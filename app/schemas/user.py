@@ -12,6 +12,7 @@ class UserBase(BaseModel):
     role: Optional[UserRole] = None
     language: Optional[str] = "tr"
     username: Optional[str] = None
+    is_superuser: Optional[bool] = False
 
 # Veritabanından okunan kullanıcı
 class User(UserBase):

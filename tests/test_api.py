@@ -7,6 +7,7 @@ import asyncio
 import json
 import httpx
 from pathlib import Path
+import pytest
 
 # Proje kök dizinini Python path'ine ekle
 project_root = Path(__file__).parent.parent
@@ -17,6 +18,7 @@ from app.core.config import settings
 # API URL'si
 API_URL = f"{settings.SERVER_HOST}{settings.API_V1_STR}"
 
+@pytest.mark.asyncio
 async def test_health_check():
     """
     Sağlık kontrolü endpointini test et.
@@ -36,6 +38,7 @@ async def test_health_check():
         print(f"❌ Sağlık kontrolü hatası: {e}")
         return False
 
+@pytest.mark.asyncio
 async def test_algorithms_list():
     """
     Algoritma listesi endpointini test et.
@@ -57,6 +60,7 @@ async def test_algorithms_list():
         print(f"❌ Algoritma listesi hatası: {e}")
         return False
 
+@pytest.mark.asyncio
 async def test_instructors_list():
     """
     Öğretim üyeleri listesi endpointini test et.
@@ -78,6 +82,7 @@ async def test_instructors_list():
         print(f"❌ Öğretim üyeleri listesi hatası: {e}")
         return False
 
+@pytest.mark.asyncio
 async def test_projects_list():
     """
     Projeler listesi endpointini test et.
@@ -99,6 +104,7 @@ async def test_projects_list():
         print(f"❌ Projeler listesi hatası: {e}")
         return False
 
+@pytest.mark.asyncio
 async def test_classrooms_list():
     """
     Sınıflar listesi endpointini test et.
@@ -120,6 +126,7 @@ async def test_classrooms_list():
         print(f"❌ Sınıflar listesi hatası: {e}")
         return False
 
+@pytest.mark.asyncio
 async def test_timeslots_list():
     """
     Zaman dilimleri listesi endpointini test et.

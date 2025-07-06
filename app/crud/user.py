@@ -46,11 +46,13 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         """
         db_obj = User(
             email=obj_in.email,
+            username=obj_in.username,
             hashed_password=get_password_hash(obj_in.password),
             full_name=obj_in.full_name,
             role=obj_in.role,
             is_superuser=obj_in.is_superuser,
             is_active=obj_in.is_active,
+            language=obj_in.language,
         )
         db.add(db_obj)
         await db.commit()

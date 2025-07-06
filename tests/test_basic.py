@@ -4,8 +4,10 @@ Basic tests for the application
 import pytest
 from httpx import AsyncClient
 
-pytestmark = pytest.mark.asyncio
+# Sadece async fonksiyonlar için asyncio marker'ı kullan
+# pytestmark = pytest.mark.asyncio
 
+@pytest.mark.asyncio
 async def test_root(client: AsyncClient):
     """Root endpoint test"""
     response = await client.get("/")
@@ -13,6 +15,7 @@ async def test_root(client: AsyncClient):
     data = response.json()
     assert data["message"] == "Welcome to Project Assignment API"
 
+@pytest.mark.asyncio
 async def test_health_check(client: AsyncClient):
     """Health check endpoint test"""
     response = await client.get("/api/v1/health")

@@ -3,6 +3,8 @@ Redis cache tests
 """
 import asyncio
 import json
+import pytest
+import pytest_asyncio
 from fakeredis.aioredis import FakeRedis
 
 class RedisCache:
@@ -228,11 +230,24 @@ class RedisCache:
             print(f"Error: {e}")
             return False
 
-async def test_set_get():
-    """Test setting and getting values"""
+# Redis client fixture
+@pytest_asyncio.fixture(scope="function")
+async def redis_client():
+    """Redis client fixture."""
     client = FakeRedis(decode_responses=True)
-    redis_cache = RedisCache(client)
-    
+    yield client
+    await client.flushall()
+    await client.close()
+
+# Redis cache fixture
+@pytest_asyncio.fixture(scope="function")
+async def redis_cache(redis_client):
+    """Redis cache fixture."""
+    yield RedisCache(redis_client)
+
+@pytest.mark.asyncio
+async def test_set_get(redis_cache):
+    """Test setting and getting values"""
     key = "test_key"
     value = "test_value"
     await redis_cache.set(key, value)
@@ -240,232 +255,235 @@ async def test_set_get():
     print(f"Expected: {value}, Got: {result}")
     assert result == value
     print("✅ test_set_get passed")
-    
-    await client.flushall()
-    await client.close()
 
-async def test_delete():
+@pytest.mark.asyncio
+async def test_delete(redis_cache):
     """Test deleting values"""
-    client = FakeRedis(decode_responses=True)
-    redis_cache = RedisCache(client)
-    
     key = "test_key"
     value = "test_value"
+    
+    # Set value
     await redis_cache.set(key, value)
+    assert await redis_cache.get(key) == value
+    
+    # Delete value
     await redis_cache.delete(key)
-    result = await redis_cache.get(key)
-    assert result is None
+    assert await redis_cache.get(key) is None
     print("✅ test_delete passed")
-    
-    await client.flushall()
-    await client.close()
 
-async def test_exists():
-    """Test checking if key exists"""
-    client = FakeRedis(decode_responses=True)
-    redis_cache = RedisCache(client)
-    
+@pytest.mark.asyncio
+async def test_exists(redis_cache):
+    """Test key existence check"""
     key = "test_key"
     value = "test_value"
+    
+    # Key should not exist initially
+    assert not await redis_cache.exists(key)
+    
+    # Set value and check existence
     await redis_cache.set(key, value)
-    exists = await redis_cache.exists(key)
-    assert exists is True
+    assert await redis_cache.exists(key)
     
+    # Delete and check non-existence
     await redis_cache.delete(key)
-    exists = await redis_cache.exists(key)
-    assert exists is False
+    assert not await redis_cache.exists(key)
     print("✅ test_exists passed")
-    
-    await client.flushall()
-    await client.close()
 
-async def test_expire():
-    """Test setting expiration on keys"""
-    client = FakeRedis(decode_responses=True)
-    redis_cache = RedisCache(client)
-    
+@pytest.mark.asyncio
+async def test_expire(redis_cache):
+    """Test key expiration"""
     key = "test_key"
     value = "test_value"
-    await redis_cache.set(key, value, expire=1)  # 1 second expiration
-    result = await redis_cache.get(key)
-    assert result == value
     
-    await asyncio.sleep(2)  # Wait for expiration
-    result = await redis_cache.get(key)
-    assert result is None
+    # Set with short expiration
+    await redis_cache.set(key, value, expire=1)
+    assert await redis_cache.get(key) == value
+    
+    # Wait for expiration
+    await asyncio.sleep(1.1)
+    
+    # Key should be gone
+    assert await redis_cache.get(key) is None
     print("✅ test_expire passed")
-    
-    await client.flushall()
-    await client.close()
 
-async def test_set_json():
+@pytest.mark.asyncio
+async def test_set_json(redis_cache):
     """Test setting and getting JSON values"""
-    client = FakeRedis(decode_responses=True)
-    redis_cache = RedisCache(client)
+    key = "test_json"
+    value = {"name": "Test", "value": 123}
     
-    key = "test_key"
-    value = {"test": "value", "nested": {"key": "value"}}
+    # Set JSON
     await redis_cache.set_json(key, value)
+    
+    # Get JSON
     result = await redis_cache.get_json(key)
     assert result == value
     print("✅ test_set_json passed")
-    
-    await client.flushall()
-    await client.close()
 
-async def test_set_multiple():
-    """Test setting multiple key-value pairs"""
-    client = FakeRedis(decode_responses=True)
-    redis_cache = RedisCache(client)
-    
+@pytest.mark.asyncio
+async def test_set_multiple(redis_cache):
+    """Test setting multiple values"""
     pairs = {
         "key1": "value1",
         "key2": "value2",
         "key3": "value3"
     }
+    
+    # Set multiple
     await redis_cache.set_multiple(pairs)
     
-    for key, value in pairs.items():
-        result = await redis_cache.get(key)
-        assert result == value
+    # Check each value
+    for key, expected in pairs.items():
+        assert await redis_cache.get(key) == expected
+    
     print("✅ test_set_multiple passed")
-    
-    await client.flushall()
-    await client.close()
 
-async def test_get_multiple():
-    """Test getting multiple keys"""
-    client = FakeRedis(decode_responses=True)
-    redis_cache = RedisCache(client)
-    
+@pytest.mark.asyncio
+async def test_get_multiple(redis_cache):
+    """Test getting multiple values"""
     pairs = {
         "key1": "value1",
         "key2": "value2",
         "key3": "value3"
     }
+    
+    # Set values
     await redis_cache.set_multiple(pairs)
     
+    # Get multiple
     keys = list(pairs.keys())
-    results = await redis_cache.get_multiple(keys)
-    assert results == list(pairs.values())
+    values = await redis_cache.get_multiple(keys)
+    
+    # Check values
+    for i, key in enumerate(keys):
+        assert values[i] == pairs[key]
+    
     print("✅ test_get_multiple passed")
-    
-    await client.flushall()
-    await client.close()
 
-async def test_delete_multiple():
-    """Test deleting multiple keys"""
-    client = FakeRedis(decode_responses=True)
-    redis_cache = RedisCache(client)
-    
+@pytest.mark.asyncio
+async def test_delete_multiple(redis_cache):
+    """Test deleting multiple values"""
     pairs = {
         "key1": "value1",
         "key2": "value2",
         "key3": "value3"
     }
+    
+    # Set values
     await redis_cache.set_multiple(pairs)
     
-    keys = list(pairs.keys())
-    await redis_cache.delete_multiple(keys)
+    # Delete first two keys
+    keys_to_delete = list(pairs.keys())[:2]
+    await redis_cache.delete_multiple(keys_to_delete)
     
-    for key in keys:
-        result = await redis_cache.get(key)
-        assert result is None
+    # Check deleted keys
+    for key in keys_to_delete:
+        assert await redis_cache.get(key) is None
+    
+    # Check remaining key
+    remaining_key = list(pairs.keys())[2]
+    assert await redis_cache.get(remaining_key) == pairs[remaining_key]
+    
     print("✅ test_delete_multiple passed")
-    
-    await client.flushall()
-    await client.close()
 
-async def test_set_with_ttl():
-    """Test TTL ile cache işlemleri."""
-    client = FakeRedis(decode_responses=True)
-    redis_cache = RedisCache(client)
-    
+@pytest.mark.asyncio
+async def test_set_with_ttl(redis_cache):
+    """Test setting values with TTL"""
     key = "test_ttl"
     value = "test_value"
-    ttl = 3600  # 1 saat
     
-    await redis_cache.set(key, value, ttl)
-    ttl_result = await client.ttl(key)
+    # Set with TTL
+    await redis_cache.set(key, value, expire=2)
     
-    assert ttl_result > 0
-    assert ttl_result <= 3600
+    # Check value exists
+    assert await redis_cache.get(key) == value
+    
+    # Wait for half the TTL
+    await asyncio.sleep(1)
+    assert await redis_cache.get(key) == value
+    
+    # Wait for expiration
+    await asyncio.sleep(1.1)
+    assert await redis_cache.get(key) is None
+    
     print("✅ test_set_with_ttl passed")
-    
-    await client.flushall()
-    await client.close()
 
-async def test_clear_cache():
-    """Test önbellek temizleme."""
-    client = FakeRedis(decode_responses=True)
-    redis_cache = RedisCache(client)
-    
-    # Birkaç test anahtarı ekle
-    test_data = {
+@pytest.mark.asyncio
+async def test_clear_cache(redis_cache):
+    """Test clearing the cache"""
+    # Set multiple values
+    pairs = {
         "key1": "value1",
         "key2": "value2",
         "key3": "value3"
     }
+    await redis_cache.set_multiple(pairs)
     
-    for key, value in test_data.items():
-        await redis_cache.set(key, value)
+    # Verify values exist
+    for key, expected in pairs.items():
+        assert await redis_cache.get(key) == expected
     
-    # Önbelleği temizle
+    # Clear cache
     await redis_cache.clear()
     
-    # Tüm anahtarların silindiğini kontrol et
-    for key in test_data:
-        exists = await redis_cache.exists(key)
-        assert not exists
+    # Verify all values are gone
+    for key in pairs:
+        assert await redis_cache.get(key) is None
+    
     print("✅ test_clear_cache passed")
-    
-    await client.flushall()
-    await client.close()
 
-async def test_pattern_delete():
-    """Test pattern ile anahtar silme."""
-    client = FakeRedis(decode_responses=True)
-    redis_cache = RedisCache(client)
+@pytest.mark.asyncio
+async def test_pattern_delete(redis_cache):
+    """Test deleting by pattern"""
+    # Set values with pattern
+    await redis_cache.set("user:1", "Alice")
+    await redis_cache.set("user:2", "Bob")
+    await redis_cache.set("user:3", "Charlie")
+    await redis_cache.set("product:1", "Apple")
     
-    # Test anahtarları ekle
-    test_data = {
-        "user:1": "data1",
-        "user:2": "data2",
-        "other:1": "data3"
-    }
-    
-    for key, value in test_data.items():
-        await redis_cache.set(key, value)
-    
-    # Pattern ile sil
+    # Delete by pattern
     await redis_cache.delete_pattern("user:*")
     
-    # user:* anahtarlarının silindiğini kontrol et
-    assert not await redis_cache.exists("user:1")
-    assert not await redis_cache.exists("user:2")
+    # Check user keys are gone
+    assert await redis_cache.get("user:1") is None
+    assert await redis_cache.get("user:2") is None
+    assert await redis_cache.get("user:3") is None
     
-    # other:* anahtarının hala var olduğunu kontrol et
-    assert await redis_cache.exists("other:1")
+    # Check product key still exists
+    assert await redis_cache.get("product:1") == "Apple"
+    
     print("✅ test_pattern_delete passed")
-    
-    await client.flushall()
-    await client.close()
 
+# Bu fonksiyonu doğrudan çalıştırma için saklıyoruz
 async def run_tests():
     """Run all tests"""
-    print("Running Redis cache tests...")
-    await test_set_get()
-    await test_delete()
-    await test_exists()
-    await test_expire()
-    await test_set_json()
-    await test_set_multiple()
-    await test_get_multiple()
-    await test_delete_multiple()
-    await test_set_with_ttl()
-    await test_clear_cache()
-    await test_pattern_delete()
-    print("All tests passed! ✅")
+    print("=" * 50)
+    print("Redis Cache Tests")
+    print("=" * 50)
+    
+    client = FakeRedis(decode_responses=True)
+    cache = RedisCache(client)
+    
+    tests = [
+        test_set_get(cache),
+        test_delete(cache),
+        test_exists(cache),
+        test_expire(cache),
+        test_set_json(cache),
+        test_set_multiple(cache),
+        test_get_multiple(cache),
+        test_delete_multiple(cache),
+        test_set_with_ttl(cache),
+        test_clear_cache(cache),
+        test_pattern_delete(cache)
+    ]
+    
+    await asyncio.gather(*tests)
+    
+    await client.close()
+    print("=" * 50)
+    print("All tests passed!")
+    print("=" * 50)
 
 if __name__ == "__main__":
     asyncio.run(run_tests()) 

@@ -4,6 +4,7 @@ Veritabanı bağlantısını test etmek için basit bir script.
 import sys
 import os
 import asyncio
+import pytest
 from pathlib import Path
 
 # Proje kök dizinini Python path'ine ekle
@@ -14,6 +15,7 @@ from sqlalchemy import text
 from app.db.base import async_session
 from app.models import User, Instructor, Project, Classroom, TimeSlot, Schedule, AlgorithmRun, AuditLog
 
+@pytest.mark.asyncio
 async def test_db_connection():
     """Veritabanı bağlantısını test et"""
     try:
@@ -33,6 +35,7 @@ async def test_db_connection():
         print(f"❌ Veritabanı bağlantı hatası: {e}")
         return False
 
+@pytest.mark.asyncio
 async def test_models():
     """Veritabanı modellerini test et"""
     try:

@@ -4,7 +4,7 @@ Algorithm factory module for creating optimization algorithms.
 from typing import Dict, Any, Optional, List
 
 from app.models.algorithm import AlgorithmType
-from app.algorithms.base import OptimizationAlgorithm
+from app.algorithms.base import OptimizationAlgorithm, BaseAlgorithm
 from app.algorithms.genetic_algorithm import GeneticAlgorithm
 from app.algorithms.simulated_annealing import SimulatedAnnealing
 from app.algorithms.ant_colony import AntColony
@@ -69,6 +69,37 @@ class AlgorithmFactory:
             return DeepSearch(params)
         else:
             raise ValueError(f"Unsupported algorithm type: {algorithm_type}")
+            
+    def list_algorithms(self) -> List[str]:
+        """
+        Get a list of available algorithm types.
+        
+        Returns:
+            List[str]: List of available algorithm types.
+        """
+        return [algo_type.value for algo_type in AlgorithmType]
+        
+    def create_algorithm(self, algorithm_name: str, params: Optional[Dict[str, Any]] = None) -> BaseAlgorithm:
+        """
+        Create an algorithm instance based on the algorithm name.
+        
+        Args:
+            algorithm_name: Name of the algorithm to create.
+            params: Algorithm parameters.
+            
+        Returns:
+            BaseAlgorithm: An instance of the algorithm.
+            
+        Raises:
+            ValueError: If the algorithm name is not supported.
+        """
+        params = params or {}
+        
+        try:
+            algorithm_type = AlgorithmType(algorithm_name)
+            return self.create(algorithm_type, params)
+        except ValueError:
+            raise ValueError(f"Unsupported algorithm name: {algorithm_name}")
 
 
 def get_algorithm_types() -> List[str]:
