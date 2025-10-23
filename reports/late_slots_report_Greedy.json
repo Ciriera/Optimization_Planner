@@ -1,0 +1,52 @@
+[
+  {
+    "project_id": 1,
+    "classroom_id": 6,
+    "timeslot_id": 16
+  },
+  {
+    "project_id": 3,
+    "classroom_id": 5,
+    "timeslot_id": 16
+  },
+  {
+    "project_id": 11,
+    "classroom_id": 7,
+    "timeslot_id": 14
+  },
+  {
+    "project_id": 14,
+    "classroom_id": 2,
+    "timeslot_id": 16
+  },
+  {
+    "project_id": 17,
+    "classroom_id": 3,
+    "timeslot_id": 16
+  },
+  {
+    "project_id": 18,
+    "classroom_id": 2,
+    "timeslot_id": 14
+  },
+  {
+    "project_id": 25,
+    "classroom_id": 4,
+    "timeslot_id": 15
+  },
+  {
+    "project_id": 42,
+    "classroom_id": 5,
+    "timeslot_id": 14
+  },
+  {
+    "project_id": 50,
+    "classroom_id": 3,
+    "timeslot_id": 14
+  },
+  {
+    "project_id": 71,
+    "classroom_id": 7,
+    "timeslot_id": 15
+  }
+]

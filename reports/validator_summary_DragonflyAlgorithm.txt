@@ -1,0 +1,11 @@
+Duplicate_total: 0
+Coverage_expected: 81
+Coverage_scheduled: 81
+Coverage_missing_count: 0
+Gap_total_slots: 46
+Late_slots_count: 9
+Load_min: 7
+Load_max: 11
+Load_avg: 7.65
+
+Missing_projects:

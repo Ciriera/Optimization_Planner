@@ -1,0 +1,18 @@
+GENEL İSTATİSTİK RAPORU
+==================================================
+
+TEMEL BİLGİLER:
+  Toplam Proje: 100
+  Toplam Atama: 100
+  Atama Oranı: 100.0%
+  Toplam Hoca: 21
+  Toplam Sınıf: 7
+  Toplam Zaman Dilimi: 16
+
+PROJE TÜRÜ DAĞILIMI:
+  Ara Projeler: 0
+  Bitirme Projeleri: 0
+
+KAYNAK KULLANIMI:
+  Sınıf Kullanım Oranı: 89.3%
+  Ortalama Hoca Başına Atama: 4.8

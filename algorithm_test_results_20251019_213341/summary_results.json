@@ -1,0 +1,79 @@
+{
+  "simplex": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 0.4845707416534424,
+    "schedule_count": 90,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "PASS - Fully AI-based with 5 AI features",
+    "fitness_score": 100,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "PASS - Algorithm works according to its theoretical nature"
+  },
+  "genetic_algorithm": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 65.80495095252991,
+    "schedule_count": 90,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "PASS - Fully AI-based with 8 AI features",
+    "fitness_score": 100,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "PASS - Algorithm works according to its theoretical nature"
+  },
+  "simulated_annealing": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 0.30571627616882324,
+    "schedule_count": 90,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "PASS - Fully AI-based with 6 AI features",
+    "fitness_score": 100,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "PASS - Algorithm works according to its theoretical nature"
+  },
+  "tabu_search": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 0.07015776634216309,
+    "schedule_count": 90,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "PASS - Fully AI-based with 7 AI features",
+    "fitness_score": 100,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "PASS - Algorithm works according to its theoretical nature"
+  },
+  "cp_sat": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 0.0690004825592041,
+    "schedule_count": 90,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "PASS - Fully AI-based with 7 AI features",
+    "fitness_score": 100,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "PASS - Algorithm works according to its theoretical nature"
+  },
+  "lexicographic": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 0.6507730484008789,
+    "schedule_count": 18,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "PASS - Fully AI-based with 7 AI features",
+    "fitness_score": 36,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "FAIL - Algorithm does not exhibit expected characteristics"
+  },
+  "dynamic_programming": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 0.06299734115600586,
+    "schedule_count": 90,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "PASS - Fully AI-based with 18 AI features",
+    "fitness_score": 100,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "PASS - Algorithm works according to its theoretical nature"
+  }
+}

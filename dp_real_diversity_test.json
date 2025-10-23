@@ -1,0 +1,611 @@
+{
+  "run1": {
+    "15": {
+      "timeslot": 9,
+      "classroom": 4
+    },
+    "14": {
+      "timeslot": 12,
+      "classroom": 4
+    },
+    "9": {
+      "timeslot": 7,
+      "classroom": 2
+    },
+    "20": {
+      "timeslot": 8,
+      "classroom": 3
+    },
+    "1": {
+      "timeslot": 21,
+      "classroom": 5
+    },
+    "7": {
+      "timeslot": 16,
+      "classroom": 1
+    },
+    "18": {
+      "timeslot": 17,
+      "classroom": 5
+    },
+    "30": {
+      "timeslot": 5,
+      "classroom": 1
+    },
+    "11": {
+      "timeslot": 10,
+      "classroom": 2
+    },
+    "19": {
+      "timeslot": 2,
+      "classroom": 4
+    },
+    "13": {
+      "timeslot": 6,
+      "classroom": 2
+    },
+    "8": {
+      "timeslot": 18,
+      "classroom": 1
+    },
+    "6": {
+      "timeslot": 7,
+      "classroom": 3
+    },
+    "4": {
+      "timeslot": 8,
+      "classroom": 2
+    },
+    "27": {
+      "timeslot": 1,
+      "classroom": 1
+    },
+    "16": {
+      "timeslot": 4,
+      "classroom": 4
+    },
+    "3": {
+      "timeslot": 15,
+      "classroom": 1
+    },
+    "22": {
+      "timeslot": 14,
+      "classroom": 4
+    },
+    "23": {
+      "timeslot": 20,
+      "classroom": 2
+    },
+    "24": {
+      "timeslot": 17,
+      "classroom": 4
+    },
+    "29": {
+      "timeslot": 24,
+      "classroom": 5
+    },
+    "12": {
+      "timeslot": 23,
+      "classroom": 1
+    },
+    "25": {
+      "timeslot": 22,
+      "classroom": 3
+    },
+    "21": {
+      "timeslot": 19,
+      "classroom": 4
+    },
+    "10": {
+      "timeslot": 13,
+      "classroom": 2
+    }
+  },
+  "run2": {
+    "7": {
+      "timeslot": 4,
+      "classroom": 4
+    },
+    "18": {
+      "timeslot": 7,
+      "classroom": 1
+    },
+    "24": {
+      "timeslot": 12,
+      "classroom": 5
+    },
+    "14": {
+      "timeslot": 21,
+      "classroom": 5
+    },
+    "17": {
+      "timeslot": 14,
+      "classroom": 1
+    },
+    "25": {
+      "timeslot": 18,
+      "classroom": 5
+    },
+    "23": {
+      "timeslot": 3,
+      "classroom": 4
+    },
+    "8": {
+      "timeslot": 11,
+      "classroom": 5
+    },
+    "16": {
+      "timeslot": 7,
+      "classroom": 5
+    },
+    "20": {
+      "timeslot": 1,
+      "classroom": 1
+    },
+    "9": {
+      "timeslot": 6,
+      "classroom": 3
+    },
+    "4": {
+      "timeslot": 5,
+      "classroom": 5
+    },
+    "10": {
+      "timeslot": 8,
+      "classroom": 3
+    },
+    "2": {
+      "timeslot": 24,
+      "classroom": 5
+    },
+    "28": {
+      "timeslot": 18,
+      "classroom": 4
+    },
+    "3": {
+      "timeslot": 2,
+      "classroom": 5
+    },
+    "15": {
+      "timeslot": 9,
+      "classroom": 5
+    },
+    "22": {
+      "timeslot": 20,
+      "classroom": 5
+    },
+    "1": {
+      "timeslot": 24,
+      "classroom": 4
+    },
+    "21": {
+      "timeslot": 20,
+      "classroom": 4
+    },
+    "13": {
+      "timeslot": 19,
+      "classroom": 3
+    },
+    "26": {
+      "timeslot": 15,
+      "classroom": 2
+    },
+    "27": {
+      "timeslot": 16,
+      "classroom": 4
+    }
+  },
+  "run3": {
+    "28": {
+      "timeslot": 3,
+      "classroom": 3
+    },
+    "5": {
+      "timeslot": 20,
+      "classroom": 4
+    },
+    "1": {
+      "timeslot": 4,
+      "classroom": 2
+    },
+    "14": {
+      "timeslot": 12,
+      "classroom": 2
+    },
+    "10": {
+      "timeslot": 23,
+      "classroom": 5
+    },
+    "29": {
+      "timeslot": 3,
+      "classroom": 3
+    },
+    "2": {
+      "timeslot": 14,
+      "classroom": 4
+    },
+    "12": {
+      "timeslot": 5,
+      "classroom": 4
+    },
+    "24": {
+      "timeslot": 10,
+      "classroom": 2
+    },
+    "16": {
+      "timeslot": 19,
+      "classroom": 3
+    },
+    "4": {
+      "timeslot": 7,
+      "classroom": 3
+    },
+    "11": {
+      "timeslot": 11,
+      "classroom": 4
+    },
+    "26": {
+      "timeslot": 1,
+      "classroom": 2
+    },
+    "3": {
+      "timeslot": 8,
+      "classroom": 1
+    },
+    "6": {
+      "timeslot": 2,
+      "classroom": 1
+    },
+    "25": {
+      "timeslot": 9,
+      "classroom": 5
+    },
+    "8": {
+      "timeslot": 11,
+      "classroom": 3
+    },
+    "13": {
+      "timeslot": 13,
+      "classroom": 4
+    },
+    "9": {
+      "timeslot": 15,
+      "classroom": 1
+    },
+    "22": {
+      "timeslot": 19,
+      "classroom": 1
+    },
+    "7": {
+      "timeslot": 17,
+      "classroom": 4
+    },
+    "17": {
+      "timeslot": 24,
+      "classroom": 1
+    },
+    "27": {
+      "timeslot": 23,
+      "classroom": 3
+    }
+  },
+  "diversity_analysis": {
+    "1": {
+      "timeslots": [
+        24,
+        4,
+        21
+      ],
+      "classrooms": [
+        2,
+        4,
+        5
+      ]
+    },
+    "2": {
+      "timeslots": [
+        24,
+        14
+      ],
+      "classrooms": [
+        4,
+        5
+      ]
+    },
+    "3": {
+      "timeslots": [
+        8,
+        2,
+        15
+      ],
+      "classrooms": [
+        1,
+        5
+      ]
+    },
+    "4": {
+      "timeslots": [
+        8,
+        5,
+        7
+      ],
+      "classrooms": [
+        2,
+        3,
+        5
+      ]
+    },
+    "5": {
+      "timeslots": [
+        20
+      ],
+      "classrooms": [
+        4
+      ]
+    },
+    "6": {
+      "timeslots": [
+        2,
+        7
+      ],
+      "classrooms": [
+        1,
+        3
+      ]
+    },
+    "7": {
+      "timeslots": [
+        16,
+        17,
+        4
+      ],
+      "classrooms": [
+        1,
+        4
+      ]
+    },
+    "8": {
+      "timeslots": [
+        18,
+        11
+      ],
+      "classrooms": [
+        1,
+        3,
+        5
+      ]
+    },
+    "9": {
+      "timeslots": [
+        15,
+        6,
+        7
+      ],
+      "classrooms": [
+        1,
+        2,
+        3
+      ]
+    },
+    "10": {
+      "timeslots": [
+        8,
+        13,
+        23
+      ],
+      "classrooms": [
+        2,
+        3,
+        5
+      ]
+    },
+    "11": {
+      "timeslots": [
+        10,
+        11
+      ],
+      "classrooms": [
+        2,
+        4
+      ]
+    },
+    "12": {
+      "timeslots": [
+        5,
+        23
+      ],
+      "classrooms": [
+        1,
+        4
+      ]
+    },
+    "13": {
+      "timeslots": [
+        19,
+        13,
+        6
+      ],
+      "classrooms": [
+        2,
+        3,
+        4
+      ]
+    },
+    "14": {
+      "timeslots": [
+        12,
+        21
+      ],
+      "classrooms": [
+        2,
+        4,
+        5
+      ]
+    },
+    "15": {
+      "timeslots": [
+        9
+      ],
+      "classrooms": [
+        4,
+        5
+      ]
+    },
+    "16": {
+      "timeslots": [
+        19,
+        4,
+        7
+      ],
+      "classrooms": [
+        3,
+        4,
+        5
+      ]
+    },
+    "17": {
+      "timeslots": [
+        24,
+        14
+      ],
+      "classrooms": [
+        1
+      ]
+    },
+    "18": {
+      "timeslots": [
+        17,
+        7
+      ],
+      "classrooms": [
+        1,
+        5
+      ]
+    },
+    "19": {
+      "timeslots": [
+        2
+      ],
+      "classrooms": [
+        4
+      ]
+    },
+    "20": {
+      "timeslots": [
+        8,
+        1
+      ],
+      "classrooms": [
+        1,
+        3
+      ]
+    },
+    "21": {
+      "timeslots": [
+        19,
+        20
+      ],
+      "classrooms": [
+        4
+      ]
+    },
+    "22": {
+      "timeslots": [
+        19,
+        20,
+        14
+      ],
+      "classrooms": [
+        1,
+        4,
+        5
+      ]
+    },
+    "23": {
+      "timeslots": [
+        3,
+        20
+      ],
+      "classrooms": [
+        2,
+        4
+      ]
+    },
+    "24": {
+      "timeslots": [
+        17,
+        10,
+        12
+      ],
+      "classrooms": [
+        2,
+        4,
+        5
+      ]
+    },
+    "25": {
+      "timeslots": [
+        9,
+        18,
+        22
+      ],
+      "classrooms": [
+        3,
+        5
+      ]
+    },
+    "26": {
+      "timeslots": [
+        1,
+        15
+      ],
+      "classrooms": [
+        2
+      ]
+    },
+    "27": {
+      "timeslots": [
+        16,
+        1,
+        23
+      ],
+      "classrooms": [
+        1,
+        3,
+        4
+      ]
+    },
+    "28": {
+      "timeslots": [
+        18,
+        3
+      ],
+      "classrooms": [
+        3,
+        4
+      ]
+    },
+    "29": {
+      "timeslots": [
+        24,
+        3
+      ],
+      "classrooms": [
+        3,
+        5
+      ]
+    },
+    "30": {
+      "timeslots": [
+        5
+      ],
+      "classrooms": [
+        1
+      ]
+    }
+  },
+  "average_diversity": 2.5,
+  "success1": true,
+  "success2": true,
+  "overall_success": true
+}

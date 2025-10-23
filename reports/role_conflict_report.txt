@@ -1,0 +1,5 @@
+ROL ÇAKIŞMASI RAPORU
+==================================================
+
+✅ Hiçbir rol çakışması tespit edilmedi.
+Tüm projeler kurallara uygun şekilde atanmış.

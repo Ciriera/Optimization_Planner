@@ -1,0 +1,143 @@
+{
+  "test_scenario": "emre_gunes_to_okan_tas_consecutive",
+  "test_data": {
+    "instructors": 5,
+    "classrooms": 3,
+    "timeslots": 10,
+    "projects": 11
+  },
+  "algorithm_result": {
+    "execution_time": 0.64864182472229,
+    "generations": 50,
+    "total_assignments": 11
+  },
+  "consecutive_analysis": {
+    "emre_assignments": 4,
+    "okan_assignments": 2,
+    "perfect_consecutive": 0,
+    "emre_jury_for_okan": 0,
+    "overall_score": 0.0
+  },
+  "sample_assignments": [
+    {
+      "project_id": 101,
+      "classroom_id": 3,
+      "timeslot_id": 1,
+      "is_makeup": false,
+      "instructors": [
+        4,
+        5,
+        "RA-Placeholder"
+      ]
+    },
+    {
+      "project_id": 104,
+      "classroom_id": 3,
+      "timeslot_id": 2,
+      "is_makeup": false,
+      "instructors": [
+        4,
+        2,
+        5
+      ]
+    },
+    {
+      "project_id": 100,
+      "classroom_id": 2,
+      "timeslot_id": 1,
+      "is_makeup": false,
+      "instructors": [
+        3,
+        2,
+        "RA-Placeholder"
+      ]
+    },
+    {
+      "project_id": 103,
+      "classroom_id": 2,
+      "timeslot_id": 2,
+      "is_makeup": false,
+      "instructors": [
+        3,
+        1,
+        "RA-Placeholder"
+      ]
+    },
+    {
+      "project_id": 12,
+      "classroom_id": 1,
+      "timeslot_id": 3,
+      "is_makeup": false,
+      "instructors": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "project_id": 28,
+      "classroom_id": 1,
+      "timeslot_id": 4,
+      "is_makeup": false,
+      "instructors": [
+        2,
+        3,
+        4
+      ]
+    },
+    {
+      "project_id": 11,
+      "classroom_id": 2,
+      "timeslot_id": 3,
+      "is_makeup": false,
+      "instructors": [
+        1,
+        4,
+        "RA-Placeholder"
+      ]
+    },
+    {
+      "project_id": 27,
+      "classroom_id": 2,
+      "timeslot_id": 4,
+      "is_makeup": false,
+      "instructors": [
+        1,
+        2,
+        "RA-Placeholder"
+      ]
+    },
+    {
+      "project_id": 43,
+      "classroom_id": 2,
+      "timeslot_id": 5,
+      "is_makeup": false,
+      "instructors": [
+        1,
+        5,
+        "RA-Placeholder"
+      ]
+    },
+    {
+      "project_id": 59,
+      "classroom_id": 2,
+      "timeslot_id": 6,
+      "is_makeup": false,
+      "instructors": [
+        1,
+        5,
+        "RA-Placeholder"
+      ]
+    },
+    {
+      "project_id": 102,
+      "classroom_id": 1,
+      "timeslot_id": 5,
+      "instructors": [
+        5,
+        2,
+        3
+      ]
+    }
+  ]
+}

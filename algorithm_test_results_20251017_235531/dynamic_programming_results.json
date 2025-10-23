@@ -1,0 +1,86 @@
+{
+  "algorithm_type": "dynamic_programming",
+  "status": "completed",
+  "error": null,
+  "execution_time": 0.015999317169189453,
+  "schedule_count": 0,
+  "hard_constraints": {
+    "instructor_conflicts": 0,
+    "classroom_conflicts": 0,
+    "timeslot_conflicts": 0,
+    "late_slots": 0,
+    "summary": "PASS - No hard constraints detected"
+  },
+  "ai_features": {
+    "ai_based": true,
+    "feature_count": 18,
+    "features": [
+      "Feature 13: Learning rate for adaptive weights.",
+      "Feature 1-4: Strategic pairing & load balancing.",
+      "Feature 5: Adaptive classroom selection.",
+      "Feature 6: Dynamic timeslot scoring.",
+      "Feature 7: Multi-dimensional workload.",
+      "Feature 8: Conflict probability prediction.",
+      "Feature 9: Smart jury rotation.",
+      "Feature 10: Adaptive pair weighting.",
+      "Feature 11-12: Pattern recognition.",
+      "Feature 13: Self-learning weights.",
+      "Feature 14: Context-aware costing.",
+      "Feature 15: Smart conflict resolution.",
+      "Feature 16: AI-powered emergency.",
+      "Feature 17: Real time efficiency.",
+      "Feature 18: Multi-factor balancing.",
+      "Feature 19: Context-aware changes.",
+      "Feature 20: Multi-objective fitness.",
+      "Feature 21: Aggressive early slot usage with global search & gap filling."
+    ],
+    "summary": "PASS - Fully AI-based with 18 AI features"
+  },
+  "fitness_score": {
+    "score": 0,
+    "components": {},
+    "summary": "POOR - Score: 0"
+  },
+  "objective_achievement": {
+    "achieved": false,
+    "details": {},
+    "summary": "FAIL - No schedule generated"
+  },
+  "algorithm_nature": {
+    "compliant": false,
+    "details": {},
+    "summary": "FAIL - Algorithm does not exhibit expected characteristics"
+  },
+  "raw_result": {
+    "schedules": [],
+    "statistics": {
+      "total_schedules": 0,
+      "phase1_count": 0,
+      "phase2_count": 0,
+      "average_ai_score": 0,
+      "max_ai_score": 0,
+      "min_ai_score": 0
+    },
+    "ai_insights": {
+      "strategic_pairing_summary": "9 stratejik e\u015fle\u015ftirme yap\u0131ld\u0131",
+      "load_balancing_achieved": "En fazla y\u00fckl\u00fc instructor'lar en az y\u00fckl\u00fclerle e\u015fle\u015ftirildi",
+      "bi_directional_jury": "Her instructor birbirinin j\u00fcrisi oldu",
+      "consecutive_grouping": "T\u00fcm projeler ard\u0131\u015f\u0131k slotlarda atand\u0131",
+      "ai_optimization_level": "PURE AI-POWERED - Zero hard constraints",
+      "recommendations": [
+        "Sistem tamamen AI odakl\u0131 \u00e7al\u0131\u015f\u0131yor",
+        "Hard k\u0131s\u0131tlar kald\u0131r\u0131ld\u0131, sadece soft optimization",
+        "Strategic pairing ile optimal y\u00fck da\u011f\u0131l\u0131m\u0131 sa\u011fland\u0131",
+        "Bi-directional jury assignment ile adil j\u00fcri da\u011f\u0131l\u0131m\u0131"
+      ]
+    },
+    "algorithm_info": {
+      "name": "Dynamic Programming Algorithm (\ud83e\udd16 AI-Powered Strategic Pairing)",
+      "description": "\ud83e\udd16 PURE AI-POWERED: Strategic instructor pairing with high-low matching, bi-directional jury assignment, consecutive grouping, and zero hard constraints!",
+      "strategic_pairs_count": 9,
+      "phase1_assignments": 0,
+      "phase2_assignments": 0,
+      "total_assignments": 0
+    }
+  }
+}

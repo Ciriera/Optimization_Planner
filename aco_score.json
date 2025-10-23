@@ -1,0 +1,21 @@
+{
+  "load_balance_score": 55.82,
+  "classroom_stability_score": 57.41,
+  "time_continuity_score": 100.0,
+  "session_efficiency_score": 89.29,
+  "rule_compliance_score": 100.0,
+  "total_score": 78.83,
+  "objective_weights": {
+    "load_balance": 0.25,
+    "classroom_stability": 0.2,
+    "time_continuity": 0.2,
+    "session_efficiency": 0.15,
+    "rule_compliance": 0.2
+  },
+  "algorithm": "ant_colony",
+  "total_assignments": 100,
+  "total_projects": 100,
+  "total_instructors": 19,
+  "total_classrooms": 7,
+  "total_timeslots": 55
+}

@@ -1,0 +1,60 @@
+{
+  "hard_constraints": {
+    "pass": false,
+    "score": 80
+  },
+  "ai_based": {
+    "pass": true,
+    "score": 100.0
+  },
+  "fitness_score": 55.122528543581176,
+  "fitness_details": {
+    "total": 55.122528543581176,
+    "consecutive": 10.122528543581174,
+    "load_balance": 0,
+    "classroom": 20.0,
+    "time": 15.0,
+    "jury": 10.000000000000002,
+    "status": "POOR"
+  },
+  "objective_achievement": 85.12252854358118,
+  "objectives": [
+    "Proje Atama: 30/30 (100.0%)",
+    "Strategic Pairing: EVET (100.0%)",
+    "Consecutive Grouping: 40.5%",
+    "Sinif Kullanimi: 5/5 (100.0%)"
+  ],
+  "algorithm_nature": {
+    "pass": true,
+    "score": 100.0
+  },
+  "recommendations": [
+    {
+      "priority": "HIGH",
+      "area": "Fitness Score",
+      "issue": "Fitness score 55.1, hedef 80+",
+      "suggestion": "AI weights'leri artir, consecutive bonus'u yukselt"
+    },
+    {
+      "priority": "MEDIUM",
+      "area": "Amac Fonksiyonu",
+      "issue": "Amac fonksiyonu basarisi 85.1%, hedef 90+",
+      "suggestion": "Proje atama algoritmalarini optimize et"
+    },
+    {
+      "priority": "HIGH",
+      "area": "Consecutive Grouping",
+      "issue": "Consecutive grouping skoru dusuk",
+      "suggestion": "_find_best_diverse_slot metodunda consecutive bonus'u artir"
+    },
+    {
+      "priority": "MEDIUM",
+      "area": "Load Balance",
+      "issue": "Yuk dagilimi dengesiz",
+      "suggestion": "Strategic pairing algoritmasini iyilestir"
+    }
+  ],
+  "overall_score": 84.04901141743247,
+  "execution_time": 0.016654253005981445,
+  "test_time": "2025-10-18 23:37:36"
+}

@@ -1,0 +1,189 @@
+🧠 SINIF DEĞİŞİMİ VALİDASYON RAPORU
+============================================================
+
+📋 RAPOR AÇIKLAMASI:
+• EXCELLENT: Hiç sınıf değişimi yok (0)
+• GOOD: Minimal sınıf değişimi (1)
+• ACCEPTABLE: Kabul edilebilir sınıf değişimi (2)
+• NEEDS_IMPROVEMENT: İyileştirme gerekli (3)
+• CRITICAL: Kritik seviye (4+)
+
+[FAIL] Hoca: Dr. Ogretim Uyesi 1 (ID: 22)
+   📊 Sınıf Değişim Sayısı: 8
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 4, 5, 7
+   📝 Toplam Atama Sayısı: 10
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 2 (ID: 23)
+   📊 Sınıf Değişim Sayısı: 9
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 2, 3, 4, 5, 7
+   📝 Toplam Atama Sayısı: 10
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 3 (ID: 24)
+   📊 Sınıf Değişim Sayısı: 8
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 2, 3, 4, 5, 6, 7
+   📝 Toplam Atama Sayısı: 10
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 4 (ID: 25)
+   📊 Sınıf Değişim Sayısı: 6
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 3, 4, 5
+   📝 Toplam Atama Sayısı: 11
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 5 (ID: 26)
+   📊 Sınıf Değişim Sayısı: 10
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 3, 4, 5, 6, 7
+   📝 Toplam Atama Sayısı: 14
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 6 (ID: 27)
+   📊 Sınıf Değişim Sayısı: 11
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 3, 4, 5, 6, 7
+   📝 Toplam Atama Sayısı: 12
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 7 (ID: 28)
+   📊 Sınıf Değişim Sayısı: 7
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 3, 4, 5, 6, 7
+   📝 Toplam Atama Sayısı: 9
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 8 (ID: 29)
+   📊 Sınıf Değişim Sayısı: 12
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 3, 4, 6, 7
+   📝 Toplam Atama Sayısı: 13
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 9 (ID: 30)
+   📊 Sınıf Değişim Sayısı: 11
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 3, 4, 5, 6, 7
+   📝 Toplam Atama Sayısı: 15
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 10 (ID: 31)
+   📊 Sınıf Değişim Sayısı: 9
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 3, 4, 5, 6, 7
+   📝 Toplam Atama Sayısı: 10
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 11 (ID: 32)
+   📊 Sınıf Değişim Sayısı: 11
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 3, 4, 5, 7
+   📝 Toplam Atama Sayısı: 12
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 12 (ID: 33)
+   📊 Sınıf Değişim Sayısı: 4
+   🎯 Sınıf Sabitlik Skoru: 20/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 3
+   📝 Toplam Atama Sayısı: 8
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 13 (ID: 34)
+   📊 Sınıf Değişim Sayısı: 10
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 3, 4, 5, 6
+   📝 Toplam Atama Sayısı: 13
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 14 (ID: 35)
+   📊 Sınıf Değişim Sayısı: 10
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 3, 4, 6, 7
+   📝 Toplam Atama Sayısı: 11
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 15 (ID: 36)
+   📊 Sınıf Değişim Sayısı: 9
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 4, 5, 6, 7
+   📝 Toplam Atama Sayısı: 12
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 16 (ID: 37)
+   📊 Sınıf Değişim Sayısı: 8
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 3, 4, 7
+   📝 Toplam Atama Sayısı: 10
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 17 (ID: 38)
+   📊 Sınıf Değişim Sayısı: 10
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 3, 4, 5, 7
+   📝 Toplam Atama Sayısı: 11
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 18 (ID: 39)
+   📊 Sınıf Değişim Sayısı: 4
+   🎯 Sınıf Sabitlik Skoru: 20/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 3, 5, 6, 7
+   📝 Toplam Atama Sayısı: 9
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 19 (ID: 40)
+   📊 Sınıf Değişim Sayısı: 7
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 3, 4, 5, 6
+   📝 Toplam Atama Sayısı: 12
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 20 (ID: 41)
+   📊 Sınıf Değişim Sayısı: 7
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 4, 5
+   📝 Toplam Atama Sayısı: 11
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+[FAIL] Hoca: Dr. Ogretim Uyesi 21 (ID: 42)
+   📊 Sınıf Değişim Sayısı: 10
+   🎯 Sınıf Sabitlik Skoru: 0/100
+   📈 Durum: CRITICAL
+   🏫 Kullanılan Sınıflar: 1, 2, 3, 4, 7
+   📝 Toplam Atama Sayısı: 12
+   🚨 UYARI: Bu hoca çok fazla sınıf değiştiriyor!
+--------------------------------------------------
+
+📊 ÖZET İSTATİSTİKLER:
+   📈 Toplam Sınıf Değişimi: 181
+   📊 Ortalama Sınıf Değişimi: 8.62
+   🎯 Ortalama Sabitlik Skoru: 1.90/100
+
+📋 DURUM DAĞILIMI:
+   [FAIL] CRITICAL: 21 hoca (100.0%)
+
+🎯 GENEL DEĞERLENDİRME:
+   [FAIL] Kötü! Sınıf değişimi çok yüksek, optimizasyon gerekli

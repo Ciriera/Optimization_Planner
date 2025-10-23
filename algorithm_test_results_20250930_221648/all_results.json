@@ -1,0 +1,107 @@
+{
+  "GENETIC_ALGORITHM": {
+    "algorithm": "GENETIC_ALGORITHM",
+    "execution_time": 0.0,
+    "error": "'charmap' codec can't encode character '\\u274c' in position 0: character maps to <undefined>",
+    "success": false,
+    "timestamp": "2025-09-30T22:16:48.152015"
+  },
+  "SIMULATED_ANNEALING": {
+    "algorithm": "SIMULATED_ANNEALING",
+    "execution_time": 0.001001,
+    "error": "'datetime.time' object has no attribute 'split'",
+    "success": false,
+    "timestamp": "2025-09-30T22:16:48.153016"
+  },
+  "GREEDY": {
+    "algorithm": "GREEDY",
+    "execution_time": 60.067745,
+    "error": "'is_balanced'",
+    "success": false,
+    "timestamp": "2025-09-30T22:17:48.220761"
+  },
+  "TABU_SEARCH": {
+    "algorithm": "TABU_SEARCH",
+    "execution_time": 0.004995,
+    "error": "'list' object has no attribute 'get'",
+    "success": false,
+    "timestamp": "2025-09-30T22:17:48.225756"
+  },
+  "PSO": {
+    "algorithm": "PSO",
+    "execution_time": 0.001999,
+    "error": "'list' object has no attribute 'get'",
+    "success": false,
+    "timestamp": "2025-09-30T22:17:48.227755"
+  },
+  "ANT_COLONY": {
+    "algorithm": "ANT_COLONY",
+    "execution_time": 60.218298,
+    "error": "'is_balanced'",
+    "success": false,
+    "timestamp": "2025-09-30T22:18:48.446053"
+  },
+  "HARMONY_SEARCH": {
+    "algorithm": "HARMONY_SEARCH",
+    "execution_time": 0.001001,
+    "error": "'list' object has no attribute 'get'",
+    "success": false,
+    "timestamp": "2025-09-30T22:18:48.447054"
+  },
+  "FIREFLY": {
+    "algorithm": "FIREFLY",
+    "execution_time": 0.000999,
+    "error": "'list' object has no attribute 'get'",
+    "success": false,
+    "timestamp": "2025-09-30T22:18:48.448053"
+  },
+  "GREY_WOLF": {
+    "algorithm": "GREY_WOLF",
+    "execution_time": 0.001,
+    "error": "'list' object has no attribute 'get'",
+    "success": false,
+    "timestamp": "2025-09-30T22:18:48.449053"
+  },
+  "WHALE_OPTIMIZATION": {
+    "algorithm": "WHALE_OPTIMIZATION",
+    "execution_time": 0.001,
+    "error": "'WhaleOptimization' object has no attribute '_calculate_rule_compliance'",
+    "success": false,
+    "timestamp": "2025-09-30T22:18:48.450053"
+  },
+  "BAT_ALGORITHM": {
+    "algorithm": "BAT_ALGORITHM",
+    "execution_time": 0.0,
+    "error": "'BatAlgorithm' object has no attribute '_calculate_rule_compliance'",
+    "success": false,
+    "timestamp": "2025-09-30T22:18:48.450053"
+  },
+  "CUCKOO_SEARCH": {
+    "algorithm": "CUCKOO_SEARCH",
+    "execution_time": 0.001001,
+    "error": "'list' object has no attribute 'get'",
+    "success": false,
+    "timestamp": "2025-09-30T22:18:48.451054"
+  },
+  "DRAGONFLY_ALGORITHM": {
+    "algorithm": "DRAGONFLY_ALGORITHM",
+    "execution_time": 3.56516,
+    "error": "'is_balanced'",
+    "success": false,
+    "timestamp": "2025-09-30T22:18:52.016214"
+  },
+  "ARTIFICIAL_BEE_COLONY": {
+    "algorithm": "ARTIFICIAL_BEE_COLONY",
+    "execution_time": 0.0,
+    "error": "'list' object has no attribute 'get'",
+    "success": false,
+    "timestamp": "2025-09-30T22:18:52.017221"
+  },
+  "NSGA_II": {
+    "algorithm": "NSGA_II",
+    "execution_time": 3.04121,
+    "error": "'is_balanced'",
+    "success": false,
+    "timestamp": "2025-09-30T22:18:55.058431"
+  }
+}

@@ -1,0 +1,229 @@
+---
+description:
+💻 Proje Tanımı: Bitirme ve Ara Projeleri için Yapay Zeka Destekli Sınıf ve Danışman Atama Sistemi
+
+Bu proje, bilgisayar mühendisliği öğrencilerinin bitirme ve ara projeleri için danışman hocaların uygun sınıflarda ve saat dilimlerinde atanmasını sağlayan, yapay zeka destekli bir planlama ve optimizasyon sistemidir.
+
+🎯 Temel Amaçlar
+
+Tüm projelerin (bitirme + ara) kurallara uygun şekilde atamasının yapılması
+
+Öğretim üyeleri arasındaki toplam yükün dengeli dağıtılması
+
+Öğretim üyelerinin saatlik dağılımlarının uniform olması
+
+Sınıf değiştirme sayılarının minimum seviyeye indirilmesi
+
+Oturum (slot) sayısının minimumda tutulması
+
+🧠 Amaç Fonksiyonu (Objective Function)
+
+Sistemin toplam amaç fonksiyonu, aşağıdaki alt hedeflerin normalize edilmiş (0-100 arası) skorlarına göre ağırlıklı olarak hesaplanır:
+
+Hedef 1: Yük dengesi skoru (yüklerin standart sapmasına göre)
+
+Hedef 2: Hocaların saat dağılımı skorları (aralıksız oturum dizileri)
+
+Hedef 3: Sınıf değişim cezası (mümkünse aynı sınıfta kalma)
+
+Hedef 4: Oturum sayısının azaltılması (aynı anda daha çok proje sunumu)
+
+Hedef 5: Kurallara uyum (eksik hoca/yanlış yapı olmaması)
+
+Toplam skor = (W1 * yük dengesi) + (W2 * sınıf geçişi azlığı) + (W3 * saat bütünlüğü) + ...
+
+🏫 Sınıf Yapısı
+
+Min sınıf sayısı: 5
+
+Max sınıf sayısı: 7
+
+Kullanıcı, sistemde bu sayıyı girdi olarak belirtir
+
+Sınıf isimleri örneğin: D106, D107, D108, D109, D110, D111, D223 olabilir
+
+⏰ Saat Dilimleri
+
+Aşağıdaki zaman aralıkları kullanılabilir:
+
+Sabah oturumu: 09:00, 09:30, 10:00, 10:30, 11:00, 11:30
+
+Öğle arası: 12:00 – 13:00
+
+Öğleden sonra oturumu: 13:00, 13:30, 14:00, 14:30, 15:00, 15:30, 16:00, 16:30
+
+👥 Katılımcı Yapısı
+
+Her projede 3 kişi yer alır:
+
+1. kişi: Zorunlu olarak hoca olmalıdır.
+
+2. ve 3. kişi: Hoca veya araştırma görevlisi olabilir.
+
+🔹 Bitirme projelerinde:
+
+Projede bir adet sorumlu öğretim üyesi bulunması zorunludur.
+
+Ayrıca proje ekibinde sorumlu öğretim üyesi yanında en az bir, en fazla iki jüri üyesi yer almalıdır. Toplamda üç kişi görev alabilir. Jüri üyelerinden biri öğretim üyesi ise, üçüncü kişi araştırma görevlisi olarak atanabilir.
+
+Jüri ataması yapılırken, projeden sorumlu öğretim üyesinin mutlaka jüriye dahil edilmesi gerekir.
+
+Bitirme projelerinde jüri, en az iki öğretim üyesinden oluşmalıdır; jüri üç öğretim üyesinden veya iki öğretim üyesi ile bir araştırma görevlisinden de oluşturulabilir. Dolayısıyla, sorumlu öğretim üyesi jüriye dahil edildiğinde, kalan iki jüri üyesi ayrıca seçilmelidir.
+
+🔹 Ara projelerde:
+
+Projede bir adet sorumlu öğretim üyesi bulunması zorunludur.
+
+Ayrıca proje ekibinde sorumlu öğretim üyesi yanında en az bir, en fazla iki jüri üyesi yer almalıdır. Toplamda üç kişi görev alabilir. Jürilerin öğretim görevlisi ya da araştırma görevlisi olup olmaması önemli değildir. Yani diğer kişiler hoca ya da araştırma görevlisi olabilir.
+
+📌 Özel Kurallar
+
+Hocaların girdiği saatler arasında boşluk olmamalı.
+Örnek: Eğer bir hoca 09:00 - 11:00 arasında görevliyse, bu saatler arada boşluk olmadan ve aynı sınıfta kalacak şekilde planlanmalıdır.
+
+Hocalar mümkünse aynı sınıfta sabit kalmalıdır.
+Sınıf geçişleri minimize edilmelidir.
+
+Araştırma görevlilerinin planlaması sistem tarafından önemsenmeyecek, sadece “araştırma görevlisi” olarak placeholder bırakılacaktır.
+İsimlendirme kullanıcı tarafından manuel yapılacaktır.
+
+Projeler, sistem içinde bitirme ya da ara olarak işaretlenmelidir. Bu işaretleme kuralların kontrolünde kullanılır.
+
+🧾 Girdiler (Inputs)
+
+Kullanıcıdan sistemin alacağı veriler:
+
+Hoca listesi
+
+Her hocanın bitirme ve ara proje sayısı
+
+Maksimum sınıf sayısı (x)
+
+Her projenin türü (bitirme / ara)
+
+Her projenin sorumlu öğretim üyesi (1. sütun), jüri(ler) (2. ve 3. sütun)
+
+Final ve bütünleme ayrımı
+
+Bütünleme için kalan proje sayısı (isteğe bağlı olarak ayrı çalıştırılır)
+
+⚙️ Kullanılan Algoritmalar
+
+Sistem, aşağıdaki algoritmaları destekler. Kullanıcı, dilerse bu algoritmalardan birini elle seçebilir veya “en uygun algoritmayı öner” kutucuğunu işaretleyerek sistemin doğruluk odaklı önerisini alabilir.
+
+🔹 1. Simplex Algoritması
+
+Klasik doğrusal programlama tekniği. Küçük, kısıtlı çözüm alanlarında yük dağılımını dengelemek için hızlı ve etkili sonuç verir.
+
+🔹 2. Simulated Annealing (SA)
+
+Geçici olarak kötü çözümleri kabul ederek daha iyi küresel çözümlere ulaşmayı hedefleyen metaheuristik yaklaşımdır. Özellikle sınıf geçişlerinin azaltılmasında etkilidir.
+
+🔹 3. Tabu Search
+
+Yerel aramalarda döngüleri engellemek için önceden denenmiş çözümleri tabu listesine alarak daha geniş bir çözüm alanı tarar. Sınıf ve saat çakışmalarını minimize etmede başarılıdır.
+
+🔹 4. Genetic Algorithm (GA)
+
+Genetik evrim modeline dayanır. Uygunluk fonksiyonlarına göre bireyler çaprazlanır ve mutasyona uğratılır. Dağılım çeşitliliği sağlar.
+
+🔹 5. Constraint Programming (CP-SAT)
+
+Google OR-Tools tarafından sağlanan deterministik bir kısıt programlama modelidir. Özellikle sabit kuralların (örneğin “bitirme projesinde min. 2 hoca”) sıkı şekilde uygulanmasında tercih edilir.
+
+🔹 6. Multi-objective Optimization (NSGA-II)
+
+Birden fazla amacı optimize eden (örneğin yük dengesi + sınıf geçişi) algoritmalardan biridir. Çözümler bir Pareto öncülüğü temelinde sıralanır.
+
+🔹 7. CP-SAT → NSGA-II Hibrit Modeli ✅
+
+Bu modelde:
+
+CP-SAT, sabit ve katı kuralları (hard constraints) uygular ve geçerli çözüm uzayını oluşturur.
+
+Ardından, bu çözüm uzayı içinde NSGA-II devreye girer ve çok amaçlı optimizasyon yapar.
+
+Bu yapı sayesinde sistem, hem kurallara mutlak uyum sağlar hem de optimum çözümler arasında en iyi dengelenmiş atamayı seçebilir.
+
+🔹 8. Deep Local Search
+
+İlk çözüm üzerine çok katmanlı küçük mutasyonlarla iyileştirme yapılır. Özellikle geçici olarak iyi gözüken ama globalde kötü olan çözümlerden kaçınmada başarılıdır.
+
+🔹 9. Greedy + Local Refinement
+
+Hızlı bir greedy çözüm oluşturur ve ardından yerel olarak optimize eder. Final yerine bütünleme gibi düşük öğrenci sayılı oturumlar için idealdir.
+
+🔹 10. Lexicographic Model (Sıralı Optimizasyon) ✅
+
+Amaç fonksiyonlarını öncelik sırasına göre optimize eden bir modeldir.
+Örneğin:
+
+Öncelikli: Hocaların sınıf geçiş sayısını minimize et
+
+Sonra: Yük dengesi sağla
+
+En sonra: Saat aralıklarını dengeli yap
+
+Her adımda bir hedefe tam uyum arandıktan sonra bir sonraki hedef değerlendirilir. Kritik kuralların asla ihlal edilmemesi gereken durumlar için kullanılır.
+
+📤 Çıktılar (Outputs)
+
+Hangi hocanın hangi sınıf ve saat diliminde görevli olduğu
+
+Atanan projeler (bitirme/ara) + katılımcılar
+
+Boşta kalan saatler ve sınıflar
+
+Yük dağılımı grafiği
+
+Hocaların sınıf geçiş raporu
+
+PDF / Excel çıktıları
+
+Otomatik üretilen score.json dosyası
+
+Her alt amaç fonksiyonu için skorlar (0-100)
+
+Total skor (normalize edilmiş)
+
+🧮 Final & Bütünleme Ayrımı
+
+Sistem hem final hem de bütünleme planlamasını destekler.
+
+Bütünleme oturumunda, yalnızca kalan projeler dikkate alınır.
+
+Aynı kurallar geçerlidir, ancak proje sayısı daha azdır.
+
+Bütünleme algoritması, final oturumuna göre daha dar bir çözüm uzayında çalışır.
+
+🖥️ Teknik Altyapı
+
+Backend: FastAPI (Python)
+
+Frontend: React.js + TailwindCSS
+
+DB: PostgreSQL
+
+AI Engine: OR-Tools, Scikit-learn, NumPy
+
+Deployment: Railway + Vercel
+
+Formatlar: JSON, CSV, Excel, PDF
+
+🧩 Geliştirilebilirlik
+
+Takvim senkronizasyonu (Google Calendar, iCal)
+
+Kullanıcı bazlı öneri sistemi
+
+Jüri eşleştirmesi
+
+Sözlü sınav planlaması
+
+Erişilebilirlik (WCAG) uyumu
+
+Çoklu dil desteği
+
+globs:
+alwaysApply: true
+---

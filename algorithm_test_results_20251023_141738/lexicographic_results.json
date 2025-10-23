@@ -1,0 +1,305 @@
+{
+  "algorithm_type": "lexicographic",
+  "status": "completed",
+  "error": null,
+  "execution_time": 0.6853702068328857,
+  "schedule_count": 18,
+  "hard_constraints": {
+    "instructor_conflicts": 0,
+    "classroom_conflicts": 0,
+    "timeslot_conflicts": 0,
+    "late_slots": 0,
+    "summary": "PASS - No hard constraints detected"
+  },
+  "ai_features": {
+    "ai_based": true,
+    "feature_count": 7,
+    "features": [
+      "Feature 3: Number of diverse solutions to generate.",
+      "Feature 4: Initial temperature for simulated annealing.",
+      "Feature 9: Enable adaptive parameter tuning.",
+      "Feature 10: Enable solution memory & learning.",
+      "Feature 11: Enable dynamic fitness weights.",
+      "Feature 13: Enable beam search integration.",
+      "Feature 14: Enable solution clustering."
+    ],
+    "summary": "PASS - Fully AI-based with 7 AI features"
+  },
+  "fitness_score": {
+    "score": 36,
+    "components": {},
+    "summary": "POOR - Score: 36"
+  },
+  "objective_achievement": {
+    "achieved": true,
+    "details": {},
+    "summary": "PARTIAL - Schedule generated but no explicit fitness metrics"
+  },
+  "algorithm_nature": {
+    "compliant": false,
+    "details": {},
+    "summary": "FAIL - Algorithm does not exhibit expected characteristics"
+  },
+  "raw_result": {
+    "assignments": [
+      {
+        "time_slot_id": 2,
+        "supervisor_id": 6,
+        "jury_id": 21,
+        "classroom_id": 5
+      },
+      {
+        "time_slot_id": 1,
+        "supervisor_id": 16,
+        "jury_id": 8,
+        "classroom_id": 7
+      },
+      {
+        "time_slot_id": 1,
+        "supervisor_id": 15,
+        "jury_id": 17,
+        "classroom_id": 5
+      },
+      {
+        "time_slot_id": 1,
+        "supervisor_id": 9,
+        "jury_id": 5,
+        "classroom_id": 3
+      },
+      {
+        "time_slot_id": 1,
+        "supervisor_id": 17,
+        "jury_id": 16,
+        "classroom_id": 2
+      },
+      {
+        "time_slot_id": 6,
+        "supervisor_id": 12,
+        "jury_id": 6,
+        "classroom_id": 3
+      },
+      {
+        "time_slot_id": 9,
+        "supervisor_id": 11,
+        "jury_id": 4,
+        "classroom_id": 3
+      },
+      {
+        "time_slot_id": 16,
+        "supervisor_id": 6,
+        "jury_id": 13,
+        "classroom_id": 4
+      },
+      {
+        "time_slot_id": 10,
+        "supervisor_id": 16,
+        "jury_id": 11,
+        "classroom_id": 7
+      },
+      {
+        "time_slot_id": 2,
+        "supervisor_id": 8,
+        "jury_id": 7,
+        "classroom_id": 1
+      },
+      {
+        "time_slot_id": 16,
+        "supervisor_id": 5,
+        "jury_id": 12,
+        "classroom_id": 1
+      },
+      {
+        "time_slot_id": 11,
+        "supervisor_id": 10,
+        "jury_id": 13,
+        "classroom_id": 6
+      },
+      {
+        "time_slot_id": 2,
+        "supervisor_id": 3,
+        "jury_id": 6,
+        "classroom_id": 3
+      },
+      {
+        "time_slot_id": 14,
+        "supervisor_id": 9,
+        "jury_id": 7,
+        "classroom_id": 6
+      },
+      {
+        "time_slot_id": 1,
+        "supervisor_id": 8,
+        "jury_id": 13,
+        "classroom_id": 1
+      },
+      {
+        "time_slot_id": 16,
+        "supervisor_id": 20,
+        "jury_id": 20,
+        "classroom_id": 6
+      },
+      {
+        "time_slot_id": 2,
+        "supervisor_id": 21,
+        "jury_id": 10,
+        "classroom_id": 3
+      },
+      {
+        "time_slot_id": 11,
+        "supervisor_id": 7,
+        "jury_id": 11,
+        "classroom_id": 2
+      }
+    ],
+    "instructor_pairs": [
+      {
+        "upper_instructor": {
+          "id": 3,
+          "name": "Dr. Ogretim Uyesi 3",
+          "project_count": 0
+        },
+        "lower_instructor": {
+          "id": 4,
+          "name": "Dr. Ogretim Uyesi 4",
+          "project_count": 0
+        }
+      },
+      {
+        "upper_instructor": {
+          "id": 5,
+          "name": "Dr. Ogretim Uyesi 5",
+          "project_count": 0
+        },
+        "lower_instructor": {
+          "id": 6,
+          "name": "Dr. Ogretim Uyesi 6",
+          "project_count": 0
+        }
+      },
+      {
+        "upper_instructor": {
+          "id": 7,
+          "name": "Dr. Ogretim Uyesi 7",
+          "project_count": 0
+        },
+        "lower_instructor": {
+          "id": 8,
+          "name": "Dr. Ogretim Uyesi 8",
+          "project_count": 0
+        }
+      },
+      {
+        "upper_instructor": {
+          "id": 9,
+          "name": "Dr. Ogretim Uyesi 9",
+          "project_count": 0
+        },
+        "lower_instructor": {
+          "id": 10,
+          "name": "Dr. Ogretim Uyesi 10",
+          "project_count": 0
+        }
+      },
+      {
+        "upper_instructor": {
+          "id": 11,
+          "name": "Dr. Ogretim Uyesi 11",
+          "project_count": 0
+        },
+        "lower_instructor": {
+          "id": 12,
+          "name": "Dr. Ogretim Uyesi 12",
+          "project_count": 0
+        }
+      },
+      {
+        "upper_instructor": {
+          "id": 13,
+          "name": "Dr. Ogretim Uyesi 13",
+          "project_count": 0
+        },
+        "lower_instructor": {
+          "id": 15,
+          "name": "Dr. Ogretim Uyesi 15",
+          "project_count": 0
+        }
+      },
+      {
+        "upper_instructor": {
+          "id": 16,
+          "name": "Dr. Ogretim Uyesi 16",
+          "project_count": 0
+        },
+        "lower_instructor": {
+          "id": 17,
+          "name": "Dr. Ogretim Uyesi 17",
+          "project_count": 0
+        }
+      },
+      {
+        "upper_instructor": {
+          "id": 20,
+          "name": "Dr. Ogretim Uyesi 20",
+          "project_count": 0
+        },
+        "lower_instructor": {
+          "id": 21,
+          "name": "Dr. Ogretim Uyesi 21",
+          "project_count": 0
+        }
+      }
+    ],
+    "metrics": {
+      "total_pairs": 8,
+      "total_assignments": 18,
+      "ai_metrics": {
+        "workload_distribution": 0.0,
+        "pairing_efficiency": 0.0,
+        "schedule_optimization": 0.0,
+        "instructor_diversity": 0.47291666666666665,
+        "time_slot_distribution": 0.5612588032535057,
+        "classroom_utilization": 1.2668181892751258,
+        "ai_recommendations": [
+          "\u0130\u015f y\u00fck\u00fc dengesizli\u011fi tespit edildi. En y\u00fcksek: 4, En d\u00fc\u015f\u00fck: 0, Ortalama: 1.89",
+          "A\u015f\u0131r\u0131 y\u00fckl\u00fc instructorlar: Dr. Ogretim Uyesi 6 (4), Dr. Ogretim Uyesi 7 (3), Dr. Ogretim Uyesi 8 (3)",
+          "Az y\u00fckl\u00fc instructorlar: Dr. Ogretim Uyesi 14 (0), Dr. Ogretim Uyesi 18 (0), Dr. Ogretim Uyesi 19 (0)",
+          "Kullan\u0131lmayan zaman dilimleri: 10:00:00-10:30:00, 10:30:00-11:00:00, 11:00:00-11:30:00, 13:00:00-13:30:00, 13:30:00-14:00:00, 15:30:00-16:00:00, 16:00:00-16:30:00, 17:00:00-17:30:00",
+          "\u00c7\u00f6z\u00fcm kalitesi d\u00fc\u015f\u00fck. Daha fazla iterasyon veya farkl\u0131 ba\u015flang\u0131\u00e7 ko\u015fullar\u0131 denenebilir."
+        ]
+      },
+      "best_fitness": 0.5092568930090211,
+      "solutions_explored": 15,
+      "classroom_distribution": {
+        "usage_counts": {
+          "5": 2,
+          "7": 2,
+          "3": 5,
+          "2": 2,
+          "4": 1,
+          "1": 3,
+          "6": 3
+        },
+        "usage_percentage": {
+          "5": 11.11111111111111,
+          "7": 11.11111111111111,
+          "3": 27.77777777777778,
+          "2": 11.11111111111111,
+          "4": 5.555555555555555,
+          "1": 16.666666666666664,
+          "6": 16.666666666666664
+        },
+        "classroom_diversity": 1.0
+      }
+    },
+    "gap_report_service_level": {
+      "assignments": {
+        "total_gaps": null
+      }
+    },
+    "policy_summary": {
+      "lists": {
+        "assignments": {}
+      }
+    }
+  }
+}

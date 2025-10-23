@@ -1,0 +1,488 @@
+{
+  "all_runs": [
+    {
+      "run": 1,
+      "total_schedules": 30,
+      "unique_timeslots": 20,
+      "unique_classrooms": 5,
+      "unique_instructors": 8,
+      "timeslot_usage": {
+        "6": 3,
+        "2": 1,
+        "3": 1,
+        "5": 2,
+        "10": 1,
+        "8": 2,
+        "7": 1,
+        "9": 2,
+        "12": 2,
+        "20": 1,
+        "1": 1,
+        "4": 2,
+        "18": 1,
+        "16": 2,
+        "13": 1,
+        "14": 1,
+        "17": 1,
+        "11": 2,
+        "19": 2,
+        "15": 1
+      },
+      "classroom_usage": {
+        "3": 5,
+        "4": 5,
+        "1": 10,
+        "2": 5,
+        "5": 5
+      }
+    },
+    {
+      "run": 2,
+      "total_schedules": 30,
+      "unique_timeslots": 20,
+      "unique_classrooms": 5,
+      "unique_instructors": 8,
+      "timeslot_usage": {
+        "4": 2,
+        "3": 1,
+        "5": 2,
+        "6": 3,
+        "9": 1,
+        "8": 2,
+        "7": 2,
+        "15": 1,
+        "11": 2,
+        "20": 2,
+        "2": 1,
+        "1": 1,
+        "10": 2,
+        "14": 1,
+        "19": 2,
+        "13": 1,
+        "16": 1,
+        "12": 1,
+        "18": 1,
+        "17": 1
+      },
+      "classroom_usage": {
+        "4": 5,
+        "1": 10,
+        "2": 5,
+        "3": 5,
+        "5": 5
+      }
+    },
+    {
+      "run": 3,
+      "total_schedules": 30,
+      "unique_timeslots": 20,
+      "unique_classrooms": 5,
+      "unique_instructors": 8,
+      "timeslot_usage": {
+        "5": 2,
+        "6": 3,
+        "4": 2,
+        "9": 1,
+        "7": 1,
+        "3": 2,
+        "10": 2,
+        "8": 2,
+        "15": 1,
+        "19": 1,
+        "18": 1,
+        "17": 1,
+        "1": 1,
+        "2": 1,
+        "14": 1,
+        "16": 2,
+        "11": 2,
+        "13": 1,
+        "12": 2,
+        "20": 1
+      },
+      "classroom_usage": {
+        "1": 10,
+        "2": 5,
+        "5": 5,
+        "3": 5,
+        "4": 5
+      }
+    },
+    {
+      "run": 4,
+      "total_schedules": 30,
+      "unique_timeslots": 20,
+      "unique_classrooms": 5,
+      "unique_instructors": 8,
+      "timeslot_usage": {
+        "2": 1,
+        "6": 3,
+        "9": 1,
+        "8": 1,
+        "7": 1,
+        "5": 2,
+        "10": 2,
+        "15": 1,
+        "16": 1,
+        "19": 1,
+        "12": 2,
+        "11": 2,
+        "1": 2,
+        "3": 1,
+        "4": 3,
+        "14": 1,
+        "20": 1,
+        "17": 1,
+        "18": 2,
+        "13": 1
+      },
+      "classroom_usage": {
+        "4": 5,
+        "1": 10,
+        "2": 5,
+        "3": 5,
+        "5": 5
+      }
+    },
+    {
+      "run": 5,
+      "total_schedules": 30,
+      "unique_timeslots": 20,
+      "unique_classrooms": 5,
+      "unique_instructors": 8,
+      "timeslot_usage": {
+        "3": 1,
+        "5": 3,
+        "9": 1,
+        "6": 3,
+        "7": 2,
+        "10": 2,
+        "16": 1,
+        "12": 1,
+        "13": 2,
+        "11": 2,
+        "2": 1,
+        "4": 2,
+        "8": 1,
+        "15": 1,
+        "1": 1,
+        "20": 1,
+        "19": 2,
+        "17": 1,
+        "18": 1,
+        "14": 1
+      },
+      "classroom_usage": {
+        "4": 5,
+        "1": 10,
+        "2": 5,
+        "5": 5,
+        "3": 5
+      }
+    }
+  ],
+  "project_diversity": {
+    "10": {
+      "timeslots": [
+        12,
+        7,
+        6,
+        15
+      ],
+      "classrooms": [
+        1,
+        3
+      ],
+      "instructor_combinations": 3
+    },
+    "6": {
+      "timeslots": [
+        2,
+        7,
+        9,
+        10,
+        16
+      ],
+      "classrooms": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "instructor_combinations": 4
+    },
+    "13": {
+      "timeslots": [
+        1,
+        4,
+        6,
+        11,
+        20
+      ],
+      "classrooms": [
+        1,
+        2,
+        5
+      ],
+      "instructor_combinations": 4
+    },
+    "16": {
+      "timeslots": [
+        1,
+        5,
+        11,
+        13,
+        17
+      ],
+      "classrooms": [
+        1,
+        3,
+        4
+      ],
+      "instructor_combinations": 3
+    },
+    "8": {
+      "timeslots": [
+        1,
+        5,
+        8,
+        10,
+        18
+      ],
+      "classrooms": [
+        1,
+        3
+      ],
+      "instructor_combinations": 3
+    },
+    "3": {
+      "timeslots": [
+        1,
+        4,
+        5,
+        8,
+        19
+      ],
+      "classrooms": [
+        1,
+        2,
+        5
+      ],
+      "instructor_combinations": 3
+    },
+    "18": {
+      "timeslots": [
+        16,
+        3,
+        5,
+        14
+      ],
+      "classrooms": [
+        1,
+        3,
+        5
+      ],
+      "instructor_combinations": 4
+    },
+    "5": {
+      "timeslots": [
+        2,
+        11,
+        12,
+        18,
+        19
+      ],
+      "classrooms": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "instructor_combinations": 4
+    },
+    "19": {
+      "timeslots": [
+        2,
+        4,
+        9,
+        10,
+        12
+      ],
+      "classrooms": [
+        1,
+        2,
+        3,
+        5
+      ],
+      "instructor_combinations": 4
+    },
+    "12": {
+      "timeslots": [
+        4,
+        5,
+        10,
+        17,
+        19
+      ],
+      "classrooms": [
+        1,
+        4,
+        5
+      ],
+      "instructor_combinations": 3
+    },
+    "11": {
+      "timeslots": [
+        4,
+        8,
+        16,
+        19,
+        20
+      ],
+      "classrooms": [
+        1,
+        2,
+        5
+      ],
+      "instructor_combinations": 4
+    },
+    "15": {
+      "timeslots": [
+        18,
+        19,
+        4,
+        5
+      ],
+      "classrooms": [
+        1,
+        2,
+        5
+      ],
+      "instructor_combinations": 4
+    },
+    "2": {
+      "timeslots": [
+        3,
+        6,
+        8,
+        11,
+        13
+      ],
+      "classrooms": [
+        1,
+        2,
+        5
+      ],
+      "instructor_combinations": 3
+    },
+    "1": {
+      "timeslots": [
+        3,
+        4,
+        10,
+        12,
+        18
+      ],
+      "classrooms": [
+        1,
+        2,
+        4
+      ],
+      "instructor_combinations": 3
+    },
+    "4": {
+      "timeslots": [
+        19,
+        11,
+        12,
+        6
+      ],
+      "classrooms": [
+        1,
+        3,
+        5
+      ],
+      "instructor_combinations": 4
+    },
+    "9": {
+      "timeslots": [
+        6,
+        15,
+        17,
+        18,
+        20
+      ],
+      "classrooms": [
+        3,
+        4,
+        5
+      ],
+      "instructor_combinations": 3
+    },
+    "17": {
+      "timeslots": [
+        2,
+        12,
+        13,
+        15
+      ],
+      "classrooms": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "instructor_combinations": 4
+    },
+    "7": {
+      "timeslots": [
+        4,
+        7,
+        16,
+        17,
+        19
+      ],
+      "classrooms": [
+        2,
+        3,
+        4
+      ],
+      "instructor_combinations": 3
+    },
+    "14": {
+      "timeslots": [
+        6,
+        11,
+        13,
+        17,
+        19
+      ],
+      "classrooms": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "instructor_combinations": 5
+    },
+    "20": {
+      "timeslots": [
+        8,
+        11,
+        14
+      ],
+      "classrooms": [
+        1,
+        3,
+        4
+      ],
+      "instructor_combinations": 3
+    }
+  },
+  "summary": {
+    "average_diversity_score": 11.1,
+    "max_possible_diversity": 15,
+    "diversity_percentage": 74.0
+  }
+}

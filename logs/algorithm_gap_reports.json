@@ -1,0 +1,677 @@
+{
+  "timestamp": 1759178336.7032514,
+  "algorithms": {
+    "SIMPLEX": {
+      "succeeded": true,
+      "gaps": {
+        "schedule": {
+          "total_gaps": 0,
+          "classrooms_with_gap": 0,
+          "details": []
+        },
+        "solution": {
+          "total_gaps": 0,
+          "classrooms_with_gap": 0,
+          "details": []
+        }
+      },
+      "policy_summary": {
+        "lists": {
+          "schedule": {
+            "total": 81,
+            "late": 0,
+            "by_timeslot": {
+              "13:30-14:00": 7,
+              "14:00-14:30": 7,
+              "11:30-12:00": 7,
+              "15:30-16:00": 6,
+              "09:00-09:30": 7,
+              "09:30-10:00": 7,
+              "10:00-10:30": 7,
+              "10:30-11:00": 7,
+              "11:00-11:30": 7,
+              "13:00-13:30": 7,
+              "14:30-15:00": 6,
+              "15:00-15:30": 6
+            },
+            "classrooms_with_gap": 0
+          },
+          "solution": {
+            "total": 81,
+            "late": 0,
+            "by_timeslot": {
+              "13:30-14:00": 7,
+              "14:00-14:30": 7,
+              "11:30-12:00": 7,
+              "15:30-16:00": 6,
+              "09:00-09:30": 7,
+              "09:30-10:00": 7,
+              "10:00-10:30": 7,
+              "10:30-11:00": 7,
+              "11:00-11:30": 7,
+              "13:00-13:30": 7,
+              "14:30-15:00": 6,
+              "15:00-15:30": 6
+            },
+            "classrooms_with_gap": 0
+          }
+        }
+      },
+      "late_count": 0,
+      "result_keys": [
+        "algorithm",
+        "status",
+        "schedule",
+        "solution",
+        "metrics",
+        "execution_time",
+        "iterations",
+        "message",
+        "constraint_compliance",
+        "fitness",
+        "duplicate_report",
+        "gap_report",
+        "time_policy_report",
+        "gap_report_service_level",
+        "policy_summary",
+        "time_policy_summary"
+      ]
+    },
+    "GENETIC_ALGORITHM": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "SIMULATED_ANNEALING": {
+      "succeeded": true,
+      "gaps": {
+        "schedule": {
+          "total_gaps": null
+        }
+      },
+      "policy_summary": {
+        "lists": {
+          "schedule": {
+            "total": 112,
+            "late": 0,
+            "by_timeslot": {
+              "09:00-09:30": 57,
+              "09:30-10:00": 44,
+              "10:00-10:30": 8,
+              "10:30-11:00": 3
+            },
+            "classrooms_with_gap": 7
+          }
+        }
+      },
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "gap_report_service_level",
+        "policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_gap_details",
+        "time_policy_summary"
+      ]
+    },
+    "DEEP_SEARCH": {
+      "succeeded": true,
+      "gaps": {
+        "schedule": {
+          "total_gaps": null
+        }
+      },
+      "policy_summary": {
+        "lists": {
+          "schedule": {
+            "total": 112,
+            "late": 0,
+            "by_timeslot": {
+              "09:30-10:00": 39,
+              "09:00-09:30": 60,
+              "10:00-10:30": 13
+            },
+            "classrooms_with_gap": 7
+          }
+        }
+      },
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "gap_report_service_level",
+        "policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_gap_details",
+        "time_policy_summary"
+      ]
+    },
+    "ANT_COLONY": {
+      "succeeded": true,
+      "gaps": {
+        "schedule": {
+          "total_gaps": null
+        }
+      },
+      "policy_summary": {
+        "lists": {
+          "schedule": {
+            "total": 112,
+            "late": 0,
+            "by_timeslot": {
+              "09:00-09:30": 61,
+              "09:30-10:00": 35,
+              "10:00-10:30": 15,
+              "10:30-11:00": 1
+            },
+            "classrooms_with_gap": 7
+          }
+        }
+      },
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "gap_report_service_level",
+        "policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_gap_details",
+        "time_policy_summary"
+      ]
+    },
+    "NSGA_II": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "generations",
+        "execution_time",
+        "duplicate_report",
+        "time_policy_summary"
+      ]
+    },
+    "GREEDY": {
+      "succeeded": true,
+      "gaps": {
+        "schedule": {
+          "total_gaps": null
+        }
+      },
+      "policy_summary": {
+        "lists": {
+          "schedule": {
+            "total": 112,
+            "late": 0,
+            "by_timeslot": {
+              "09:00-09:30": 61,
+              "09:30-10:00": 38,
+              "10:00-10:30": 12,
+              "10:30-11:00": 1
+            },
+            "classrooms_with_gap": 7
+          }
+        }
+      },
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "gap_report_service_level",
+        "policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_gap_details",
+        "time_policy_summary"
+      ]
+    },
+    "TABU_SEARCH": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "PSO": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "HARMONY_SEARCH": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "FIREFLY": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "GREY_WOLF": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "CP_SAT": {
+      "succeeded": true,
+      "gaps": {
+        "schedule": {
+          "total_gaps": null
+        }
+      },
+      "policy_summary": {
+        "lists": {
+          "schedule": {
+            "total": 112,
+            "late": 0,
+            "by_timeslot": {
+              "09:00-09:30": 62,
+              "09:30-10:00": 35,
+              "10:00-10:30": 12,
+              "10:30-11:00": 3
+            },
+            "classrooms_with_gap": 7
+          }
+        }
+      },
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "gap_report_service_level",
+        "policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_gap_details",
+        "time_policy_summary"
+      ]
+    },
+    "LEXICOGRAPHIC": {
+      "succeeded": true,
+      "gaps": {
+        "schedule": {
+          "total_gaps": null
+        },
+        "solution": {
+          "total_gaps": null
+        }
+      },
+      "policy_summary": {
+        "lists": {
+          "schedule": {
+            "total": 81,
+            "late": 15,
+            "by_timeslot": {
+              "13:30-14:00": 5,
+              "17:00-17:30": 5,
+              "14:00-14:30": 5,
+              "14:30-15:00": 5,
+              "16:30-17:00": 5,
+              "17:30-18:00": 5,
+              "16:00-16:30": 5,
+              "11:30-12:00": 5,
+              "15:30-16:00": 5,
+              "09:00-09:30": 6,
+              "10:30-11:00": 5,
+              "11:00-11:30": 5,
+              "10:00-10:30": 5,
+              "09:30-10:00": 5,
+              "13:00-13:30": 5,
+              "15:00-15:30": 5
+            },
+            "classrooms_with_gap": 5
+          },
+          "solution": {
+            "total": 81,
+            "late": 15,
+            "by_timeslot": {
+              "13:30-14:00": 5,
+              "17:00-17:30": 5,
+              "14:00-14:30": 5,
+              "14:30-15:00": 5,
+              "16:30-17:00": 5,
+              "17:30-18:00": 5,
+              "16:00-16:30": 5,
+              "11:30-12:00": 5,
+              "15:30-16:00": 5,
+              "09:00-09:30": 6,
+              "10:30-11:00": 5,
+              "11:00-11:30": 5,
+              "10:00-10:30": 5,
+              "09:30-10:00": 5,
+              "13:00-13:30": 5,
+              "15:00-15:30": 5
+            },
+            "classrooms_with_gap": 5
+          }
+        }
+      },
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "solution",
+        "fitness_scores",
+        "execution_time",
+        "iterations",
+        "converged",
+        "algorithm",
+        "parameters",
+        "gap_report_service_level",
+        "policy_summary",
+        "time_policy_summary"
+      ]
+    },
+    "HYBRID_CP_SAT_NSGA": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "solution",
+        "fitness_scores",
+        "execution_time",
+        "generations",
+        "population_size",
+        "algorithm",
+        "parameters",
+        "time_policy_summary"
+      ]
+    },
+    "ARTIFICIAL_BEE_COLONY": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "CUCKOO_SEARCH": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "BRANCH_AND_BOUND": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "DYNAMIC_PROGRAMMING": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "WHALE_OPTIMIZATION": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "BAT_ALGORITHM": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "DRAGONFLY_ALGORITHM": {
+      "succeeded": true,
+      "gaps": {
+        "schedule": {
+          "total_gaps": null
+        }
+      },
+      "policy_summary": {
+        "lists": {
+          "schedule": {
+            "total": 112,
+            "late": 0,
+            "by_timeslot": {
+              "09:00-09:30": 59,
+              "09:30-10:00": 36,
+              "10:00-10:30": 15,
+              "10:30-11:00": 2
+            },
+            "classrooms_with_gap": 7
+          }
+        }
+      },
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "gap_report_service_level",
+        "policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_gap_details",
+        "time_policy_summary"
+      ]
+    },
+    "A_STAR_SEARCH": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "INTEGER_LINEAR_PROGRAMMING": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    },
+    "GENETIC_LOCAL_SEARCH": {
+      "succeeded": true,
+      "gaps": {
+        "schedule": {
+          "total_gaps": 0,
+          "classrooms_with_gap": 0,
+          "details": []
+        }
+      },
+      "policy_summary": {
+        "lists": {
+          "schedule": {
+            "total": 81,
+            "late": 0,
+            "by_timeslot": {
+              "09:00-09:30": 81
+            },
+            "classrooms_with_gap": 0
+          }
+        }
+      },
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "generations",
+        "execution_time",
+        "duplicate_report",
+        "gap_report",
+        "time_policy_report",
+        "gap_report_service_level",
+        "policy_summary",
+        "time_policy_summary"
+      ]
+    },
+    "COMPREHENSIVE_OPTIMIZER": {
+      "succeeded": true,
+      "gaps": null,
+      "policy_summary": null,
+      "late_count": 0,
+      "result_keys": [
+        "schedule",
+        "fitness",
+        "objectives",
+        "statistics",
+        "time_policy_summary",
+        "fallback_used",
+        "fallback_from",
+        "original_error"
+      ]
+    }
+  }
+}

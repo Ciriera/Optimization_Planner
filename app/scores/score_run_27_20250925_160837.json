@@ -1,0 +1,59 @@
+{
+  "timestamp": "2025-09-25T16:08:37.707495",
+  "algorithm_run_id": null,
+  "total_schedules": 0,
+  "metrics": {
+    "load_balance": {
+      "score": 0.0,
+      "variance": 0.0,
+      "mean": 0.0,
+      "details": {}
+    },
+    "classroom_changes": {
+      "score": 0.0,
+      "changes": 0,
+      "total_assignments": 0
+    },
+    "time_efficiency": {
+      "score": 0.0,
+      "gaps": 0,
+      "total_instructors": 0
+    },
+    "constraint_satisfaction": {
+      "score": 0.0,
+      "violations": [],
+      "total_violations": 0
+    },
+    "gini_coefficient": {
+      "gini": 0.0,
+      "interpretation": "no_data"
+    },
+    "instructor_preference": {
+      "score": 0.0,
+      "satisfied": 0,
+      "total": 0
+    },
+    "classroom_utilization": {
+      "score": 0.0,
+      "utilization": {}
+    },
+    "time_slot_distribution": {
+      "score": 0.0,
+      "distribution": {}
+    }
+  },
+  "overall_score": 0.0,
+  "breakdowns": {
+    "by_project_type": {
+      "bitirme": {
+        "count": 0
+      },
+      "ara": {
+        "count": 0
+      }
+    },
+    "by_instructor": {},
+    "by_classroom": {},
+    "by_timeslot": {}
+  }
+}

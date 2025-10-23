@@ -1,0 +1,2871 @@
+{
+  "algorithm_type": "dynamic_programming",
+  "status": "completed",
+  "error": null,
+  "execution_time": 0.06299734115600586,
+  "schedule_count": 90,
+  "hard_constraints": {
+    "instructor_conflicts": 0,
+    "classroom_conflicts": 0,
+    "timeslot_conflicts": 0,
+    "late_slots": 0,
+    "summary": "PASS - No hard constraints detected"
+  },
+  "ai_features": {
+    "ai_based": true,
+    "feature_count": 18,
+    "features": [
+      "Feature 13: Learning rate for adaptive weights.",
+      "Feature 1-4: Strategic pairing & load balancing.",
+      "Feature 5: Adaptive classroom selection.",
+      "Feature 6: Dynamic timeslot scoring.",
+      "Feature 7: Multi-dimensional workload.",
+      "Feature 8: Conflict probability prediction.",
+      "Feature 9: Smart jury rotation.",
+      "Feature 10: Adaptive pair weighting.",
+      "Feature 11-12: Pattern recognition.",
+      "Feature 13: Self-learning weights.",
+      "Feature 14: Context-aware costing.",
+      "Feature 15: Smart conflict resolution.",
+      "Feature 16: AI-powered emergency.",
+      "Feature 17: Real time efficiency.",
+      "Feature 18: Multi-factor balancing.",
+      "Feature 19: Context-aware changes.",
+      "Feature 20: Multi-objective fitness.",
+      "Feature 21: Aggressive early slot usage with global search & gap filling."
+    ],
+    "summary": "PASS - Fully AI-based with 18 AI features"
+  },
+  "fitness_score": {
+    "score": 100,
+    "components": {},
+    "summary": "EXCELLENT - Score: 100"
+  },
+  "objective_achievement": {
+    "achieved": true,
+    "details": {},
+    "summary": "PARTIAL - Schedule generated but no explicit fitness metrics"
+  },
+  "algorithm_nature": {
+    "compliant": true,
+    "details": {
+      "schedule_generated": true
+    },
+    "summary": "PASS - Algorithm works according to its theoretical nature"
+  },
+  "raw_result": {
+    "assignments": [
+      {
+        "project_id": 52,
+        "classroom_id": 1,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 10,
+        "classroom_id": 1,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 31,
+        "classroom_id": 1,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 73,
+        "classroom_id": 1,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 94,
+        "classroom_id": 1,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 56,
+        "classroom_id": 2,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 35,
+        "classroom_id": 2,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 14,
+        "classroom_id": 2,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 98,
+        "classroom_id": 2,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 77,
+        "classroom_id": 2,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 63,
+        "classroom_id": 3,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          21,
+          3
+        ]
+      },
+      {
+        "project_id": 84,
+        "classroom_id": 3,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          21,
+          3
+        ]
+      },
+      {
+        "project_id": 42,
+        "classroom_id": 3,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          21,
+          3
+        ]
+      },
+      {
+        "project_id": 21,
+        "classroom_id": 3,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          21,
+          3
+        ]
+      },
+      {
+        "project_id": 36,
+        "classroom_id": 4,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 99,
+        "classroom_id": 4,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 15,
+        "classroom_id": 4,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 78,
+        "classroom_id": 4,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 57,
+        "classroom_id": 4,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 74,
+        "classroom_id": 5,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 11,
+        "classroom_id": 5,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 53,
+        "classroom_id": 5,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 32,
+        "classroom_id": 5,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 95,
+        "classroom_id": 5,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 83,
+        "classroom_id": 6,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          20,
+          6
+        ]
+      },
+      {
+        "project_id": 62,
+        "classroom_id": 6,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          20,
+          6
+        ]
+      },
+      {
+        "project_id": 41,
+        "classroom_id": 6,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          20,
+          6
+        ]
+      },
+      {
+        "project_id": 20,
+        "classroom_id": 6,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          20,
+          6
+        ]
+      },
+      {
+        "project_id": 8,
+        "classroom_id": 7,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 29,
+        "classroom_id": 7,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 71,
+        "classroom_id": 7,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 92,
+        "classroom_id": 7,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 50,
+        "classroom_id": 7,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 87,
+        "classroom_id": 3,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 45,
+        "classroom_id": 3,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 66,
+        "classroom_id": 3,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 24,
+        "classroom_id": 3,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 3,
+        "classroom_id": 3,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 27,
+        "classroom_id": 6,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 90,
+        "classroom_id": 6,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 6,
+        "classroom_id": 6,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 69,
+        "classroom_id": 6,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 48,
+        "classroom_id": 6,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 54,
+        "classroom_id": 1,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 96,
+        "classroom_id": 1,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 75,
+        "classroom_id": 1,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 12,
+        "classroom_id": 1,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 33,
+        "classroom_id": 1,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 39,
+        "classroom_id": 2,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          18,
+          14,
+          7
+        ]
+      },
+      {
+        "project_id": 60,
+        "classroom_id": 2,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          18,
+          14,
+          7
+        ]
+      },
+      {
+        "project_id": 81,
+        "classroom_id": 2,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          18,
+          14,
+          7
+        ]
+      },
+      {
+        "project_id": 18,
+        "classroom_id": 2,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          18,
+          14,
+          7
+        ]
+      },
+      {
+        "project_id": 82,
+        "classroom_id": 4,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          19,
+          15,
+          16
+        ]
+      },
+      {
+        "project_id": 40,
+        "classroom_id": 4,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          19,
+          15,
+          16
+        ]
+      },
+      {
+        "project_id": 61,
+        "classroom_id": 4,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          19,
+          15,
+          16
+        ]
+      },
+      {
+        "project_id": 19,
+        "classroom_id": 4,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          19,
+          15,
+          16
+        ]
+      },
+      {
+        "project_id": 51,
+        "classroom_id": 5,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 93,
+        "classroom_id": 5,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 9,
+        "classroom_id": 5,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 72,
+        "classroom_id": 5,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 30,
+        "classroom_id": 5,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 68,
+        "classroom_id": 7,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 89,
+        "classroom_id": 7,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 26,
+        "classroom_id": 7,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 47,
+        "classroom_id": 7,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 5,
+        "classroom_id": 7,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 91,
+        "classroom_id": 2,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 70,
+        "classroom_id": 2,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 7,
+        "classroom_id": 2,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 49,
+        "classroom_id": 2,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 28,
+        "classroom_id": 2,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 55,
+        "classroom_id": 3,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 34,
+        "classroom_id": 3,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 97,
+        "classroom_id": 3,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 13,
+        "classroom_id": 3,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 76,
+        "classroom_id": 3,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 58,
+        "classroom_id": 4,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 16,
+        "classroom_id": 4,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 100,
+        "classroom_id": 4,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 79,
+        "classroom_id": 4,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 37,
+        "classroom_id": 4,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 4,
+        "classroom_id": 6,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 67,
+        "classroom_id": 6,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 88,
+        "classroom_id": 6,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 46,
+        "classroom_id": 6,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 25,
+        "classroom_id": 6,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 80,
+        "classroom_id": 1,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          17,
+          12
+        ]
+      },
+      {
+        "project_id": 59,
+        "classroom_id": 1,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          17,
+          12
+        ]
+      },
+      {
+        "project_id": 38,
+        "classroom_id": 1,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          17,
+          12
+        ]
+      },
+      {
+        "project_id": 17,
+        "classroom_id": 1,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          17,
+          12
+        ]
+      }
+    ],
+    "schedule": [
+      {
+        "project_id": 52,
+        "classroom_id": 1,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 10,
+        "classroom_id": 1,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 31,
+        "classroom_id": 1,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 73,
+        "classroom_id": 1,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 94,
+        "classroom_id": 1,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 56,
+        "classroom_id": 2,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 35,
+        "classroom_id": 2,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 14,
+        "classroom_id": 2,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 98,
+        "classroom_id": 2,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 77,
+        "classroom_id": 2,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 63,
+        "classroom_id": 3,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          21,
+          3
+        ]
+      },
+      {
+        "project_id": 84,
+        "classroom_id": 3,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          21,
+          3
+        ]
+      },
+      {
+        "project_id": 42,
+        "classroom_id": 3,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          21,
+          3
+        ]
+      },
+      {
+        "project_id": 21,
+        "classroom_id": 3,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          21,
+          3
+        ]
+      },
+      {
+        "project_id": 36,
+        "classroom_id": 4,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 99,
+        "classroom_id": 4,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 15,
+        "classroom_id": 4,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 78,
+        "classroom_id": 4,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 57,
+        "classroom_id": 4,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 74,
+        "classroom_id": 5,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 11,
+        "classroom_id": 5,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 53,
+        "classroom_id": 5,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 32,
+        "classroom_id": 5,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 95,
+        "classroom_id": 5,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 83,
+        "classroom_id": 6,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          20,
+          6
+        ]
+      },
+      {
+        "project_id": 62,
+        "classroom_id": 6,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          20,
+          6
+        ]
+      },
+      {
+        "project_id": 41,
+        "classroom_id": 6,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          20,
+          6
+        ]
+      },
+      {
+        "project_id": 20,
+        "classroom_id": 6,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          20,
+          6
+        ]
+      },
+      {
+        "project_id": 8,
+        "classroom_id": 7,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 29,
+        "classroom_id": 7,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 71,
+        "classroom_id": 7,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 92,
+        "classroom_id": 7,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 50,
+        "classroom_id": 7,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 87,
+        "classroom_id": 3,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 45,
+        "classroom_id": 3,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 66,
+        "classroom_id": 3,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 24,
+        "classroom_id": 3,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 3,
+        "classroom_id": 3,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 27,
+        "classroom_id": 6,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 90,
+        "classroom_id": 6,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 6,
+        "classroom_id": 6,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 69,
+        "classroom_id": 6,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 48,
+        "classroom_id": 6,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 54,
+        "classroom_id": 1,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 96,
+        "classroom_id": 1,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 75,
+        "classroom_id": 1,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 12,
+        "classroom_id": 1,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 33,
+        "classroom_id": 1,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 39,
+        "classroom_id": 2,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          18,
+          14,
+          7
+        ]
+      },
+      {
+        "project_id": 60,
+        "classroom_id": 2,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          18,
+          14,
+          7
+        ]
+      },
+      {
+        "project_id": 81,
+        "classroom_id": 2,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          18,
+          14,
+          7
+        ]
+      },
+      {
+        "project_id": 18,
+        "classroom_id": 2,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          18,
+          14,
+          7
+        ]
+      },
+      {
+        "project_id": 82,
+        "classroom_id": 4,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          19,
+          15,
+          16
+        ]
+      },
+      {
+        "project_id": 40,
+        "classroom_id": 4,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          19,
+          15,
+          16
+        ]
+      },
+      {
+        "project_id": 61,
+        "classroom_id": 4,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          19,
+          15,
+          16
+        ]
+      },
+      {
+        "project_id": 19,
+        "classroom_id": 4,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          19,
+          15,
+          16
+        ]
+      },
+      {
+        "project_id": 51,
+        "classroom_id": 5,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 93,
+        "classroom_id": 5,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 9,
+        "classroom_id": 5,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 72,
+        "classroom_id": 5,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 30,
+        "classroom_id": 5,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 68,
+        "classroom_id": 7,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 89,
+        "classroom_id": 7,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 26,
+        "classroom_id": 7,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 47,
+        "classroom_id": 7,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 5,
+        "classroom_id": 7,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 91,
+        "classroom_id": 2,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 70,
+        "classroom_id": 2,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 7,
+        "classroom_id": 2,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 49,
+        "classroom_id": 2,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 28,
+        "classroom_id": 2,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 55,
+        "classroom_id": 3,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 34,
+        "classroom_id": 3,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 97,
+        "classroom_id": 3,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 13,
+        "classroom_id": 3,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 76,
+        "classroom_id": 3,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 58,
+        "classroom_id": 4,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 16,
+        "classroom_id": 4,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 100,
+        "classroom_id": 4,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 79,
+        "classroom_id": 4,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 37,
+        "classroom_id": 4,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 4,
+        "classroom_id": 6,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 67,
+        "classroom_id": 6,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 88,
+        "classroom_id": 6,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 46,
+        "classroom_id": 6,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 25,
+        "classroom_id": 6,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 80,
+        "classroom_id": 1,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          17,
+          12
+        ]
+      },
+      {
+        "project_id": 59,
+        "classroom_id": 1,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          17,
+          12
+        ]
+      },
+      {
+        "project_id": 38,
+        "classroom_id": 1,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          17,
+          12
+        ]
+      },
+      {
+        "project_id": 17,
+        "classroom_id": 1,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          17,
+          12
+        ]
+      }
+    ],
+    "solution": [
+      {
+        "project_id": 52,
+        "classroom_id": 1,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 10,
+        "classroom_id": 1,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 31,
+        "classroom_id": 1,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 73,
+        "classroom_id": 1,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 94,
+        "classroom_id": 1,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          10,
+          12
+        ]
+      },
+      {
+        "project_id": 56,
+        "classroom_id": 2,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 35,
+        "classroom_id": 2,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 14,
+        "classroom_id": 2,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 98,
+        "classroom_id": 2,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 77,
+        "classroom_id": 2,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          14,
+          18
+        ]
+      },
+      {
+        "project_id": 63,
+        "classroom_id": 3,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          21,
+          3
+        ]
+      },
+      {
+        "project_id": 84,
+        "classroom_id": 3,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          21,
+          3
+        ]
+      },
+      {
+        "project_id": 42,
+        "classroom_id": 3,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          21,
+          3
+        ]
+      },
+      {
+        "project_id": 21,
+        "classroom_id": 3,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          21,
+          3
+        ]
+      },
+      {
+        "project_id": 36,
+        "classroom_id": 4,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 99,
+        "classroom_id": 4,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 15,
+        "classroom_id": 4,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 78,
+        "classroom_id": 4,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 57,
+        "classroom_id": 4,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          15,
+          19
+        ]
+      },
+      {
+        "project_id": 74,
+        "classroom_id": 5,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 11,
+        "classroom_id": 5,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 53,
+        "classroom_id": 5,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 32,
+        "classroom_id": 5,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 95,
+        "classroom_id": 5,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          11,
+          9
+        ]
+      },
+      {
+        "project_id": 83,
+        "classroom_id": 6,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          20,
+          6
+        ]
+      },
+      {
+        "project_id": 62,
+        "classroom_id": 6,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          20,
+          6
+        ]
+      },
+      {
+        "project_id": 41,
+        "classroom_id": 6,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          20,
+          6
+        ]
+      },
+      {
+        "project_id": 20,
+        "classroom_id": 6,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          20,
+          6
+        ]
+      },
+      {
+        "project_id": 8,
+        "classroom_id": 7,
+        "timeslot_id": 1,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 29,
+        "classroom_id": 7,
+        "timeslot_id": 2,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 71,
+        "classroom_id": 7,
+        "timeslot_id": 3,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 92,
+        "classroom_id": 7,
+        "timeslot_id": 4,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 50,
+        "classroom_id": 7,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          8,
+          5
+        ]
+      },
+      {
+        "project_id": 87,
+        "classroom_id": 3,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 45,
+        "classroom_id": 3,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 66,
+        "classroom_id": 3,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 24,
+        "classroom_id": 3,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 3,
+        "classroom_id": 3,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          3,
+          21,
+          13
+        ]
+      },
+      {
+        "project_id": 27,
+        "classroom_id": 6,
+        "timeslot_id": 5,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 90,
+        "classroom_id": 6,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 6,
+        "classroom_id": 6,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 69,
+        "classroom_id": 6,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 48,
+        "classroom_id": 6,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          6,
+          20,
+          4
+        ]
+      },
+      {
+        "project_id": 54,
+        "classroom_id": 1,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 96,
+        "classroom_id": 1,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 75,
+        "classroom_id": 1,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 12,
+        "classroom_id": 1,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 33,
+        "classroom_id": 1,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          12,
+          10,
+          17
+        ]
+      },
+      {
+        "project_id": 39,
+        "classroom_id": 2,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          18,
+          14,
+          7
+        ]
+      },
+      {
+        "project_id": 60,
+        "classroom_id": 2,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          18,
+          14,
+          7
+        ]
+      },
+      {
+        "project_id": 81,
+        "classroom_id": 2,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          18,
+          14,
+          7
+        ]
+      },
+      {
+        "project_id": 18,
+        "classroom_id": 2,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          18,
+          14,
+          7
+        ]
+      },
+      {
+        "project_id": 82,
+        "classroom_id": 4,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          19,
+          15,
+          16
+        ]
+      },
+      {
+        "project_id": 40,
+        "classroom_id": 4,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          19,
+          15,
+          16
+        ]
+      },
+      {
+        "project_id": 61,
+        "classroom_id": 4,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          19,
+          15,
+          16
+        ]
+      },
+      {
+        "project_id": 19,
+        "classroom_id": 4,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          19,
+          15,
+          16
+        ]
+      },
+      {
+        "project_id": 51,
+        "classroom_id": 5,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 93,
+        "classroom_id": 5,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 9,
+        "classroom_id": 5,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 72,
+        "classroom_id": 5,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 30,
+        "classroom_id": 5,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          9,
+          11
+        ]
+      },
+      {
+        "project_id": 68,
+        "classroom_id": 7,
+        "timeslot_id": 6,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 89,
+        "classroom_id": 7,
+        "timeslot_id": 7,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 26,
+        "classroom_id": 7,
+        "timeslot_id": 8,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 47,
+        "classroom_id": 7,
+        "timeslot_id": 9,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 5,
+        "classroom_id": 7,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          5,
+          8
+        ]
+      },
+      {
+        "project_id": 91,
+        "classroom_id": 2,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 70,
+        "classroom_id": 2,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 7,
+        "classroom_id": 2,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 49,
+        "classroom_id": 2,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 28,
+        "classroom_id": 2,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          7,
+          18
+        ]
+      },
+      {
+        "project_id": 55,
+        "classroom_id": 3,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 34,
+        "classroom_id": 3,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 97,
+        "classroom_id": 3,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 13,
+        "classroom_id": 3,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 76,
+        "classroom_id": 3,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          13,
+          3
+        ]
+      },
+      {
+        "project_id": 58,
+        "classroom_id": 4,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 16,
+        "classroom_id": 4,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 100,
+        "classroom_id": 4,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 79,
+        "classroom_id": 4,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 37,
+        "classroom_id": 4,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          16,
+          19
+        ]
+      },
+      {
+        "project_id": 4,
+        "classroom_id": 6,
+        "timeslot_id": 10,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 67,
+        "classroom_id": 6,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 88,
+        "classroom_id": 6,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 46,
+        "classroom_id": 6,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 25,
+        "classroom_id": 6,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          4,
+          6
+        ]
+      },
+      {
+        "project_id": 80,
+        "classroom_id": 1,
+        "timeslot_id": 11,
+        "is_makeup": false,
+        "instructors": [
+          17,
+          12
+        ]
+      },
+      {
+        "project_id": 59,
+        "classroom_id": 1,
+        "timeslot_id": 12,
+        "is_makeup": false,
+        "instructors": [
+          17,
+          12
+        ]
+      },
+      {
+        "project_id": 38,
+        "classroom_id": 1,
+        "timeslot_id": 13,
+        "is_makeup": false,
+        "instructors": [
+          17,
+          12
+        ]
+      },
+      {
+        "project_id": 17,
+        "classroom_id": 1,
+        "timeslot_id": 14,
+        "is_makeup": false,
+        "instructors": [
+          17,
+          12
+        ]
+      }
+    ],
+    "fitness_scores": {
+      "quality": -9941.632270819198
+    },
+    "execution_time": 0.017000198364257812,
+    "algorithm": "Comprehensive Optimizer (Enhanced Randomizer + Consecutive Grouping + Smart Jury)",
+    "status": "completed",
+    "optimizations_applied": [
+      "enhanced_randomizer_instructor_order",
+      "pure_consecutive_grouping",
+      "smart_jury_assignment",
+      "consecutive_jury_pairing",
+      "conflict_detection_and_resolution",
+      "uniform_classroom_distribution",
+      "earliest_slot_assignment",
+      "comprehensive_multi_algorithm_optimization"
+    ],
+    "stats": {
+      "consecutive_count": 19,
+      "total_instructors": 19,
+      "avg_classroom_changes": 0.0,
+      "consecutive_percentage": 100.0
+    },
+    "parameters": {
+      "algorithm_type": "consecutive_grouping_with_smart_jury",
+      "enhanced_randomizer_instructor_order": true,
+      "smart_jury_assignment": true,
+      "consecutive_jury_pairing": true,
+      "conflict_prevention": true,
+      "same_classroom_priority": true,
+      "uniform_distribution": true,
+      "earliest_slot_strategy": true,
+      "population_size": 100,
+      "generations": 50
+    },
+    "quality": -9941.632270819198,
+    "fallback_used": true,
+    "fallback_from": "dynamic_programming",
+    "original_error": "'<=' not supported between instances of 'datetime.time' and 'str'"
+  }
+}

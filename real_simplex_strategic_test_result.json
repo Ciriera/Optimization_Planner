@@ -1,0 +1,359 @@
+{
+  "assignments": [
+    {
+      "project_id": 1,
+      "classroom_id": 1,
+      "timeslot_id": 1,
+      "instructors": [
+        1,
+        4
+      ],
+      "metadata": {
+        "supervisor": 1,
+        "jury": 4,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_0_A"
+      }
+    },
+    {
+      "project_id": 2,
+      "classroom_id": 1,
+      "timeslot_id": 2,
+      "instructors": [
+        1,
+        4
+      ],
+      "metadata": {
+        "supervisor": 1,
+        "jury": 4,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_0_A"
+      }
+    },
+    {
+      "project_id": 3,
+      "classroom_id": 1,
+      "timeslot_id": 3,
+      "instructors": [
+        1,
+        4
+      ],
+      "metadata": {
+        "supervisor": 1,
+        "jury": 4,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_0_A"
+      }
+    },
+    {
+      "project_id": 4,
+      "classroom_id": 1,
+      "timeslot_id": 4,
+      "instructors": [
+        1,
+        4
+      ],
+      "metadata": {
+        "supervisor": 1,
+        "jury": 4,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_0_A"
+      }
+    },
+    {
+      "project_id": 5,
+      "classroom_id": 1,
+      "timeslot_id": 5,
+      "instructors": [
+        1,
+        4
+      ],
+      "metadata": {
+        "supervisor": 1,
+        "jury": 4,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_0_A"
+      }
+    },
+    {
+      "project_id": 6,
+      "classroom_id": 1,
+      "timeslot_id": 6,
+      "instructors": [
+        1,
+        4
+      ],
+      "metadata": {
+        "supervisor": 1,
+        "jury": 4,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_0_A"
+      }
+    },
+    {
+      "project_id": 16,
+      "classroom_id": 2,
+      "timeslot_id": 1,
+      "instructors": [
+        4,
+        1
+      ],
+      "metadata": {
+        "supervisor": 4,
+        "jury": 1,
+        "pair_role": "B_supervises_A_jury",
+        "consecutive_group": "pair_0_B"
+      }
+    },
+    {
+      "project_id": 17,
+      "classroom_id": 2,
+      "timeslot_id": 2,
+      "instructors": [
+        4,
+        1
+      ],
+      "metadata": {
+        "supervisor": 4,
+        "jury": 1,
+        "pair_role": "B_supervises_A_jury",
+        "consecutive_group": "pair_0_B"
+      }
+    },
+    {
+      "project_id": 18,
+      "classroom_id": 2,
+      "timeslot_id": 3,
+      "instructors": [
+        4,
+        1
+      ],
+      "metadata": {
+        "supervisor": 4,
+        "jury": 1,
+        "pair_role": "B_supervises_A_jury",
+        "consecutive_group": "pair_0_B"
+      }
+    },
+    {
+      "project_id": 7,
+      "classroom_id": 3,
+      "timeslot_id": 1,
+      "instructors": [
+        2,
+        5
+      ],
+      "metadata": {
+        "supervisor": 2,
+        "jury": 5,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_1_A"
+      }
+    },
+    {
+      "project_id": 8,
+      "classroom_id": 3,
+      "timeslot_id": 2,
+      "instructors": [
+        2,
+        5
+      ],
+      "metadata": {
+        "supervisor": 2,
+        "jury": 5,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_1_A"
+      }
+    },
+    {
+      "project_id": 9,
+      "classroom_id": 3,
+      "timeslot_id": 3,
+      "instructors": [
+        2,
+        5
+      ],
+      "metadata": {
+        "supervisor": 2,
+        "jury": 5,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_1_A"
+      }
+    },
+    {
+      "project_id": 10,
+      "classroom_id": 3,
+      "timeslot_id": 4,
+      "instructors": [
+        2,
+        5
+      ],
+      "metadata": {
+        "supervisor": 2,
+        "jury": 5,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_1_A"
+      }
+    },
+    {
+      "project_id": 11,
+      "classroom_id": 3,
+      "timeslot_id": 5,
+      "instructors": [
+        2,
+        5
+      ],
+      "metadata": {
+        "supervisor": 2,
+        "jury": 5,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_1_A"
+      }
+    },
+    {
+      "project_id": 19,
+      "classroom_id": 2,
+      "timeslot_id": 4,
+      "instructors": [
+        5,
+        2
+      ],
+      "metadata": {
+        "supervisor": 5,
+        "jury": 2,
+        "pair_role": "B_supervises_A_jury",
+        "consecutive_group": "pair_1_B"
+      }
+    },
+    {
+      "project_id": 20,
+      "classroom_id": 2,
+      "timeslot_id": 5,
+      "instructors": [
+        5,
+        2
+      ],
+      "metadata": {
+        "supervisor": 5,
+        "jury": 2,
+        "pair_role": "B_supervises_A_jury",
+        "consecutive_group": "pair_1_B"
+      }
+    },
+    {
+      "project_id": 12,
+      "classroom_id": 2,
+      "timeslot_id": 6,
+      "instructors": [
+        3,
+        6
+      ],
+      "metadata": {
+        "supervisor": 3,
+        "jury": 6,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_2_A"
+      }
+    },
+    {
+      "project_id": 13,
+      "classroom_id": 2,
+      "timeslot_id": 7,
+      "instructors": [
+        3,
+        6
+      ],
+      "metadata": {
+        "supervisor": 3,
+        "jury": 6,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_2_A"
+      }
+    },
+    {
+      "project_id": 14,
+      "classroom_id": 1,
+      "timeslot_id": 7,
+      "instructors": [
+        3,
+        6
+      ],
+      "metadata": {
+        "supervisor": 3,
+        "jury": 6,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_2_A"
+      }
+    },
+    {
+      "project_id": 15,
+      "classroom_id": 2,
+      "timeslot_id": 9,
+      "instructors": [
+        3,
+        6
+      ],
+      "metadata": {
+        "supervisor": 3,
+        "jury": 6,
+        "pair_role": "A_supervises_B_jury",
+        "consecutive_group": "pair_2_A"
+      }
+    },
+    {
+      "project_id": 21,
+      "classroom_id": 3,
+      "timeslot_id": 6,
+      "instructors": [
+        6,
+        3
+      ],
+      "metadata": {
+        "supervisor": 6,
+        "jury": 3,
+        "pair_role": "B_supervises_A_jury",
+        "consecutive_group": "pair_2_B"
+      }
+    }
+  ],
+  "metrics": {
+    "strategic_pairs": 3,
+    "bidirectional_jury_count": 21,
+    "consecutive_grouping_count": 6,
+    "same_classroom_rate": 83.33333333333334,
+    "early_timeslot_rate": 71.42857142857143,
+    "total_gaps": 1,
+    "gap_free_rate": 95.23809523809523,
+    "soft_conflicts": 0,
+    "total_score": 11300.0
+  },
+  "metadata": {
+    "algorithm": "Real Simplex Algorithm (AI Strategic Pairing)",
+    "description": "NO HARD CONSTRAINTS - Pure AI Optimization with Strategic Instructor Pairing",
+    "execution_time": 0.0,
+    "strategic_pairs": [
+      [
+        1,
+        4
+      ],
+      [
+        2,
+        5
+      ],
+      [
+        3,
+        6
+      ]
+    ],
+    "upper_group": [
+      1,
+      2,
+      3
+    ],
+    "lower_group": [
+      4,
+      5,
+      6
+    ]
+  }
+}

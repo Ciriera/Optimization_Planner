@@ -1,0 +1,705 @@
+"""
+Lexicographic Optimization Algorithm - Advanced AI Edition
+Strategic Instructor Pairing + Reward-Penalty System + Soft Constraints
+"""
+
+from typing import Dict, List, Any, Tuple, Optional
+import time
+import random
+import logging
+from collections import defaultdict, Counter
+from datetime import time as dt_time
+from app.algorithms.base import OptimizationAlgorithm
+from app.algorithms.fitness_helpers import FitnessMetrics
+
+logger = logging.getLogger(__name__)
+
+
+class LexicographicAlgorithm(OptimizationAlgorithm):
+    """
+    Advanced AI-Powered Lexicographic Algorithm.
+    
+    STRATEGIC PAIRING:
+    - Sort instructors by project count (HIGH → LOW)
+    - Split into balanced groups
+    - Pair HIGH[i] ↔ LOW[i]
+    - x responsible → y jury, then y responsible → x jury
+    
+    ADVANCED AI FEATURES:
+    - Multi-solution generation & selection
+    - Elite preservation
+    - Local search optimization
+    - Mutation for diversity
+    - Advanced reward-penalty system (8 soft constraints)
+    - Stochastic exploration
+    - Adaptive parameter tuning
+    """
+    
+    def __init__(self, params: Optional[Dict[str, Any]] = None):
+        super().__init__(params)
+        params = params or {}
+        self.name = "Lexicographic (Advanced AI)"
+        self.description = "Strategic pairing + Advanced AI with reward-penalty system"
+        
+        # AI PARAMETERS
+        self.num_solutions = params.get("num_solutions", 20)
+        self.randomization_level = params.get("randomization_level", 0.8)
+        self.temperature = params.get("temperature", 150.0)
+        self.cooling_rate = params.get("cooling_rate", 0.92)
+        self.elite_size = params.get("elite_size", 3)
+        self.mutation_rate = params.get("mutation_rate", 0.3)
+        self.local_search_prob = params.get("local_search_prob", 0.5)
+        
+        # REWARD-PENALTY WEIGHTS (Soft Constraints)
+        self.weights = {
+            "coverage": params.get("weight_coverage", 100.0),
+            "no_gaps": params.get("weight_no_gaps", 80.0),
+            "no_duplicates": params.get("weight_no_duplicates", 80.0),
+            "early_slots": params.get("weight_early_slots", 50.0),
+            "load_balance": params.get("weight_load_balance", 40.0),
+            "consecutive": params.get("weight_consecutive", 60.0),
+            "same_classroom": params.get("weight_same_classroom", 30.0),
+            "no_late_slots": params.get("weight_no_late_slots", 90.0),
+        }
+        
+        # Data
+        self.projects = []
+        self.instructors = []
+        self.classrooms = []
+        self.timeslots = []
+        self.fitness_calculator = None
+        self.instructor_pairs = []
+        self.instructor_projects = {}
+        
+    def initialize(self, data: Dict[str, Any]) -> None:
+        """Initialize algorithm."""
+        self.data = data
+        self.projects = data.get("projects", [])
+        self.instructors = data.get("instructors", [])
+        self.classrooms = data.get("classrooms", [])
+        self.timeslots = data.get("timeslots", [])
+        
+        if not (self.projects and self.instructors and self.classrooms and self.timeslots):
+            raise ValueError("Insufficient data")
+        
+        self.fitness_calculator = FitnessMetrics(
+            self.projects, self.instructors, self.classrooms, self.timeslots
+        )
+        
+        self._build_instructor_projects()
+        self._create_strategic_pairing()
+    
+    def optimize(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Run Advanced AI Optimization."""
+        import time as time_module
+        start_time = time_module.time()
+        
+        try:
+        self.initialize(data)
+        
+            logger.info("=" * 80)
+            logger.info("LEXICOGRAPHIC ALGORITHM - ADVANCED AI MODE")
+            logger.info("=" * 80)
+            logger.info(f"📊 Configuration:")
+            logger.info(f"   Solutions to Generate: {self.num_solutions}")
+            logger.info(f"   Elite Size: {self.elite_size}")
+            logger.info(f"   Mutation Rate: {self.mutation_rate * 100:.0f}%")
+            logger.info(f"   Local Search Prob: {self.local_search_prob * 100:.0f}%")
+            logger.info(f"   Randomization: {self.randomization_level * 100:.0f}%")
+            
+            # PHASE 1: Generate Population
+            logger.info(f"\n📊 Phase 1: Generating population ({self.num_solutions} solutions)...")
+            population = []
+            
+            for i in range(self.num_solutions):
+                solution = self._create_solution_with_ai()
+                if solution:
+                    fitness = self._calculate_advanced_fitness(solution)
+                    population.append({
+                        "solution": solution,
+                        "fitness": fitness["total"],
+                        "fitness_detailed": fitness
+                    })
+            
+            if not population:
+                raise ValueError("Failed to generate any valid solutions")
+            
+            population.sort(key=lambda x: x["fitness"], reverse=True)
+            logger.info(f"   ✓ Generated {len(population)} solutions")
+            logger.info(f"   Best: {population[0]['fitness']:.2f}, Worst: {population[-1]['fitness']:.2f}")
+            
+            # PHASE 2: Elite Preservation
+            logger.info(f"\n🏆 Phase 2: Elite preservation...")
+            elite = population[:self.elite_size]
+            elite_scores = [e["fitness"] for e in elite]
+            logger.info(f"   Elite: {[f'{s:.2f}' for s in elite_scores]}")
+            
+            # PHASE 3: Local Search on Elite
+            logger.info(f"\n🔍 Phase 3: Local search optimization...")
+            improved_count = 0
+            for idx, elite_item in enumerate(elite):
+                if random.random() < self.local_search_prob:
+                    improved = self._apply_local_search(elite_item["solution"])
+                    improved_fitness = self._calculate_advanced_fitness(improved)
+                    
+                    if improved_fitness["total"] > elite_item["fitness"]:
+                        elite[idx] = {
+                            "solution": improved,
+                            "fitness": improved_fitness["total"],
+                            "fitness_detailed": improved_fitness
+                        }
+                        improved_count += 1
+            
+            logger.info(f"   ✓ Improved {improved_count}/{len(elite)} elite solutions")
+            
+            # PHASE 4: Mutation
+            logger.info(f"\n🧬 Phase 4: Mutation for diversity...")
+            mutated_population = []
+            for item in population[:10]:
+                if random.random() < self.mutation_rate:
+                    mutated = self._mutate_solution(item["solution"])
+                    mutated_fitness = self._calculate_advanced_fitness(mutated)
+                    
+                    if mutated_fitness["total"] >= item["fitness"] * 0.95:
+                        mutated_population.append({
+                            "solution": mutated,
+                            "fitness": mutated_fitness["total"],
+                            "fitness_detailed": mutated_fitness
+                        })
+            
+            logger.info(f"   ✓ Created {len(mutated_population)} mutated solutions")
+            
+            # FINAL: Select Best
+            final_population = elite + mutated_population + population
+            final_population.sort(key=lambda x: x["fitness"], reverse=True)
+            
+            best = final_population[0]
+            best_solution = best["solution"]
+            best_fitness = best["fitness_detailed"]
+            
+            logger.info(f"\n🏆 Best Solution Selected:")
+            logger.info(f"   Total Fitness: {best['fitness']:.2f}/100")
+            logger.info(f"   Detailed Breakdown:")
+            for metric, score in best_fitness.items():
+                if metric != "total":
+                    logger.info(f"      {metric}: {score:.2f}")
+            
+            # Statistics
+            stats = self._calculate_stats(best_solution)
+            
+            logger.info(f"\n📊 Final Statistics:")
+            logger.info(f"   Coverage: {stats['coverage_percentage']:.1f}%")
+            logger.info(f"   Duplicates: {stats['duplicate_count']}")
+            logger.info(f"   Gaps: {stats['gap_count']}")
+            logger.info(f"   Late Slots: {stats['late_slot_count']}")
+            logger.info(f"   Classrooms Used: {stats['classrooms_used']}")
+            
+            execution_time = time_module.time() - start_time
+            logger.info(f"\n✅ Completed in {execution_time:.2f}s")
+            logger.info("=" * 80)
+            
+            return {
+                "assignments": best_solution,
+                "schedule": best_solution,
+                "solution": best_solution,
+                "fitness_scores": best_fitness,
+                "execution_time": execution_time,
+                "algorithm": "Lexicographic (Advanced AI)",
+                "status": "completed",
+                "optimizations_applied": [
+                    "strategic_instructor_pairing",
+                    "advanced_reward_penalty_system",
+                    "elite_preservation",
+                    "local_search_optimization",
+                    "mutation_for_diversity",
+                    "multi_objective_soft_constraints",
+                    "stochastic_exploration",
+                    "fitness_weighted_selection"
+                ],
+                "stats": stats,
+                "parameters": {
+                    "num_solutions": self.num_solutions,
+                    "elite_size": self.elite_size,
+                    "mutation_rate": self.mutation_rate,
+                    "randomization_level": self.randomization_level
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Algorithm failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
+                    return {
+                "assignments": [],
+                "schedule": [],
+                "solution": [],
+                "fitness_scores": {},
+                "execution_time": time_module.time() - start_time,
+                "algorithm": "Lexicographic (Advanced AI)",
+                "status": "error",
+                "message": f"Failed: {str(e)}",
+                "error": str(e)
+            }
+    
+    def _build_instructor_projects(self) -> None:
+        """Group projects by instructor."""
+        self.instructor_projects = defaultdict(list)
+        for project in self.projects:
+            rid = project.get("responsible_id")
+            if rid:
+                self.instructor_projects[rid].append(project)
+    
+    def _create_strategic_pairing(self) -> None:
+        """Create strategic pairs (HIGH ↔ LOW)."""
+        sorted_instructors = sorted(
+            self.instructor_projects.items(),
+            key=lambda x: len(x[1]),
+            reverse=True
+        )
+        
+        total = len(sorted_instructors)
+        if total == 0:
+            return
+        
+        split = total // 2
+        high_group = sorted_instructors[:split]
+        low_group = sorted_instructors[split:]
+        
+        self.instructor_pairs = []
+        for i in range(len(high_group)):
+            high_id = high_group[i][0]
+            low_id = low_group[i][0] if i < len(low_group) else None
+            if low_id:
+                self.instructor_pairs.append((high_id, low_id))
+    
+    def _create_solution_with_ai(self) -> List[Dict[str, Any]]:
+        """Create solution with AI randomization."""
+        assignments = []
+        used_slots = set()
+        instructor_usage = defaultdict(set)
+        assigned_projects = set()
+        
+        sorted_timeslots = sorted(self.timeslots, key=lambda x: self._parse_time(x.get("start_time", "09:00")))
+        
+        # Randomize pair order
+        pairs = list(self.instructor_pairs)
+        if random.random() < self.randomization_level:
+            random.shuffle(pairs)
+        
+        # Process pairs
+        for high_id, low_id in pairs:
+            high_projects = self.instructor_projects.get(high_id, [])
+            low_projects = self.instructor_projects.get(low_id, [])
+            
+            # Find classroom
+            classroom_id = self._select_classroom_ai(used_slots)
+            
+            # Assign HIGH projects (LOW as jury)
+            for project in high_projects:
+                if project["id"] in assigned_projects:
+                    continue
+                
+                slot_id = self._find_next_available_slot(
+                    classroom_id, high_id, low_id, used_slots, instructor_usage, sorted_timeslots
+                )
+                
+                if slot_id:
+                    assignments.append({
+                        "project_id": project["id"],
+                        "classroom_id": classroom_id,
+                        "timeslot_id": slot_id,
+                        "is_makeup": project.get("is_makeup", False),
+                        "instructors": [high_id, low_id]
+                    })
+                    used_slots.add((classroom_id, slot_id))
+                    instructor_usage[high_id].add(slot_id)
+                    instructor_usage[low_id].add(slot_id)
+                    assigned_projects.add(project["id"])
+            
+            # Assign LOW projects (HIGH as jury)
+            for project in low_projects:
+                if project["id"] in assigned_projects:
+                    continue
+                
+                slot_id = self._find_next_available_slot(
+                    classroom_id, low_id, high_id, used_slots, instructor_usage, sorted_timeslots
+                )
+                
+                if slot_id:
+                    assignments.append({
+                        "project_id": project["id"],
+                        "classroom_id": classroom_id,
+                        "timeslot_id": slot_id,
+                        "is_makeup": project.get("is_makeup", False),
+                        "instructors": [low_id, high_id]
+                    })
+                    used_slots.add((classroom_id, slot_id))
+                    instructor_usage[low_id].add(slot_id)
+                    instructor_usage[high_id].add(slot_id)
+                    assigned_projects.add(project["id"])
+        
+        # Handle unpaired instructors
+        for instructor_id, projects in self.instructor_projects.items():
+            is_paired = any(instructor_id in pair for pair in self.instructor_pairs)
+            if not is_paired:
+                for project in projects:
+                    if project["id"] in assigned_projects:
+                        continue
+                    
+                    classroom_id = self._select_classroom_ai(used_slots)
+                    slot_id = self._find_any_available_slot(
+                        classroom_id, instructor_id, used_slots, instructor_usage, sorted_timeslots
+                    )
+                    
+                    if slot_id:
+                        assignments.append({
+                            "project_id": project["id"],
+                            "classroom_id": classroom_id,
+                            "timeslot_id": slot_id,
+                            "is_makeup": project.get("is_makeup", False),
+                            "instructors": [instructor_id]
+                        })
+                        used_slots.add((classroom_id, slot_id))
+                        instructor_usage[instructor_id].add(slot_id)
+                        assigned_projects.add(project["id"])
+        
+        return assignments
+    
+    def _select_classroom_ai(self, used_slots: set) -> int:
+        """AI: Select classroom with weighted randomization."""
+        classroom_usage = Counter()
+        for (cid, _) in used_slots:
+            classroom_usage[cid] += 1
+        
+        candidates = []
+        for classroom in self.classrooms:
+            cid = classroom["id"]
+            usage = classroom_usage[cid]
+            # Score: less usage = higher score
+            score = 100.0 - (usage * 10)
+            score += random.uniform(0, 20)  # Randomness
+            candidates.append({"id": cid, "score": max(0, score)})
+        
+        # Weighted random selection
+        if random.random() < self.randomization_level:
+            total_score = sum(c["score"] for c in candidates)
+            if total_score > 0:
+                weights = [c["score"] / total_score for c in candidates]
+                selected = random.choices(candidates, weights=weights, k=1)[0]
+                return selected["id"]
+        
+        # Greedy: least used
+        return min(candidates, key=lambda c: -c["score"])["id"]
+    
+    def _find_next_available_slot(self, classroom_id, responsible_id, jury_id,
+                                   used_slots, instructor_usage, sorted_timeslots) -> Optional[int]:
+        """Find next available slot for both instructors."""
+        for timeslot in sorted_timeslots:
+            tid = timeslot["id"]
+            key = (classroom_id, tid)
+            
+            if (key not in used_slots and
+                tid not in instructor_usage[responsible_id] and
+                tid not in instructor_usage[jury_id]):
+                return tid
+        
+        return None
+    
+    def _find_any_available_slot(self, classroom_id, instructor_id,
+                                  used_slots, instructor_usage, sorted_timeslots) -> Optional[int]:
+        """Find any available slot for instructor."""
+        for timeslot in sorted_timeslots:
+            tid = timeslot["id"]
+            key = (classroom_id, tid)
+            
+            if key not in used_slots and tid not in instructor_usage[instructor_id]:
+                return tid
+        
+        return None
+    
+    def _calculate_advanced_fitness(self, assignments: List[Dict[str, Any]]) -> Dict[str, float]:
+        """Calculate advanced fitness with reward-penalty system."""
+        scores = {}
+        
+        # 1. Coverage (100 pts)
+        assigned_ids = {a["project_id"] for a in assignments}
+        expected_ids = {p["id"] for p in self.projects}
+        coverage_ratio = len(assigned_ids & expected_ids) / len(expected_ids) if expected_ids else 0
+        scores["coverage"] = coverage_ratio * self.weights["coverage"]
+        
+        # 2. No Gaps (80 pts)
+        gap_count = self._count_gaps(assignments)
+        max_gaps = len(self.timeslots) * len(self.classrooms)
+        gap_ratio = 1.0 - (gap_count / max_gaps if max_gaps > 0 else 0)
+        scores["gap_penalty"] = gap_ratio * self.weights["no_gaps"]
+        
+        # 3. No Duplicates (80 pts)
+        project_counts = Counter(a["project_id"] for a in assignments)
+        dup_count = sum(1 for c in project_counts.values() if c > 1)
+        dup_ratio = 1.0 - (dup_count / len(self.projects) if self.projects else 0)
+        scores["no_duplicates"] = dup_ratio * self.weights["no_duplicates"]
+        
+        # 4. No Late Slots (90 pts)
+        late_count = sum(1 for a in assignments if self._is_late_slot(a["timeslot_id"]))
+        late_ratio = 1.0 - (late_count / len(assignments) if assignments else 0)
+        scores["no_late_slots"] = late_ratio * self.weights["no_late_slots"]
+        
+        # 5. Early Slots Reward (50 pts)
+        early_score = sum(self._get_timeslot_reward(a["timeslot_id"]) for a in assignments)
+        early_score /= len(assignments) if assignments else 1
+        scores["early_slots"] = early_score * self.weights["early_slots"]
+        
+        # 6. Load Balance (40 pts)
+        instructor_loads = Counter()
+        for a in assignments:
+            for iid in a.get("instructors", []):
+                instructor_loads[iid] += 1
+        
+        if instructor_loads:
+            loads = list(instructor_loads.values())
+            avg = sum(loads) / len(loads)
+            variance = sum((l - avg) ** 2 for l in loads) / len(loads)
+            balance_score = 1.0 - min(1.0, variance / (avg ** 2) if avg > 0 else 0)
+            else:
+            balance_score = 0.0
+        scores["load_balance"] = balance_score * self.weights["load_balance"]
+        
+        # 7. Consecutive (60 pts)
+        consecutive_score = self._calculate_consecutive_score(assignments)
+        scores["consecutive"] = consecutive_score * self.weights["consecutive"]
+        
+        # 8. Same Classroom (30 pts)
+        classroom_score = self._calculate_classroom_score(assignments)
+        scores["same_classroom"] = classroom_score * self.weights["same_classroom"]
+        
+        # Total
+        total_weight = sum(self.weights.values())
+        scores["total"] = (sum(scores.values()) / total_weight) * 100 if total_weight > 0 else 0
+        
+        return scores
+    
+    def _count_gaps(self, assignments: List[Dict[str, Any]]) -> int:
+        """Count gaps in schedule."""
+        classroom_slots = defaultdict(list)
+        for a in assignments:
+            classroom_slots[a["classroom_id"]].append(a["timeslot_id"])
+        
+        total_gaps = 0
+        for slots in classroom_slots.values():
+            sorted_slots = sorted(slots)
+            for i in range(len(sorted_slots) - 1):
+                gap = sorted_slots[i + 1] - sorted_slots[i] - 1
+                if gap > 0:
+                    total_gaps += gap
+        
+        return total_gaps
+    
+    def _is_late_slot(self, timeslot_id: int) -> bool:
+        """Check if slot is after 16:30."""
+        timeslot = next((t for t in self.timeslots if t["id"] == timeslot_id), None)
+        if not timeslot:
+            return False
+        
+        start = timeslot.get("start_time", "09:00")
+        try:
+            hour = int(start.split(":")[0])
+            minute = int(start.split(":")[1]) if ":" in start else 0
+            return hour > 16 or (hour == 16 and minute >= 30)
+                except:
+            return False
+    
+    def _get_timeslot_reward(self, timeslot_id: int) -> float:
+        """Get reward for timeslot (early = high reward)."""
+        timeslot = next((t for t in self.timeslots if t["id"] == timeslot_id), None)
+        if not timeslot:
+            return 0.5
+        
+        start = timeslot.get("start_time", "09:00")
+        try:
+            hour = int(start.split(":")[0])
+            if hour < 12:
+                return 1.0  # Morning
+            elif hour < 14:
+                return 0.7  # Early afternoon
+            elif hour < 16:
+                return 0.5  # Late afternoon
+            else:
+                return 0.2  # Evening
+        except:
+            return 0.5
+    
+    def _calculate_consecutive_score(self, assignments: List[Dict[str, Any]]) -> float:
+        """Calculate consecutive scheduling score."""
+        instructor_assignments = defaultdict(list)
+        for a in assignments:
+            project = next((p for p in self.projects if p["id"] == a["project_id"]), None)
+            if project and project.get("responsible_id"):
+                instructor_assignments[project["responsible_id"]].append(a)
+        
+        consecutive_count = 0
+        for instr_assigns in instructor_assignments.values():
+            if len(instr_assigns) <= 1:
+                consecutive_count += 1
+                continue
+            
+            timeslots = sorted([a["timeslot_id"] for a in instr_assigns])
+            is_consecutive = all(timeslots[i] + 1 == timeslots[i + 1] for i in range(len(timeslots) - 1))
+            if is_consecutive:
+                consecutive_count += 1
+        
+        return consecutive_count / len(instructor_assignments) if instructor_assignments else 0.0
+    
+    def _calculate_classroom_score(self, assignments: List[Dict[str, Any]]) -> float:
+        """Calculate same classroom score."""
+        instructor_classrooms = defaultdict(set)
+        for a in assignments:
+            project = next((p for p in self.projects if p["id"] == a["project_id"]), None)
+            if project and project.get("responsible_id"):
+                instructor_classrooms[project["responsible_id"]].add(a["classroom_id"])
+        
+        same_count = sum(1 for rooms in instructor_classrooms.values() if len(rooms) == 1)
+        return same_count / len(instructor_classrooms) if instructor_classrooms else 0.0
+    
+    def _apply_local_search(self, solution: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Apply local search optimization."""
+        improved = [a.copy() for a in solution]
+        
+        for _ in range(10):
+            if len(improved) < 2:
+                            break
+                    
+            idx1, idx2 = random.sample(range(len(improved)), 2)
+            
+            # Try swap
+            original_t1 = improved[idx1]["timeslot_id"]
+            original_t2 = improved[idx2]["timeslot_id"]
+            
+            improved[idx1]["timeslot_id"] = original_t2
+            improved[idx2]["timeslot_id"] = original_t1
+            
+            # Check improvement
+            new_fitness = self._calculate_advanced_fitness(improved)
+            old_fitness = self._calculate_advanced_fitness(solution)
+            
+            if new_fitness["total"] <= old_fitness["total"]:
+                # Revert
+                improved[idx1]["timeslot_id"] = original_t1
+                improved[idx2]["timeslot_id"] = original_t2
+        
+        return improved
+    
+    def _mutate_solution(self, solution: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Mutate solution for diversity."""
+        mutated = [a.copy() for a in solution]
+        num_mutations = max(1, int(len(mutated) * 0.2))
+        
+        for _ in range(num_mutations):
+            if not mutated:
+                break
+            
+            idx = random.randint(0, len(mutated) - 1)
+            
+            if random.random() < 0.5:
+                # Mutate classroom
+                mutated[idx]["classroom_id"] = random.choice(self.classrooms)["id"]
+            else:
+                # Mutate timeslot (nearby)
+                current = mutated[idx]["timeslot_id"]
+                offset = random.randint(-2, 2)
+                new_t = max(1, min(len(self.timeslots), current + offset))
+                mutated[idx]["timeslot_id"] = new_t
+        
+        return mutated
+    
+    def _calculate_stats(self, assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Calculate statistics."""
+        assigned_ids = {a["project_id"] for a in assignments}
+        project_counts = Counter(a["project_id"] for a in assignments)
+        
+        return {
+            "coverage_percentage": (len(assigned_ids) / len(self.projects)) * 100 if self.projects else 0,
+            "duplicate_count": sum(1 for c in project_counts.values() if c > 1),
+            "gap_count": self._count_gaps(assignments),
+            "late_slot_count": sum(1 for a in assignments if self._is_late_slot(a["timeslot_id"])),
+            "classrooms_used": len({a["classroom_id"] for a in assignments}),
+            "pairs_applied": sum(1 for a in assignments if len(a.get("instructors", [])) >= 2)
+        }
+    
+    def _parse_time(self, time_str) -> dt_time:
+        """Parse time string."""
+        try:
+            if isinstance(time_str, dt_time):
+                return time_str
+            return dt_time.fromisoformat(time_str)
+        except:
+            return dt_time(9, 0)
+
+    # Required base methods
+    
+    def evaluate_fitness(self, solution: Dict[str, Any]) -> float:
+        """Evaluate fitness."""
+        assignments = solution.get("assignments", [])
+        if not assignments:
+            return 0.0
+        fitness = self._calculate_advanced_fitness(assignments)
+        return fitness["total"]
+    
+    def repair_solution(self, solution: Dict[str, Any], validation_report: Dict[str, Any]) -> Dict[str, Any]:
+        """Repair solution (minimal - AI does most work)."""
+        assignments = solution.get("assignments", [])
+        
+        # Remove duplicates
+        seen = set()
+        repaired = []
+        for a in assignments:
+            pid = a.get("project_id")
+            if pid not in seen:
+                repaired.append(a)
+                seen.add(pid)
+        
+        solution["assignments"] = repaired
+        return solution
+    
+    def _calculate_comprehensive_fitness(self, assignments: List[Dict[str, Any]]) -> Dict[str, float]:
+        """Alias for advanced fitness (backwards compatibility)."""
+        return self._calculate_advanced_fitness(assignments)
+    
+    def _calculate_comprehensive_stats(self, assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Alias for stats (backwards compatibility)."""
+        return self._calculate_stats(assignments)
+    
+    def _detect_conflicts(self, assignments: List[Dict[str, Any]]) -> List[str]:
+        """Detect conflicts."""
+        conflicts = []
+        usage = defaultdict(list)
+        
+        for a in assignments:
+            tid = a.get("timeslot_id")
+            for iid in a.get("instructors", []):
+                key = (iid, tid)
+                usage[key].append(a["project_id"])
+        
+        for key, projects in usage.items():
+            if len(projects) > 1:
+                conflicts.append(f"Instructor {key[0]} @ timeslot {key[1]}: {projects}")
+        
+        return conflicts
+    
+    def _resolve_conflicts(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Resolve conflicts (keep first)."""
+        seen = set()
+        resolved = []
+        
+        for a in assignments:
+            tid = a.get("timeslot_id")
+            instructors = a.get("instructors", [])
+            
+            conflict = any((iid, tid) in seen for iid in instructors)
+            
+            if not conflict:
+                resolved.append(a)
+                for iid in instructors:
+                    seen.add((iid, tid))
+        
+        return resolved

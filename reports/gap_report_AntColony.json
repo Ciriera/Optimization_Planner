@@ -1,0 +1,100 @@
+{
+  "total_gaps": 14,
+  "details": [
+    {
+      "classroom_id": 1,
+      "gap_between": [
+        10,
+        12
+      ],
+      "missing_indices": [
+        11
+      ]
+    },
+    {
+      "classroom_id": 2,
+      "gap_between": [
+        6,
+        8
+      ],
+      "missing_indices": [
+        7
+      ]
+    },
+    {
+      "classroom_id": 5,
+      "gap_between": [
+        9,
+        12
+      ],
+      "missing_indices": [
+        10,
+        11
+      ]
+    },
+    {
+      "classroom_id": 7,
+      "gap_between": [
+        3,
+        7
+      ],
+      "missing_indices": [
+        4,
+        5,
+        6
+      ]
+    },
+    {
+      "classroom_id": 7,
+      "gap_between": [
+        7,
+        11
+      ],
+      "missing_indices": [
+        8,
+        9,
+        10
+      ]
+    },
+    {
+      "classroom_id": 3,
+      "gap_between": [
+        4,
+        6
+      ],
+      "missing_indices": [
+        5
+      ]
+    },
+    {
+      "classroom_id": 3,
+      "gap_between": [
+        9,
+        11
+      ],
+      "missing_indices": [
+        10
+      ]
+    },
+    {
+      "classroom_id": 4,
+      "gap_between": [
+        6,
+        8
+      ],
+      "missing_indices": [
+        7
+      ]
+    },
+    {
+      "classroom_id": 4,
+      "gap_between": [
+        10,
+        12
+      ],
+      "missing_indices": [
+        11
+      ]
+    }
+  ]
+}

@@ -1,0 +1,364 @@
+HOCA BAZLI DETAYLI RAPOR
+==================================================
+
+Hoca: Dr. Ogretim Uyesi 1 (ID: 22)
+  Toplam Atama: 10
+  Kullanılan Sınıf Sayısı: 5
+  Kullanılan Zaman Dilimi: 10
+  Atamalar:
+    - Proje 64 -> Sınıf 1, Zaman 3
+    - Proje 45 -> Sınıf 2, Zaman 1
+    - Proje 1 -> Sınıf 4, Zaman 4
+    - Proje 21 -> Sınıf 2, Zaman 5
+    - Proje 65 -> Sınıf 2, Zaman 6
+    - Proje 68 -> Sınıf 7, Zaman 9
+    - Proje 22 -> Sınıf 4, Zaman 8
+    - Proje 10 -> Sınıf 5, Zaman 12
+    - Proje 80 -> Sınıf 7, Zaman 14
+    - Proje 62 -> Sınıf 2, Zaman 13
+------------------------------
+Hoca: Dr. Ogretim Uyesi 2 (ID: 23)
+  Toplam Atama: 10
+  Kullanılan Sınıf Sayısı: 5
+  Kullanılan Zaman Dilimi: 10
+  Atamalar:
+    - Proje 37 -> Sınıf 3, Zaman 2
+    - Proje 96 -> Sınıf 7, Zaman 4
+    - Proje 44 -> Sınıf 3, Zaman 6
+    - Proje 74 -> Sınıf 4, Zaman 7
+    - Proje 2 -> Sınıf 3, Zaman 8
+    - Proje 23 -> Sınıf 4, Zaman 9
+    - Proje 16 -> Sınıf 2, Zaman 10
+    - Proje 7 -> Sınıf 4, Zaman 11
+    - Proje 95 -> Sınıf 5, Zaman 16
+    - Proje 50 -> Sınıf 2, Zaman 14
+------------------------------
+Hoca: Dr. Ogretim Uyesi 3 (ID: 24)
+  Toplam Atama: 10
+  Kullanılan Sınıf Sayısı: 6
+  Kullanılan Zaman Dilimi: 10
+  Atamalar:
+    - Proje 45 -> Sınıf 2, Zaman 1
+    - Proje 96 -> Sınıf 7, Zaman 4
+    - Proje 66 -> Sınıf 7, Zaman 5
+    - Proje 20 -> Sınıf 5, Zaman 2
+    - Proje 28 -> Sınıf 6, Zaman 7
+    - Proje 60 -> Sınıf 3, Zaman 10
+    - Proje 24 -> Sınıf 7, Zaman 13
+    - Proje 57 -> Sınıf 4, Zaman 12
+    - Proje 3 -> Sınıf 3, Zaman 15
+    - Proje 27 -> Sınıf 5, Zaman 14
+------------------------------
+Hoca: Dr. Ogretim Uyesi 4 (ID: 25)
+  Toplam Atama: 11
+  Kullanılan Sınıf Sayısı: 5
+  Kullanılan Zaman Dilimi: 11
+  Atamalar:
+    - Proje 36 -> Sınıf 4, Zaman 1
+    - Proje 93 -> Sınıf 4, Zaman 2
+    - Proje 46 -> Sınıf 3, Zaman 5
+    - Proje 15 -> Sınıf 2, Zaman 3
+    - Proje 26 -> Sınıf 5, Zaman 6
+    - Proje 25 -> Sınıf 1, Zaman 11
+    - Proje 54 -> Sınıf 5, Zaman 7
+    - Proje 42 -> Sınıf 3, Zaman 9
+    - Proje 4 -> Sınıf 1, Zaman 13
+    - Proje 88 -> Sınıf 4, Zaman 10
+    - Proje 29 -> Sınıf 1, Zaman 15
+------------------------------
+Hoca: Dr. Ogretim Uyesi 5 (ID: 26)
+  Toplam Atama: 14
+  Kullanılan Sınıf Sayısı: 6
+  Kullanılan Zaman Dilimi: 14
+  Atamalar:
+    - Proje 5 -> Sınıf 3, Zaman 1
+    - Proje 13 -> Sınıf 3, Zaman 3
+    - Proje 70 -> Sınıf 6, Zaman 5
+    - Proje 87 -> Sınıf 5, Zaman 4
+    - Proje 26 -> Sınıf 5, Zaman 6
+    - Proje 35 -> Sınıf 7, Zaman 8
+    - Proje 14 -> Sınıf 1, Zaman 10
+    - Proje 68 -> Sınıf 7, Zaman 9
+    - Proje 47 -> Sınıf 7, Zaman 12
+    - Proje 34 -> Sınıf 5, Zaman 11
+    - Proje 89 -> Sınıf 3, Zaman 13
+    - Proje 80 -> Sınıf 7, Zaman 14
+    - Proje 90 -> Sınıf 4, Zaman 15
+    - Proje 83 -> Sınıf 4, Zaman 16
+------------------------------
+Hoca: Dr. Ogretim Uyesi 6 (ID: 27)
+  Toplam Atama: 12
+  Kullanılan Sınıf Sayısı: 6
+  Kullanılan Zaman Dilimi: 12
+  Atamalar:
+    - Proje 5 -> Sınıf 3, Zaman 1
+    - Proje 94 -> Sınıf 7, Zaman 3
+    - Proje 52 -> Sınıf 6, Zaman 2
+    - Proje 31 -> Sınıf 3, Zaman 7
+    - Proje 26 -> Sınıf 5, Zaman 6
+    - Proje 48 -> Sınıf 1, Zaman 12
+    - Proje 42 -> Sınıf 3, Zaman 9
+    - Proje 78 -> Sınıf 5, Zaman 8
+    - Proje 88 -> Sınıf 4, Zaman 10
+    - Proje 34 -> Sınıf 5, Zaman 11
+    - Proje 3 -> Sınıf 3, Zaman 15
+    - Proje 27 -> Sınıf 5, Zaman 14
+------------------------------
+Hoca: Dr. Ogretim Uyesi 7 (ID: 28)
+  Toplam Atama: 9
+  Kullanılan Sınıf Sayısı: 7
+  Kullanılan Zaman Dilimi: 9
+  Atamalar:
+    - Proje 67 -> Sınıf 6, Zaman 1
+    - Proje 12 -> Sınıf 1, Zaman 5
+    - Proje 87 -> Sınıf 5, Zaman 4
+    - Proje 59 -> Sınıf 6, Zaman 6
+    - Proje 28 -> Sınıf 6, Zaman 7
+    - Proje 91 -> Sınıf 7, Zaman 10
+    - Proje 77 -> Sınıf 2, Zaman 9
+    - Proje 7 -> Sınıf 4, Zaman 11
+    - Proje 3 -> Sınıf 3, Zaman 15
+------------------------------
+Hoca: Dr. Ogretim Uyesi 8 (ID: 29)
+  Toplam Atama: 13
+  Kullanılan Sınıf Sayısı: 6
+  Kullanılan Zaman Dilimi: 13
+  Atamalar:
+    - Proje 71 -> Sınıf 1, Zaman 1
+    - Proje 84 -> Sınıf 3, Zaman 4
+    - Proje 73 -> Sınıf 7, Zaman 6
+    - Proje 9 -> Sınıf 6, Zaman 3
+    - Proje 70 -> Sınıf 6, Zaman 5
+    - Proje 2 -> Sınıf 3, Zaman 8
+    - Proje 8 -> Sınıf 1, Zaman 9
+    - Proje 48 -> Sınıf 1, Zaman 12
+    - Proje 98 -> Sınıf 2, Zaman 7
+    - Proje 16 -> Sınıf 2, Zaman 10
+    - Proje 29 -> Sınıf 1, Zaman 15
+    - Proje 56 -> Sınıf 4, Zaman 13
+    - Proje 50 -> Sınıf 2, Zaman 14
+------------------------------
+Hoca: Dr. Ogretim Uyesi 9 (ID: 30)
+  Toplam Atama: 15
+  Kullanılan Sınıf Sayısı: 7
+  Kullanılan Zaman Dilimi: 15
+  Atamalar:
+    - Proje 64 -> Sınıf 1, Zaman 3
+    - Proje 30 -> Sınıf 5, Zaman 1
+    - Proje 93 -> Sınıf 4, Zaman 2
+    - Proje 44 -> Sınıf 3, Zaman 6
+    - Proje 21 -> Sınıf 2, Zaman 5
+    - Proje 98 -> Sınıf 2, Zaman 7
+    - Proje 91 -> Sınıf 7, Zaman 10
+    - Proje 22 -> Sınıf 4, Zaman 8
+    - Proje 51 -> Sınıf 7, Zaman 11
+    - Proje 4 -> Sınıf 1, Zaman 13
+    - Proje 72 -> Sınıf 1, Zaman 14
+    - Proje 41 -> Sınıf 6, Zaman 9
+    - Proje 57 -> Sınıf 4, Zaman 12
+    - Proje 95 -> Sınıf 5, Zaman 16
+    - Proje 6 -> Sınıf 5, Zaman 15
+------------------------------
+Hoca: Dr. Ogretim Uyesi 10 (ID: 31)
+  Toplam Atama: 10
+  Kullanılan Sınıf Sayısı: 6
+  Kullanılan Zaman Dilimi: 10
+  Atamalar:
+    - Proje 30 -> Sınıf 5, Zaman 1
+    - Proje 94 -> Sınıf 7, Zaman 3
+    - Proje 52 -> Sınıf 6, Zaman 2
+    - Proje 73 -> Sınıf 7, Zaman 6
+    - Proje 97 -> Sınıf 4, Zaman 5
+    - Proje 31 -> Sınıf 3, Zaman 7
+    - Proje 25 -> Sınıf 1, Zaman 11
+    - Proje 69 -> Sınıf 3, Zaman 12
+    - Proje 81 -> Sınıf 6, Zaman 8
+    - Proje 40 -> Sınıf 5, Zaman 10
+------------------------------
+Hoca: Dr. Ogretim Uyesi 11 (ID: 32)
+  Toplam Atama: 12
+  Kullanılan Sınıf Sayısı: 5
+  Kullanılan Zaman Dilimi: 12
+  Atamalar:
+    - Proje 11 -> Sınıf 1, Zaman 2
+    - Proje 33 -> Sınıf 1, Zaman 4
+    - Proje 38 -> Sınıf 4, Zaman 3
+    - Proje 66 -> Sınıf 7, Zaman 5
+    - Proje 74 -> Sınıf 4, Zaman 7
+    - Proje 32 -> Sınıf 1, Zaman 8
+    - Proje 68 -> Sınıf 7, Zaman 9
+    - Proje 51 -> Sınıf 7, Zaman 11
+    - Proje 60 -> Sınıf 3, Zaman 10
+    - Proje 95 -> Sınıf 5, Zaman 16
+    - Proje 53 -> Sınıf 4, Zaman 14
+    - Proje 76 -> Sınıf 5, Zaman 13
+------------------------------
+Hoca: Dr. Ogretim Uyesi 12 (ID: 33)
+  Toplam Atama: 8
+  Kullanılan Sınıf Sayısı: 3
+  Kullanılan Zaman Dilimi: 8
+  Atamalar:
+    - Proje 71 -> Sınıf 1, Zaman 1
+    - Proje 33 -> Sınıf 1, Zaman 4
+    - Proje 12 -> Sınıf 1, Zaman 5
+    - Proje 75 -> Sınıf 1, Zaman 6
+    - Proje 31 -> Sınıf 3, Zaman 7
+    - Proje 48 -> Sınıf 1, Zaman 12
+    - Proje 85 -> Sınıf 2, Zaman 8
+    - Proje 19 -> Sınıf 3, Zaman 11
+------------------------------
+Hoca: Dr. Ogretim Uyesi 13 (ID: 34)
+  Toplam Atama: 13
+  Kullanılan Sınıf Sayısı: 6
+  Kullanılan Zaman Dilimi: 13
+  Atamalar:
+    - Proje 13 -> Sınıf 3, Zaman 3
+    - Proje 61 -> Sınıf 2, Zaman 2
+    - Proje 63 -> Sınıf 6, Zaman 4
+    - Proje 97 -> Sınıf 4, Zaman 5
+    - Proje 17 -> Sınıf 4, Zaman 6
+    - Proje 74 -> Sınıf 4, Zaman 7
+    - Proje 2 -> Sınıf 3, Zaman 8
+    - Proje 88 -> Sınıf 4, Zaman 10
+    - Proje 29 -> Sınıf 1, Zaman 15
+    - Proje 79 -> Sınıf 2, Zaman 12
+    - Proje 34 -> Sınıf 5, Zaman 11
+    - Proje 18 -> Sınıf 3, Zaman 14
+    - Proje 76 -> Sınıf 5, Zaman 13
+------------------------------
+Hoca: Dr. Ogretim Uyesi 14 (ID: 35)
+  Toplam Atama: 11
+  Kullanılan Sınıf Sayısı: 6
+  Kullanılan Zaman Dilimi: 11
+  Atamalar:
+    - Proje 37 -> Sınıf 3, Zaman 2
+    - Proje 67 -> Sınıf 6, Zaman 1
+    - Proje 94 -> Sınıf 7, Zaman 3
+    - Proje 63 -> Sınıf 6, Zaman 4
+    - Proje 44 -> Sınıf 3, Zaman 6
+    - Proje 99 -> Sınıf 1, Zaman 7
+    - Proje 35 -> Sınıf 7, Zaman 8
+    - Proje 14 -> Sınıf 1, Zaman 10
+    - Proje 77 -> Sınıf 2, Zaman 9
+    - Proje 4 -> Sınıf 1, Zaman 13
+    - Proje 7 -> Sınıf 4, Zaman 11
+------------------------------
+Hoca: Dr. Ogretim Uyesi 15 (ID: 36)
+  Toplam Atama: 12
+  Kullanılan Sınıf Sayısı: 6
+  Kullanılan Zaman Dilimi: 12
+  Atamalar:
+    - Proje 39 -> Sınıf 7, Zaman 1
+    - Proje 86 -> Sınıf 7, Zaman 2
+    - Proje 38 -> Sınıf 4, Zaman 3
+    - Proje 49 -> Sınıf 5, Zaman 5
+    - Proje 99 -> Sınıf 1, Zaman 7
+    - Proje 65 -> Sınıf 2, Zaman 6
+    - Proje 25 -> Sınıf 1, Zaman 11
+    - Proje 78 -> Sınıf 5, Zaman 8
+    - Proje 41 -> Sınıf 6, Zaman 9
+    - Proje 57 -> Sınıf 4, Zaman 12
+    - Proje 55 -> Sınıf 6, Zaman 10
+    - Proje 76 -> Sınıf 5, Zaman 13
+------------------------------
+Hoca: Dr. Ogretim Uyesi 16 (ID: 37)
+  Toplam Atama: 10
+  Kullanılan Sınıf Sayısı: 5
+  Kullanılan Zaman Dilimi: 10
+  Atamalar:
+    - Proje 11 -> Sınıf 1, Zaman 2
+    - Proje 5 -> Sınıf 3, Zaman 1
+    - Proje 13 -> Sınıf 3, Zaman 3
+    - Proje 100 -> Sınıf 2, Zaman 4
+    - Proje 58 -> Sınıf 7, Zaman 7
+    - Proje 8 -> Sınıf 1, Zaman 9
+    - Proje 16 -> Sınıf 2, Zaman 10
+    - Proje 24 -> Sınıf 7, Zaman 13
+    - Proje 79 -> Sınıf 2, Zaman 12
+    - Proje 53 -> Sınıf 4, Zaman 14
+------------------------------
+Hoca: Dr. Ogretim Uyesi 17 (ID: 38)
+  Toplam Atama: 11
+  Kullanılan Sınıf Sayısı: 6
+  Kullanılan Zaman Dilimi: 11
+  Atamalar:
+    - Proje 36 -> Sınıf 4, Zaman 1
+    - Proje 64 -> Sınıf 1, Zaman 3
+    - Proje 61 -> Sınıf 2, Zaman 2
+    - Proje 84 -> Sınıf 3, Zaman 4
+    - Proje 75 -> Sınıf 1, Zaman 6
+    - Proje 35 -> Sınıf 7, Zaman 8
+    - Proje 54 -> Sınıf 5, Zaman 7
+    - Proje 91 -> Sınıf 7, Zaman 10
+    - Proje 23 -> Sınıf 4, Zaman 9
+    - Proje 89 -> Sınıf 3, Zaman 13
+    - Proje 53 -> Sınıf 4, Zaman 14
+------------------------------
+Hoca: Dr. Ogretim Uyesi 18 (ID: 39)
+  Toplam Atama: 9
+  Kullanılan Sınıf Sayısı: 5
+  Kullanılan Zaman Dilimi: 9
+  Atamalar:
+    - Proje 39 -> Sınıf 7, Zaman 1
+    - Proje 66 -> Sınıf 7, Zaman 5
+    - Proje 73 -> Sınıf 7, Zaman 6
+    - Proje 99 -> Sınıf 1, Zaman 7
+    - Proje 60 -> Sınıf 3, Zaman 10
+    - Proje 19 -> Sınıf 3, Zaman 11
+    - Proje 43 -> Sınıf 5, Zaman 9
+    - Proje 81 -> Sınıf 6, Zaman 8
+    - Proje 18 -> Sınıf 3, Zaman 14
+------------------------------
+Hoca: Dr. Ogretim Uyesi 19 (ID: 40)
+  Toplam Atama: 12
+  Kullanılan Sınıf Sayısı: 6
+  Kullanılan Zaman Dilimi: 12
+  Atamalar:
+    - Proje 11 -> Sınıf 1, Zaman 2
+    - Proje 30 -> Sınıf 5, Zaman 1
+    - Proje 15 -> Sınıf 2, Zaman 3
+    - Proje 100 -> Sınıf 2, Zaman 4
+    - Proje 49 -> Sınıf 5, Zaman 5
+    - Proje 28 -> Sınıf 6, Zaman 7
+    - Proje 78 -> Sınıf 5, Zaman 8
+    - Proje 19 -> Sınıf 3, Zaman 11
+    - Proje 69 -> Sınıf 3, Zaman 12
+    - Proje 40 -> Sınıf 5, Zaman 10
+    - Proje 18 -> Sınıf 3, Zaman 14
+    - Proje 90 -> Sınıf 4, Zaman 15
+------------------------------
+Hoca: Dr. Ogretim Uyesi 20 (ID: 41)
+  Toplam Atama: 11
+  Kullanılan Sınıf Sayısı: 4
+  Kullanılan Zaman Dilimi: 11
+  Atamalar:
+    - Proje 12 -> Sınıf 1, Zaman 5
+    - Proje 20 -> Sınıf 5, Zaman 2
+    - Proje 92 -> Sınıf 5, Zaman 3
+    - Proje 100 -> Sınıf 2, Zaman 4
+    - Proje 8 -> Sınıf 1, Zaman 9
+    - Proje 22 -> Sınıf 4, Zaman 8
+    - Proje 40 -> Sınıf 5, Zaman 10
+    - Proje 79 -> Sınıf 2, Zaman 12
+    - Proje 62 -> Sınıf 2, Zaman 13
+    - Proje 50 -> Sınıf 2, Zaman 14
+    - Proje 83 -> Sınıf 4, Zaman 16
+------------------------------
+Hoca: Dr. Ogretim Uyesi 21 (ID: 42)
+  Toplam Atama: 12
+  Kullanılan Sınıf Sayısı: 5
+  Kullanılan Zaman Dilimi: 12
+  Atamalar:
+    - Proje 45 -> Sınıf 2, Zaman 1
+    - Proje 93 -> Sınıf 4, Zaman 2
+    - Proje 84 -> Sınıf 3, Zaman 4
+    - Proje 46 -> Sınıf 3, Zaman 5
+    - Proje 17 -> Sınıf 4, Zaman 6
+    - Proje 58 -> Sınıf 7, Zaman 7
+    - Proje 32 -> Sınıf 1, Zaman 8
+    - Proje 14 -> Sınıf 1, Zaman 10
+    - Proje 42 -> Sınıf 3, Zaman 9
+    - Proje 24 -> Sınıf 7, Zaman 13
+    - Proje 82 -> Sınıf 2, Zaman 11
+    - Proje 83 -> Sınıf 4, Zaman 16
+------------------------------

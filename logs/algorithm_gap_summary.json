@@ -1,0 +1,47 @@
+{
+  "timestamp": 1759178336.7032514,
+  "offenders": [
+    {
+      "algorithm": "SIMULATED_ANNEALING",
+      "late_count": 0,
+      "classrooms_with_gap": 7,
+      "total_gaps": 0
+    },
+    {
+      "algorithm": "DEEP_SEARCH",
+      "late_count": 0,
+      "classrooms_with_gap": 7,
+      "total_gaps": 0
+    },
+    {
+      "algorithm": "ANT_COLONY",
+      "late_count": 0,
+      "classrooms_with_gap": 7,
+      "total_gaps": 0
+    },
+    {
+      "algorithm": "GREEDY",
+      "late_count": 0,
+      "classrooms_with_gap": 7,
+      "total_gaps": 0
+    },
+    {
+      "algorithm": "CP_SAT",
+      "late_count": 0,
+      "classrooms_with_gap": 7,
+      "total_gaps": 0
+    },
+    {
+      "algorithm": "LEXICOGRAPHIC",
+      "late_count": 0,
+      "classrooms_with_gap": 5,
+      "total_gaps": 0
+    },
+    {
+      "algorithm": "DRAGONFLY_ALGORITHM",
+      "late_count": 0,
+      "classrooms_with_gap": 7,
+      "total_gaps": 0
+    }
+  ]
+}

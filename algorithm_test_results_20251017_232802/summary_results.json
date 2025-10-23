@@ -1,0 +1,79 @@
+{
+  "simplex": {
+    "status": "failed",
+    "error": "(builtins.TypeError) keys must be str, int, float, bool or None, not tuple\n[SQL: UPDATE algorithm_runs SET status=$1::VARCHAR, result=$2::JSON, execution_time=$3::FLOAT, completed_at=$4::TIMESTAMP WITH TIME ZONE WHERE algorithm_runs.id = $5::INTEGER]\n[parameters: [{'status': 'completed', 'result': {'assignments': [{'project_id': 55, 'classroom_id': 1, 'timeslot_id': 9, 'is_makeup': False, 'instructors': [13, 5]} ... (30143 characters truncated) ... 'solution': {}}}}, 'completed_at': datetime.datetime(2025, 10, 17, 23, 28, 2, 930199), 'execution_time': 0.4184906482696533, 'algorithm_runs_id': 499}]]",
+    "execution_time": null,
+    "schedule_count": 0,
+    "hard_constraints": "Error",
+    "ai_features": "Error",
+    "fitness_score": 0,
+    "objective_achievement": "Error",
+    "algorithm_nature": "Error"
+  },
+  "genetic_algorithm": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 209.21374011039734,
+    "schedule_count": 90,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "PASS - Fully AI-based with 8 AI features",
+    "fitness_score": 100,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "PASS - Algorithm works according to its theoretical nature"
+  },
+  "simulated_annealing": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 0.2439441680908203,
+    "schedule_count": 90,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "PASS - Fully AI-based with 6 AI features",
+    "fitness_score": 100,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "PASS - Algorithm works according to its theoretical nature"
+  },
+  "tabu_search": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 0.04900074005126953,
+    "schedule_count": 90,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "PARTIAL - AI-based with 4 AI features",
+    "fitness_score": 100,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "PASS - Algorithm works according to its theoretical nature"
+  },
+  "cp_sat": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 0.050588130950927734,
+    "schedule_count": 90,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "PASS - Fully AI-based with 7 AI features",
+    "fitness_score": 100,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "PASS - Algorithm works according to its theoretical nature"
+  },
+  "lexicographic": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 0.1177213191986084,
+    "schedule_count": 90,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "FAIL - Not AI-based",
+    "fitness_score": 100,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "PASS - Algorithm works according to its theoretical nature"
+  },
+  "dynamic_programming": {
+    "status": "completed",
+    "error": null,
+    "execution_time": 0.08838510513305664,
+    "schedule_count": 90,
+    "hard_constraints": "PASS - No hard constraints detected",
+    "ai_features": "PASS - Fully AI-based with 18 AI features",
+    "fitness_score": 100,
+    "objective_achievement": "PARTIAL - Schedule generated but no explicit fitness metrics",
+    "algorithm_nature": "PASS - Algorithm works according to its theoretical nature"
+  }
+}

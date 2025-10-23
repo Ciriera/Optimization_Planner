@@ -1,0 +1,53 @@
+{
+  "test_time": "2025-10-18 23:53:51",
+  "execution_time": 0.012792348861694336,
+  "total_schedules": 30,
+  "overall_score": 93.01234567901236,
+  "category_scores": {
+    "hard_constraints": 90,
+    "ai_based": 100.0,
+    "fitness_score": 87.03703703703704,
+    "objective_function": 88.0246913580247,
+    "dp_nature": 100.0
+  },
+  "detailed_metrics": {
+    "consecutive_score": 12.037037037037035,
+    "load_balance_score": 25.0,
+    "classroom_score": 20.0,
+    "time_score": 15.0,
+    "jury_score": 15.0,
+    "instructor_loads": {
+      "6": 10,
+      "4": 10,
+      "5": 10,
+      "3": 10,
+      "1": 10,
+      "2": 10
+    },
+    "classroom_usage": {
+      "1": 10,
+      "2": 5,
+      "4": 5,
+      "3": 5,
+      "5": 5
+    },
+    "phase1_count": 15,
+    "phase2_count": 15,
+    "instructor_conflicts": 0,
+    "classroom_time_conflicts": 1
+  },
+  "recommendations": [
+    {
+      "priority": "HIGH",
+      "area": "Consecutive Grouping",
+      "current": "12.0/25",
+      "target": "20+/25",
+      "action": "Consecutive bonus'u daha da artir (400 -> 600), ardisik slot bonusunu 150'den 250'ye cikar"
+    }
+  ],
+  "status": {
+    "fitness": "EXCELLENT",
+    "objective": "GOOD",
+    "overall": "EXCELLENT"
+  }
+}

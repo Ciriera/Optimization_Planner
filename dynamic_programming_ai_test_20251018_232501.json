@@ -1,0 +1,765 @@
+{
+  "assignments": [
+    {
+      "project_id": 7,
+      "classroom_id": 1,
+      "timeslot_id": 2,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 5,
+      "classroom_id": 1,
+      "timeslot_id": 5,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 3,
+      "classroom_id": 3,
+      "timeslot_id": 5,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 10,
+      "classroom_id": 3,
+      "timeslot_id": 3,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 4,
+      "classroom_id": 3,
+      "timeslot_id": 4,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 5,
+      "classroom_id": 3,
+      "timeslot_id": 2,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 3,
+      "classroom_id": 2,
+      "timeslot_id": 7,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 240.0
+    },
+    {
+      "project_id": 6,
+      "classroom_id": 1,
+      "timeslot_id": 4,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 120.0
+    },
+    {
+      "project_id": 11,
+      "classroom_id": 1,
+      "timeslot_id": 1,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 120.0
+    },
+    {
+      "project_id": 9,
+      "classroom_id": 3,
+      "timeslot_id": 1,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 120.0
+    },
+    {
+      "project_id": 10,
+      "classroom_id": 2,
+      "timeslot_id": 3,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 70.0
+    },
+    {
+      "project_id": 2,
+      "classroom_id": 2,
+      "timeslot_id": 1,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 70.0
+    },
+    {
+      "project_id": 4,
+      "classroom_id": 2,
+      "timeslot_id": 6,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 40.0
+    },
+    {
+      "project_id": 9,
+      "classroom_id": 1,
+      "timeslot_id": 8,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": -10.0
+    },
+    {
+      "project_id": 8,
+      "classroom_id": 2,
+      "timeslot_id": 9,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": -10.0
+    },
+    {
+      "project_id": 2,
+      "classroom_id": 1,
+      "timeslot_id": 10,
+      "instructors": [
+        1,
+        3
+      ],
+      "phase": 2,
+      "ai_score": -10.0
+    }
+  ],
+  "schedule": [
+    {
+      "project_id": 7,
+      "classroom_id": 1,
+      "timeslot_id": 2,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 5,
+      "classroom_id": 1,
+      "timeslot_id": 5,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 3,
+      "classroom_id": 3,
+      "timeslot_id": 5,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 10,
+      "classroom_id": 3,
+      "timeslot_id": 3,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 4,
+      "classroom_id": 3,
+      "timeslot_id": 4,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 5,
+      "classroom_id": 3,
+      "timeslot_id": 2,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 3,
+      "classroom_id": 2,
+      "timeslot_id": 7,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 240.0
+    },
+    {
+      "project_id": 6,
+      "classroom_id": 1,
+      "timeslot_id": 4,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 120.0
+    },
+    {
+      "project_id": 11,
+      "classroom_id": 1,
+      "timeslot_id": 1,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 120.0
+    },
+    {
+      "project_id": 9,
+      "classroom_id": 3,
+      "timeslot_id": 1,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 120.0
+    },
+    {
+      "project_id": 10,
+      "classroom_id": 2,
+      "timeslot_id": 3,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 70.0
+    },
+    {
+      "project_id": 2,
+      "classroom_id": 2,
+      "timeslot_id": 1,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 70.0
+    },
+    {
+      "project_id": 4,
+      "classroom_id": 2,
+      "timeslot_id": 6,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 40.0
+    },
+    {
+      "project_id": 9,
+      "classroom_id": 1,
+      "timeslot_id": 8,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": -10.0
+    },
+    {
+      "project_id": 8,
+      "classroom_id": 2,
+      "timeslot_id": 9,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": -10.0
+    },
+    {
+      "project_id": 2,
+      "classroom_id": 1,
+      "timeslot_id": 10,
+      "instructors": [
+        1,
+        3
+      ],
+      "phase": 2,
+      "ai_score": -10.0
+    }
+  ],
+  "solution": [
+    {
+      "project_id": 7,
+      "classroom_id": 1,
+      "timeslot_id": 2,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 5,
+      "classroom_id": 1,
+      "timeslot_id": 5,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 3,
+      "classroom_id": 3,
+      "timeslot_id": 5,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 10,
+      "classroom_id": 3,
+      "timeslot_id": 3,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 4,
+      "classroom_id": 3,
+      "timeslot_id": 4,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 5,
+      "classroom_id": 3,
+      "timeslot_id": 2,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 3,
+      "classroom_id": 2,
+      "timeslot_id": 7,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 240.0
+    },
+    {
+      "project_id": 6,
+      "classroom_id": 1,
+      "timeslot_id": 4,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 120.0
+    },
+    {
+      "project_id": 11,
+      "classroom_id": 1,
+      "timeslot_id": 1,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 120.0
+    },
+    {
+      "project_id": 9,
+      "classroom_id": 3,
+      "timeslot_id": 1,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 120.0
+    },
+    {
+      "project_id": 10,
+      "classroom_id": 2,
+      "timeslot_id": 3,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 70.0
+    },
+    {
+      "project_id": 2,
+      "classroom_id": 2,
+      "timeslot_id": 1,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 70.0
+    },
+    {
+      "project_id": 4,
+      "classroom_id": 2,
+      "timeslot_id": 6,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 40.0
+    },
+    {
+      "project_id": 9,
+      "classroom_id": 1,
+      "timeslot_id": 8,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": -10.0
+    },
+    {
+      "project_id": 8,
+      "classroom_id": 2,
+      "timeslot_id": 9,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": -10.0
+    },
+    {
+      "project_id": 2,
+      "classroom_id": 1,
+      "timeslot_id": 10,
+      "instructors": [
+        1,
+        3
+      ],
+      "phase": 2,
+      "ai_score": -10.0
+    }
+  ],
+  "schedules": [
+    {
+      "project_id": 7,
+      "classroom_id": 1,
+      "timeslot_id": 2,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 5,
+      "classroom_id": 1,
+      "timeslot_id": 5,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 3,
+      "classroom_id": 3,
+      "timeslot_id": 5,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 10,
+      "classroom_id": 3,
+      "timeslot_id": 3,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 4,
+      "classroom_id": 3,
+      "timeslot_id": 4,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 5,
+      "classroom_id": 3,
+      "timeslot_id": 2,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 320.0
+    },
+    {
+      "project_id": 3,
+      "classroom_id": 2,
+      "timeslot_id": 7,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 240.0
+    },
+    {
+      "project_id": 6,
+      "classroom_id": 1,
+      "timeslot_id": 4,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 120.0
+    },
+    {
+      "project_id": 11,
+      "classroom_id": 1,
+      "timeslot_id": 1,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": 120.0
+    },
+    {
+      "project_id": 9,
+      "classroom_id": 3,
+      "timeslot_id": 1,
+      "instructors": [
+        4,
+        2
+      ],
+      "phase": 2,
+      "ai_score": 120.0
+    },
+    {
+      "project_id": 10,
+      "classroom_id": 2,
+      "timeslot_id": 3,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 70.0
+    },
+    {
+      "project_id": 2,
+      "classroom_id": 2,
+      "timeslot_id": 1,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 70.0
+    },
+    {
+      "project_id": 4,
+      "classroom_id": 2,
+      "timeslot_id": 6,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": 40.0
+    },
+    {
+      "project_id": 9,
+      "classroom_id": 1,
+      "timeslot_id": 8,
+      "instructors": [
+        2,
+        4
+      ],
+      "phase": 1,
+      "ai_score": -10.0
+    },
+    {
+      "project_id": 8,
+      "classroom_id": 2,
+      "timeslot_id": 9,
+      "instructors": [
+        3,
+        1
+      ],
+      "phase": 1,
+      "ai_score": -10.0
+    },
+    {
+      "project_id": 2,
+      "classroom_id": 1,
+      "timeslot_id": 10,
+      "instructors": [
+        1,
+        3
+      ],
+      "phase": 2,
+      "ai_score": -10.0
+    }
+  ],
+  "statistics": {
+    "total_schedules": 16,
+    "phase1_count": 10,
+    "phase2_count": 6,
+    "average_ai_score": 166.875,
+    "max_ai_score": 320.0,
+    "min_ai_score": -10.0,
+    "classroom_usage": {
+      "1": 6,
+      "3": 5,
+      "2": 5
+    },
+    "classrooms_used": 3,
+    "total_classrooms": 3,
+    "classroom_balance_score": 91.16116523516816
+  },
+  "ai_insights": {
+    "strategic_pairing_summary": "2 stratejik eşleştirme yapıldı",
+    "load_balancing_achieved": "En fazla yüklü instructor'lar en az yüklülerle eşleştirildi",
+    "bi_directional_jury": "Her instructor birbirinin jürisi oldu",
+    "consecutive_grouping": "Tüm projeler ardışık slotlarda atandı",
+    "ai_optimization_level": "ULTRA AI-POWERED - Zero hard constraints",
+    "classroom_distribution": "3 / 3 sınıf kullanıldı",
+    "all_classrooms_used": true,
+    "project_type_balancing": "Proje türü denge skoru: 90.0/100",
+    "workload_balancing": "Instructor iş yükü denge skoru: 79.2/100",
+    "phase_balancing": "Phase denge skoru: 90.0/100",
+    "ai_diversity_optimization": "Çeşitlilik odaklı AI optimizasyonu aktif",
+    "ai_conflict_resolution": "AI-based conflict çözümü aktif",
+    "ai_adaptive_learning": "Adaptif AI öğrenme sistemi aktif",
+    "recommendations": [
+      "Sistem tamamen AI odaklı çalışıyor",
+      "Hard kısıtlar kaldırıldı, sadece soft optimization",
+      "Strategic pairing ile optimal yük dağılımı sağlandı",
+      "AI-based proje türü dengeleme aktif",
+      "AI-based instructor iş yükü dengeleme aktif",
+      "AI-based conflict çözümü aktif",
+      "Çeşitlilik odaklı AI optimizasyonu aktif",
+      "Bi-directional jury assignment ile adil jüri dağılımı",
+      "Tüm aktif sınıflar dengeli kullanıldı (3 sınıf)"
+    ]
+  },
+  "algorithm_info": {
+    "name": "Dynamic Programming Algorithm (🤖 AI-Powered Strategic Pairing)",
+    "description": "🤖 PURE AI-POWERED: Strategic instructor pairing with high-low matching, bi-directional jury assignment, consecutive grouping, and zero hard constraints!",
+    "strategic_pairs_count": 2,
+    "phase1_assignments": 10,
+    "phase2_assignments": 6,
+    "total_assignments": 16,
+    "execution_time": 0.007871389389038086
+  }
+}

@@ -1,0 +1,365 @@
+{
+  "total_gaps": 36,
+  "details": [
+    {
+      "classroom_id": 1,
+      "gap_between": [
+        0,
+        2
+      ],
+      "missing_indices": [
+        1
+      ]
+    },
+    {
+      "classroom_id": 1,
+      "gap_between": [
+        2,
+        4
+      ],
+      "missing_indices": [
+        3
+      ]
+    },
+    {
+      "classroom_id": 1,
+      "gap_between": [
+        4,
+        6
+      ],
+      "missing_indices": [
+        5
+      ]
+    },
+    {
+      "classroom_id": 1,
+      "gap_between": [
+        6,
+        8
+      ],
+      "missing_indices": [
+        7
+      ]
+    },
+    {
+      "classroom_id": 1,
+      "gap_between": [
+        8,
+        10
+      ],
+      "missing_indices": [
+        9
+      ]
+    },
+    {
+      "classroom_id": 1,
+      "gap_between": [
+        10,
+        12
+      ],
+      "missing_indices": [
+        11
+      ]
+    },
+    {
+      "classroom_id": 2,
+      "gap_between": [
+        0,
+        2
+      ],
+      "missing_indices": [
+        1
+      ]
+    },
+    {
+      "classroom_id": 2,
+      "gap_between": [
+        2,
+        4
+      ],
+      "missing_indices": [
+        3
+      ]
+    },
+    {
+      "classroom_id": 2,
+      "gap_between": [
+        4,
+        6
+      ],
+      "missing_indices": [
+        5
+      ]
+    },
+    {
+      "classroom_id": 2,
+      "gap_between": [
+        6,
+        8
+      ],
+      "missing_indices": [
+        7
+      ]
+    },
+    {
+      "classroom_id": 2,
+      "gap_between": [
+        8,
+        10
+      ],
+      "missing_indices": [
+        9
+      ]
+    },
+    {
+      "classroom_id": 3,
+      "gap_between": [
+        0,
+        2
+      ],
+      "missing_indices": [
+        1
+      ]
+    },
+    {
+      "classroom_id": 3,
+      "gap_between": [
+        2,
+        4
+      ],
+      "missing_indices": [
+        3
+      ]
+    },
+    {
+      "classroom_id": 3,
+      "gap_between": [
+        4,
+        6
+      ],
+      "missing_indices": [
+        5
+      ]
+    },
+    {
+      "classroom_id": 3,
+      "gap_between": [
+        6,
+        8
+      ],
+      "missing_indices": [
+        7
+      ]
+    },
+    {
+      "classroom_id": 3,
+      "gap_between": [
+        8,
+        10
+      ],
+      "missing_indices": [
+        9
+      ]
+    },
+    {
+      "classroom_id": 4,
+      "gap_between": [
+        0,
+        2
+      ],
+      "missing_indices": [
+        1
+      ]
+    },
+    {
+      "classroom_id": 4,
+      "gap_between": [
+        2,
+        4
+      ],
+      "missing_indices": [
+        3
+      ]
+    },
+    {
+      "classroom_id": 4,
+      "gap_between": [
+        4,
+        6
+      ],
+      "missing_indices": [
+        5
+      ]
+    },
+    {
+      "classroom_id": 4,
+      "gap_between": [
+        6,
+        8
+      ],
+      "missing_indices": [
+        7
+      ]
+    },
+    {
+      "classroom_id": 4,
+      "gap_between": [
+        8,
+        10
+      ],
+      "missing_indices": [
+        9
+      ]
+    },
+    {
+      "classroom_id": 5,
+      "gap_between": [
+        0,
+        2
+      ],
+      "missing_indices": [
+        1
+      ]
+    },
+    {
+      "classroom_id": 5,
+      "gap_between": [
+        2,
+        4
+      ],
+      "missing_indices": [
+        3
+      ]
+    },
+    {
+      "classroom_id": 5,
+      "gap_between": [
+        4,
+        6
+      ],
+      "missing_indices": [
+        5
+      ]
+    },
+    {
+      "classroom_id": 5,
+      "gap_between": [
+        6,
+        8
+      ],
+      "missing_indices": [
+        7
+      ]
+    },
+    {
+      "classroom_id": 5,
+      "gap_between": [
+        8,
+        10
+      ],
+      "missing_indices": [
+        9
+      ]
+    },
+    {
+      "classroom_id": 6,
+      "gap_between": [
+        0,
+        2
+      ],
+      "missing_indices": [
+        1
+      ]
+    },
+    {
+      "classroom_id": 6,
+      "gap_between": [
+        2,
+        4
+      ],
+      "missing_indices": [
+        3
+      ]
+    },
+    {
+      "classroom_id": 6,
+      "gap_between": [
+        4,
+        6
+      ],
+      "missing_indices": [
+        5
+      ]
+    },
+    {
+      "classroom_id": 6,
+      "gap_between": [
+        6,
+        8
+      ],
+      "missing_indices": [
+        7
+      ]
+    },
+    {
+      "classroom_id": 6,
+      "gap_between": [
+        8,
+        10
+      ],
+      "missing_indices": [
+        9
+      ]
+    },
+    {
+      "classroom_id": 7,
+      "gap_between": [
+        0,
+        2
+      ],
+      "missing_indices": [
+        1
+      ]
+    },
+    {
+      "classroom_id": 7,
+      "gap_between": [
+        2,
+        4
+      ],
+      "missing_indices": [
+        3
+      ]
+    },
+    {
+      "classroom_id": 7,
+      "gap_between": [
+        4,
+        6
+      ],
+      "missing_indices": [
+        5
+      ]
+    },
+    {
+      "classroom_id": 7,
+      "gap_between": [
+        6,
+        8
+      ],
+      "missing_indices": [
+        7
+      ]
+    },
+    {
+      "classroom_id": 7,
+      "gap_between": [
+        8,
+        10
+      ],
+      "missing_indices": [
+        9
+      ]
+    }
+  ]
+}

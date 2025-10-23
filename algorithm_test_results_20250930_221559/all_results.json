@@ -1,0 +1,107 @@
+{
+  "GENETIC_ALGORITHM": {
+    "algorithm": "GENETIC_ALGORITHM",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.953907"
+  },
+  "SIMULATED_ANNEALING": {
+    "algorithm": "SIMULATED_ANNEALING",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.953907"
+  },
+  "GREEDY": {
+    "algorithm": "GREEDY",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.953907"
+  },
+  "TABU_SEARCH": {
+    "algorithm": "TABU_SEARCH",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.953907"
+  },
+  "PSO": {
+    "algorithm": "PSO",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.953907"
+  },
+  "ANT_COLONY": {
+    "algorithm": "ANT_COLONY",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.953907"
+  },
+  "HARMONY_SEARCH": {
+    "algorithm": "HARMONY_SEARCH",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.953907"
+  },
+  "FIREFLY": {
+    "algorithm": "FIREFLY",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.953907"
+  },
+  "GREY_WOLF": {
+    "algorithm": "GREY_WOLF",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.954908"
+  },
+  "WHALE_OPTIMIZATION": {
+    "algorithm": "WHALE_OPTIMIZATION",
+    "execution_time": 3.4e-05,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.954942"
+  },
+  "BAT_ALGORITHM": {
+    "algorithm": "BAT_ALGORITHM",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.954942"
+  },
+  "CUCKOO_SEARCH": {
+    "algorithm": "CUCKOO_SEARCH",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.954942"
+  },
+  "DRAGONFLY_ALGORITHM": {
+    "algorithm": "DRAGONFLY_ALGORITHM",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.954942"
+  },
+  "ARTIFICIAL_BEE_COLONY": {
+    "algorithm": "ARTIFICIAL_BEE_COLONY",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.954942"
+  },
+  "NSGA_II": {
+    "algorithm": "NSGA_II",
+    "execution_time": 0.0,
+    "error": "create_algorithm() missing 1 required positional argument: 'algorithm_name'",
+    "success": false,
+    "timestamp": "2025-09-30T22:15:59.954942"
+  }
+}
