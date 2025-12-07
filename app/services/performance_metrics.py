@@ -15,14 +15,15 @@ import os
 
 
 DEFAULT_WEIGHTS = {
-    "CoverageScore": 0.25,      # Kapsam (81 proje tam)
-    "DuplicateScore": 0.20,     # Duplicate olmamalı (0)
+    "CoverageScore": 0.20,      # Kapsam (81 proje tam)
+    "DuplicateScore": 0.15,     # Duplicate olmamalı (0)
     "GapScore": 0.15,          # Gap olmamalı (0)
-    "LateSlotScore": 0.15,     # Cezalı slot kullanımı minimum
+    "LateSlotScore": 0.10,     # Cezalı slot kullanımı minimum
     "RoleComplianceScore": 0.10, # Rol kuralları (sorumlu+jüri)
     "LoadBalanceScore": 0.10,   # Yük dengesi (±1 tolerans)
     "ClassSwitchScore": 0.05,   # Sınıf geçişleri minimum
-    "SessionCountScore": 0.00,  # Oturum sayısı (optimize edilecek)
+    "SessionCountScore": 0.05,  # REVISED: Was 0.00, now 0.05 (session explosion prevention)
+    "JuryRefinementScore": 0.10,  # NEW: Adjusted from 0.15 to balance with SessionCountScore
 }
 
 
@@ -271,6 +272,70 @@ def _normalize_0_100(value: float) -> float:
     return max(0.0, min(100.0, float(value)))
 
 
+def _calculate_jury_refinement_score(assignments: List[Dict[str, Any]], people_types: Dict[Any, str]) -> float:
+    """
+    Calculate jury refinement score based on workload balance and continuity.
+    
+    Args:
+        assignments: List of assignments
+        people_types: Mapping of person IDs to types
+        
+    Returns:
+        Score between 0-100 (higher is better)
+    """
+    if not assignments:
+        return 0.0
+    
+    # Calculate instructor workload (total assignments per instructor)
+    instructor_workloads = {}
+    for assignment in assignments:
+        for instructor_id in assignment.get("instructors", []):
+            instructor_workloads[instructor_id] = instructor_workloads.get(instructor_id, 0) + 1
+    
+    if not instructor_workloads:
+        return 0.0
+    
+    # Calculate workload balance (lower variance is better)
+    workloads = list(instructor_workloads.values())
+    if len(workloads) <= 1:
+        return 100.0
+    
+    mean_workload = sum(workloads) / len(workloads)
+    variance = sum((w - mean_workload) ** 2 for w in workloads) / len(workloads)
+    std_workload = math.sqrt(variance)
+    
+    # Normalize workload balance (0-100)
+    workload_balance = max(0.0, 100.0 - (std_workload * 20.0))  # Penalty for high variance
+    
+    # Calculate continuity score (instructors in same classroom)
+    classroom_continuity = 0.0
+    instructor_classrooms = {}
+    
+    for assignment in assignments:
+        classroom_id = assignment.get("classroom_id")
+        for instructor_id in assignment.get("instructors", []):
+            if instructor_id not in instructor_classrooms:
+                instructor_classrooms[instructor_id] = set()
+            instructor_classrooms[instructor_id].add(classroom_id)
+    
+    # Calculate continuity (instructors using fewer classrooms get higher scores)
+    continuity_scores = []
+    for instructor_id, classrooms in instructor_classrooms.items():
+        if len(classrooms) == 1:
+            continuity_scores.append(100.0)  # Perfect continuity
+        else:
+            # Penalty for classroom changes
+            penalty = (len(classrooms) - 1) * 25.0
+            continuity_scores.append(max(0.0, 100.0 - penalty))
+    
+    avg_continuity = sum(continuity_scores) / len(continuity_scores) if continuity_scores else 0.0
+    
+    # Combined score (weighted average)
+    combined_score = (workload_balance * 0.6) + (avg_continuity * 0.4)
+    
+    return _normalize_0_100(combined_score)
+
+
 def compute(plan: Dict[str, Any], weights: Optional[Dict[str, float]] = None, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Compute performance metrics for a single plan.
 
@@ -383,6 +448,9 @@ def compute(plan: Dict[str, Any], weights: Optional[Dict[str, float]] = None, pa
     extra_sessions = max(0, used_sessions - ideal_sessions)
     SessionCountScore = _normalize_0_100(100.0 - min(100.0, 100.0 * (extra_sessions / max(1, used_sessions)) * p.session_penalty_factor))
 
+    # Jury Refinement Score (NEW)
+    JuryRefinementScore = _calculate_jury_refinement_score(assignments, people_types)
+
     # Weighted total
     perMetric = {
         "CoverageScore": round(CoverageScore, 2),
@@ -393,6 +461,7 @@ def compute(plan: Dict[str, Any], weights: Optional[Dict[str, float]] = None, pa
         "LoadBalanceScore": round(LoadBalanceScore, 2),
         "ClassSwitchScore": round(ClassSwitchScore, 2),
         "SessionCountScore": round(SessionCountScore, 2),
+        "JuryRefinementScore": round(JuryRefinementScore, 2),
     }
 
     total = 0.0

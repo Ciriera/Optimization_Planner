@@ -22,7 +22,9 @@ from app.api.v1.endpoints import (
     final_makeup,
     user_recommendations,
     conflict_resolution,
-    lexicographic
+    lexicographic,
+    notifications,
+    import_endpoints,
 )
 from app.api.v1.endpoints import project_jury
 
@@ -101,4 +103,13 @@ api_router.include_router(user_recommendations.router, prefix="/user-recommendat
 api_router.include_router(conflict_resolution.router, prefix="/conflict-resolution", tags=["conflict-resolution"])
 
 # Lexicographic algorithm endpoints
-api_router.include_router(lexicographic.router, prefix="/lexicographic", tags=["lexicographic"]) 
+api_router.include_router(lexicographic.router, prefix="/lexicographic", tags=["lexicographic"])
+
+# Notification endpoints
+api_router.include_router(notifications.router, prefix="/notification", tags=["notifications"])
+
+# Import endpoints
+api_router.include_router(import_endpoints.router, prefix="/import", tags=["import"])
+
+# Import endpoints
+api_router.include_router(import_endpoints.router, prefix="/import", tags=["import"]) 

@@ -40,6 +40,7 @@ import {
   Cancel,
   Group,
   GroupAdd,
+  Warning,
 } from '@mui/icons-material';
 import { projectService, Project, ProjectCreateInput } from '../services/projectService';
 import { juryService, JuryMember, ProjectJury } from '../services/juryService';
@@ -61,6 +62,8 @@ const Projects: React.FC = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [tabValue, setTabValue] = useState(0);
+  const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<{ id: number; title: string } | null>(null);
   
   // Jury management states
   const [openJuryDialog, setOpenJuryDialog] = useState(false);
@@ -221,13 +224,27 @@ const Projects: React.FC = () => {
     setEditingProject(null);
   };
 
-  // Proje silme
-  const handleDeleteProject = async (projectId: number) => {
-    if (!window.confirm('Bu projeyi silmek istediğinizden emin misiniz?')) return;
+  // Proje silme dialog'unu aç
+  const handleOpenDeleteDialog = (project: Project) => {
+    setProjectToDelete({ id: project.id, title: project.title });
+    setOpenDeleteDialog(true);
+  };
+
+  // Proje silme dialog'unu kapat
+  const handleCloseDeleteDialog = () => {
+    setOpenDeleteDialog(false);
+    setProjectToDelete(null);
+  };
+
+  // Proje silme işlemini gerçekleştir
+  const handleConfirmDelete = async () => {
+    if (!projectToDelete) return;
+    
     try {
       setLoading(true);
-      await api.delete(`/projects/${projectId}`);
+      await api.delete(`/projects/${projectToDelete.id}`);
       setSnack({ open: true, message: 'Proje başarıyla silindi', severity: 'success' });
+      handleCloseDeleteDialog();
       await fetchData();
     } catch (e: any) {
       setSnack({ open: true, message: e?.response?.data?.detail || 'Silme işlemi başarısız oldu', severity: 'error' });
@@ -496,7 +513,7 @@ const Projects: React.FC = () => {
                       >
                         <Edit fontSize="small" />
                       </IconButton>
-                      <IconButton size="small" color="error" onClick={() => handleDeleteProject(project.id)}>
+                      <IconButton size="small" color="error" onClick={() => handleOpenDeleteDialog(project)}>
                         <Delete fontSize="small" />
                       </IconButton>
                     </TableCell>
@@ -603,6 +620,57 @@ const Projects: React.FC = () => {
             startIcon={saving ? <CircularProgress size={16} /> : null}
           >
             {saving ? 'Kaydediliyor...' : editingProject ? 'Güncelle' : 'Oluştur'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={openDeleteDialog} onClose={handleCloseDeleteDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <Warning sx={{ mr: 1, color: 'error.main' }} />
+            Proje Silme Onayı
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Typography variant="body1" gutterBottom>
+              Bu projeyi silmek istediğinizden emin misiniz?
+            </Typography>
+            <Box
+              sx={{
+                mt: 2,
+                p: 2,
+                bgcolor: 'error.50',
+                borderRadius: 1,
+                border: 1,
+                borderColor: 'error.200',
+              }}
+            >
+              <Typography variant="body2" sx={{ fontWeight: 500, color: 'error.main' }}>
+                Silinecek Proje:
+              </Typography>
+              <Typography variant="body1" sx={{ mt: 1, fontWeight: 600 }}>
+                {projectToDelete?.title}
+              </Typography>
+            </Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+              <strong>Uyarı:</strong> Bu işlem geri alınamaz. Proje ile ilişkili tüm veriler kalıcı olarak silinecektir.
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDeleteDialog} variant="outlined">
+            İptal
+          </Button>
+          <Button
+            onClick={handleConfirmDelete}
+            variant="contained"
+            color="error"
+            disabled={loading}
+            startIcon={loading ? <CircularProgress size={16} /> : <Delete />}
+          >
+            {loading ? 'Siliniyor...' : 'Sil'}
           </Button>
         </DialogActions>
       </Dialog>

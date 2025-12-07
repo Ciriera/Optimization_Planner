@@ -205,84 +205,33 @@ const Results: React.FC = () => {
       utilizationRate
     };
 
-    // Çakışma analizi - Gerçek hesaplama
-    const conflictCount = calculateConflicts(projects, schedules);
-    const conflictAnalysis = {
-      totalConflicts: conflictCount,
-      instructorsWithConflicts: 0 // Bu daha detaylı hesaplanabilir
-    };
+    // Çakışma analizi - Schedule verilerinden direkt hesaplama (Planner ile aynı mantık)
+    const conflictAnalysis = calculateConflictsDetailed(schedules);
+    const conflictCount = conflictAnalysis.totalConflicts;
 
-    // Yük dağılımı analizi - Gerçek hesaplama
+    // Yük dağılımı analizi - Planner'daki mantıkla hesaplama
+    const workloadAnalysis = analyzeWorkloadDistributionDetailed(schedules, instructors);
+    
+    // En yoğun ve en az yoğun öğretim üyesini bul
     const workloadMap = new Map<number, number>();
     schedules.forEach((schedule: any) => {
-      // Sorumlu öğretim üyesi
-      if (schedule.responsible_instructor_id) {
-        const count = workloadMap.get(schedule.responsible_instructor_id) || 0;
-        workloadMap.set(schedule.responsible_instructor_id, count + 1);
-      }
-      // Jüri üyeleri
       if (schedule.instructors && Array.isArray(schedule.instructors)) {
         schedule.instructors.forEach((instructor: any) => {
-          if (instructor.id) {
+          if (instructor && !instructor.is_placeholder && instructor.id && instructor.id !== -1) {
             const count = workloadMap.get(instructor.id) || 0;
             workloadMap.set(instructor.id, count + 1);
           }
         });
       }
     });
-
-    const workloads = Array.from(workloadMap.values());
-    const maxWorkload = workloads.length > 0 ? Math.max(...workloads) : 0;
-    const minWorkload = workloads.length > 0 ? Math.min(...workloads) : 0;
-    const avgWorkload = workloads.length > 0 ? Math.round((workloads.reduce((a, b) => a + b, 0) / workloads.length) * 10) / 10 : 0;
-    const maxDifference = maxWorkload - minWorkload;
-
-    // En yoğun öğretim üyesi
+    
     const mostBusyInstructor = workloadMap.size > 0 ? 
-      Array.from(workloadMap.entries())
-        .sort(([,a], [,b]) => b - a)[0] : null;
-
-    // En az yoğun öğretim üyesi
+      Array.from(workloadMap.entries()).sort(([,a], [,b]) => b - a)[0] : null;
     const minWorkloadInstructor = workloadMap.size > 0 ? 
-      Array.from(workloadMap.entries())
-        .sort(([,a], [,b]) => a - b)[0] : null;
+      Array.from(workloadMap.entries()).sort(([,a], [,b]) => a - b)[0] : null;
 
-    // Maksimum yüke sahip instructor(lar)ı bul
-    const maxWorkloadInstructorIds = Array.from(workloadMap.entries())
-      .filter(([_, workload]) => workload === maxWorkload)
-      .map(([instructorId, _]) => instructorId);
-    
-    const maxWorkloadInstructors = maxWorkloadInstructorIds.map(id => {
-      const instructor = instructors.find(i => i.id === id);
-      return instructor ? instructor.full_name || instructor.name : `Instructor ${id}`;
-    });
-
-    // Minimum yüke sahip instructor(lar)ı bul
-    const minWorkloadInstructorIds = Array.from(workloadMap.entries())
-      .filter(([_, workload]) => workload === minWorkload)
-      .map(([instructorId, _]) => instructorId);
-    
-    const minWorkloadInstructors = minWorkloadInstructorIds.map(id => {
-      const instructor = instructors.find(i => i.id === id);
-      return instructor ? instructor.full_name || instructor.name : `Instructor ${id}`;
-    });
-
-    const workloadAnalysis = {
-      maxWorkload,
-      minWorkload,
-      avgWorkload,
-      maxDifference,
-      totalInstructors: workloadMap.size,
-      maxWorkloadInstructors,
-      minWorkloadInstructors
-    };
-
-    // Sınıf değişimi analizi - Basit hesaplama
-    const classroomChangeAnalysis = {
-      totalChanges: 0, // Bu daha detaylı hesaplanabilir
-      instructorsWithChanges: 0,
-      totalInstructors: instructors.length
-    };
+    // Sınıf değişimi analizi - Planner'daki mantıkla hesaplama
+    const classroomChangeAnalysis = analyzeClassroomChangesDetailed(schedules);
 
     // Atama durumu
     const assignmentStatus = {
@@ -291,8 +240,15 @@ const Results: React.FC = () => {
       unassignedProjects: projects.length - schedules.length
     };
 
-    // Memnuniyet skoru - Gerçek hesaplama
-    const satisfactionScore = Math.max(0, Math.round(100 - (conflictCount * 10) - (maxDifference * 5)));
+    // Memnuniyet skoru - Planner'daki mantıkla hesaplama
+    const satisfactionScore = calculateSatisfactionScoreDetailed({
+      totalSchedules: schedules.length,
+      conflictAnalysis,
+      workloadAnalysis,
+      classroomChangeAnalysis,
+      unassignedProjects: assignmentStatus.unassignedProjects,
+      totalProjects: assignmentStatus.totalProjects
+    });
 
     console.log('Performance Debug: Calculated data:', {
       timeAnalysis,
@@ -303,6 +259,7 @@ const Results: React.FC = () => {
       assignmentStatus,
       satisfactionScore
     });
+    
 
     return {
       totalSchedules: schedules.length,
@@ -394,21 +351,106 @@ const Results: React.FC = () => {
         const responsibleInstructor = instructorsData.find((i: any) => i.id === project.responsible_instructor_id);
         const assistantInstructors = project.assistant_instructors || [];
         
-        // Jüri üyelerini birleştir
-        const juryMembers = [
-          { 
-            id: responsibleInstructor?.id,
-            name: responsibleInstructor?.name || 'Bilinmiyor', 
-            role: 'Sorumlu Öğretim Üyesi',
-            isSenior: isSeniorInstructor(responsibleInstructor?.role)
-          },
-          ...assistantInstructors.map((ai: any) => ({ 
-            id: ai.id,
-            name: ai.name, 
-            role: ai.role === 'hoca' ? 'Öğretim Üyesi' : 'Araştırma Görevlisi',
-            isSenior: isSeniorInstructor(ai.role)
-          }))
-        ];
+        // Jüri üyelerini birleştir - schedule.instructors'dan al (jury refinement sonucu)
+        let juryMembers = [];
+        
+        if (schedule?.instructors && Array.isArray(schedule.instructors)) {
+          // DEBUG: Log jury refinement data
+          console.log('🔍 Results Jury DEBUG:', {
+            projectId: project.id,
+            projectTitle: project.title,
+            scheduleInstructors: schedule.instructors,
+            instructorsCount: schedule.instructors.length
+          });
+          
+          // Backend'den gelen schedule.instructors array'i formatı:
+          // [responsible (role:'responsible'), jury1 (role:'jury'), jury2_placeholder, ...]
+          // Sadece jüri üyelerini (role:'jury') ve placeholder'ları dahil et
+          const responsibleId = project.responsible_instructor_id;
+          juryMembers = schedule.instructors
+            .filter((inst: any) => {
+              // String kontrolü: "[Araştırma Görevlisi]" placeholder'ı için
+              if (typeof inst === 'string' && inst === '[Araştırma Görevlisi]') {
+                return true; // J2 placeholder'ı her zaman dahil et
+              }
+              // Object kontrolü
+              if (typeof inst === 'object') {
+                // Placeholder kontrolü: is_placeholder veya id: -1 veya name: '[Araştırma Görevlisi]'
+                if (inst?.is_placeholder === true || 
+                    inst?.id === -1 || 
+                    inst?.name === '[Araştırma Görevlisi]') {
+                  return true; // J2 placeholder'ı her zaman dahil et
+                }
+                // Backend'de role:'responsible' olan ilk instructor'ı hariç tut
+                // Ayrıca responsibleId ile eşleşen instructor'ı da hariç tut (güvenlik için)
+                if (inst?.role === 'responsible') {
+                  return false; // Responsible instructor'ı dahil etme
+                }
+                // Jüri üyelerini dahil et (role:'jury' veya role belirtilmemiş)
+                return inst.id && inst.id !== responsibleId;
+              }
+              return false;
+            })
+            .map((inst: any) => {
+              // String kontrolü: "[Araştırma Görevlisi]" placeholder'ı
+              if (typeof inst === 'string' && inst === '[Araştırma Görevlisi]') {
+                return {
+                  id: -1,
+                  name: '[Araştırma Görevlisi]',
+                  role: 'Araştırma Görevlisi',
+                  isSenior: false
+                };
+              }
+              
+              // Object kontrolü
+              if (typeof inst === 'object') {
+                // Placeholder kontrolü: is_placeholder flag'i veya özel ID'ler
+                const isPlaceholder = inst.is_placeholder === true || 
+                                      inst.id === -1 || 
+                                      inst.id === 'RA_PLACEHOLDER' ||
+                                      inst.name === '[Araştırma Görevlisi]';
+                
+                // Gerçek öğretim üyeleri için 'Öğretim Üyesi', placeholder'lar için 'Araştırma Görevlisi'
+                const displayRole = isPlaceholder ? 'Araştırma Görevlisi' : 'Öğretim Üyesi';
+                
+                // id kontrolü: -1 veya gerçek id olabilir
+                const juryId = inst.id !== undefined ? inst.id : -1;
+                
+                return {
+                  id: juryId,
+                  name: inst.full_name || inst.name || '[Araştırma Görevlisi]',
+                  role: displayRole,
+                  isSenior: isSeniorInstructor(inst.role || inst.type)
+                };
+              }
+              
+              return null;
+            })
+            .filter((m: any) => m !== null); // null değerleri temizle
+          
+          // DEBUG: Log final jury result
+          console.log('🎯 Results Jury Result:', {
+            projectId: project.id,
+            juryCount: juryMembers.length,
+            juryMembers: juryMembers
+          });
+        } else {
+          // Fallback: eski yöntem (sorumlu + assistant)
+          juryMembers = [
+            { 
+              id: responsibleInstructor?.id,
+              name: responsibleInstructor?.name || 'Bilinmiyor', 
+              role: 'Sorumlu Öğretim Üyesi',
+              isSenior: isSeniorInstructor(responsibleInstructor?.role)
+            },
+            ...assistantInstructors.map((ai: any) => ({ 
+              id: ai.id,
+              name: ai.name, 
+              role: ai.role === 'hoca' ? 'Öğretim Üyesi' : 'Araştırma Görevlisi',
+              isSenior: isSeniorInstructor(ai.role)
+            }))
+          ];
+        }
         
         return {
           id: project.id,
@@ -436,12 +478,21 @@ const Results: React.FC = () => {
         const responsibleProjects = projectsData.filter((p: any) => p.responsible_instructor_id === instructor.id);
         
         // Jüri üyesi olduğu projeler (schedule.instructors'dan)
+        // Backend'den gelen array'de responsible instructor da var, sadece role:'jury' olanları say
         const juryProjects = projectsData.filter((p: any) => {
           const schedule = schedulesData.find((s: any) => s.project_id === p.id);
           if (schedule?.instructors && Array.isArray(schedule.instructors)) {
-            return schedule.instructors.some((inst: any) => 
-              inst.id === instructor.id && inst.id !== p.responsible_instructor_id
-            );
+            return schedule.instructors.some((inst: any) => {
+              // Placeholder'ları hariç tut
+              if (inst?.is_placeholder === true || inst?.id === -1) {
+                return false;
+              }
+              // Sadece jüri üyesi olanları dahil et (role:'jury' veya role belirtilmemiş ama responsible değil)
+              if (inst?.role === 'responsible') {
+                return false; // Responsible instructor'ı dahil etme
+              }
+              return inst.id === instructor.id;
+            });
           }
           return false;
         });
@@ -470,41 +521,22 @@ const Results: React.FC = () => {
           })
         ].length;
         
-        // Debug için - TÜM instructorlar için
-        console.log(`DEBUG ${instructor.name} (ID: ${instructor.id}):`, {
+        // DEBUG: Log workload calculation
+        console.log(`🔍 Workload DEBUG ${instructor.name}:`, {
           responsibleProjects: responsibleProjects.length,
           juryProjects: juryProjects.length,
-          totalJuryCount: juryProjects.length, // Sadece jüri üyeliği
-          bitirmeCount,
-          araCount,
-          allProjectsCount: projectsData.length,
-          schedulesCount: schedulesData.length,
-          responsibleTypes: responsibleProjects.map((p: any) => ({ 
-            id: p.id, 
-            type: p.type, 
-            project_type: p.project_type 
-          })),
-          juryTypes: juryProjects.map((p: any) => ({ 
-            id: p.id, 
-            type: p.type, 
-            project_type: p.project_type 
-          })),
-          allProjectTypes: projectsData.map((p: any) => ({ 
-            id: p.id, 
-            type: p.type, 
-            project_type: p.project_type 
-          })),
-          scheduleDetails: schedulesData.map((s: any) => ({
-            project_id: s.project_id,
-            instructors: s.instructors?.length || 0,
-            hasInstructors: !!s.instructors
+          totalJuryCount: juryProjects.length,
+          juryProjectDetails: juryProjects.map((p: any) => ({
+            id: p.id,
+            title: p.title,
+            scheduleInstructors: schedulesData.find((s: any) => s.project_id === p.id)?.instructors?.length || 0
           }))
         });
         const totalJuryCount = juryProjects.length; // Sadece jüri üyesi olarak çalışılan projeler
         
         return {
           id: instructor.id,
-          name: instructor.name,
+          name: instructor.full_name || instructor.name || `Hoca ${instructor.id}`,
           role: instructor.role,
           isSenior: isSeniorInstructor(instructor.role),
           finalCount: bitirmeCount,
@@ -521,14 +553,32 @@ const Results: React.FC = () => {
       const totalProjects = projectsData.length;
       const assignedProjects = schedulesData.length;
       
-      // Çakışma sayısını hesapla
-      const conflictCount = calculateConflicts(projectsWithDetails, schedulesData);
+      // Çakışma sayısını hesapla - schedule verilerinden direkt (Planner ile aynı mantık)
+      const conflictAnalysis = calculateConflictsDetailed(schedulesData);
+      const conflictCount = conflictAnalysis.totalConflicts;
       
-      // Yük dağılımı analizi
-      const loadAnalysis = analyzeLoadDistribution(workloadData);
+      // Yük dağılımı analizi - Planner.tsx'teki mantıkla
+      const allInstructorWorkloads = calculateAllInstructorWorkloads(schedulesData, instructorsData);
+      const loadAnalysis = analyzeLoadDistribution(allInstructorWorkloads, instructorsData);
       
-      // Sınıf değişimi analizi
-      const classroomChanges = analyzeClassroomChanges(instructorsData, schedulesData);
+      // DEBUG: Log workload analysis
+      console.log('🔍 Load Analysis DEBUG:', {
+        allInstructorWorkloads: allInstructorWorkloads.map((w: any) => ({ 
+          name: w.instructorName, 
+          totalCount: w.totalCount,
+          responsibleCount: w.responsibleCount,
+          juryCount: w.juryCount
+        })),
+        loadAnalysis
+      });
+      
+      // Sınıf değişimi analizi - Planner.tsx'teki mantıkla
+      const classroomChanges = analyzeClassroomChanges(schedulesData);
+      
+      // DEBUG: Log classroom changes
+      console.log('🔍 Classroom Changes DEBUG:', {
+        classroomChanges
+      });
       
       // Skor hesaplama
       const satisfactionScore = calculateSatisfactionScore({
@@ -537,6 +587,19 @@ const Results: React.FC = () => {
         classroomChanges,
         totalProjects,
         assignedProjects
+      });
+      
+      // DEBUG: Log jury metrics
+      const totalJuryMembers = projectsWithDetails.reduce((sum: number, p: any) => sum + p.juryCount, 0);
+      const averageJuryPerProject = Math.round((totalJuryMembers / totalProjects) * 10) / 10;
+      
+      console.log('🔍 Results Analytics DEBUG:', {
+        totalProjects,
+        assignedProjects,
+        totalJuryMembers,
+        averageJuryPerProject,
+        projectsWithJury: projectsWithDetails.filter((p: any) => p.juryCount > 0).length,
+        juryCounts: projectsWithDetails.map((p: any) => ({ id: p.id, title: p.title, juryCount: p.juryCount }))
       });
       
       setMetrics({
@@ -548,8 +611,8 @@ const Results: React.FC = () => {
         algorithmUsed: lastAlgorithmRun ? getAlgorithmDisplayName(lastAlgorithmRun.algorithm_name) : 'Fallback Algorithm',
         executionTime: lastAlgorithmRun ? (lastAlgorithmRun.execution_time || 0) : 0,
         utilizationRate: Math.round((assignedProjects / totalProjects) * 100 * 10) / 10,
-        totalJuryMembers: projectsWithDetails.reduce((sum: number, p: any) => sum + p.juryCount, 0),
-        averageJuryPerProject: Math.round((projectsWithDetails.reduce((sum: number, p: any) => sum + p.juryCount, 0) / totalProjects) * 10) / 10,
+        totalJuryMembers: totalJuryMembers,
+        averageJuryPerProject: averageJuryPerProject,
         loadAnalysis: loadAnalysis,
         classroomChanges: classroomChanges
       });
@@ -651,12 +714,122 @@ const Results: React.FC = () => {
     return conflictCount;
   };
 
-  const analyzeLoadDistribution = (workloads: any[]) => {
-    const seniors = workloads.filter(w => w.isSenior);
-    const assistants = workloads.filter(w => !w.isSenior);
+  // Planner.tsx'teki gibi tüm öğretim görevlilerinin detaylı iş yükünü hesapla (sorumlu + jüri)
+  const calculateAllInstructorWorkloads = (schedules: any[], instructors: any[]) => {
+    const workloadMap = new Map<number, {
+      responsibleCount: number;
+      juryCount: number;
+      totalCount: number;
+      instructor: any;
+    }>();
 
-    const seniorLoads = seniors.map(s => s.totalJuryCount);
-    const assistantLoads = assistants.map(a => a.totalJuryCount);
+    // Önce tüm instructor'ları map'e ekle
+    instructors.forEach((instructor: any) => {
+      workloadMap.set(instructor.id, {
+        responsibleCount: 0,
+        juryCount: 0,
+        totalCount: 0,
+        instructor
+      });
+    });
+
+    // Schedule'ları işle
+    schedules.forEach((schedule: any) => {
+      const responsibleId = schedule.responsible_instructor_id;
+      
+      // Sorumlu instructor'ı say
+      if (responsibleId) {
+        const workload = workloadMap.get(responsibleId);
+        if (workload) {
+          workload.responsibleCount += 1;
+          workload.totalCount += 1;
+        } else {
+          // Eğer instructor bulunamazsa yeni kayıt oluştur
+          const instructor = instructors.find((i: any) => i.id === responsibleId);
+          workloadMap.set(responsibleId, {
+            responsibleCount: 1,
+            juryCount: 0,
+            totalCount: 1,
+            instructor: instructor || { id: responsibleId, name: `Instructor ${responsibleId}` }
+          });
+        }
+      }
+
+      // Jüri üyelerini say
+      if (schedule.instructors && Array.isArray(schedule.instructors)) {
+        schedule.instructors.forEach((inst: any) => {
+          // String kontrolü: "[Araştırma Görevlisi]" placeholder'ını atla (iş yüküne dahil edilmez)
+          if (typeof inst === 'string' && inst === '[Araştırma Görevlisi]') {
+            return; // Placeholder'ı iş yükü hesaplamalarına dahil etme
+          }
+          
+          // Placeholder kontrolü
+          if (inst?.is_placeholder === true || inst?.id === -1 || inst?.name === '[Araştırma Görevlisi]') {
+            return; // Placeholder'ı iş yükü hesaplamalarına dahil etme
+          }
+          
+          const juryId = typeof inst === 'object' ? inst.id : inst;
+          // Sorumlu dışındaki jüri üyelerini say
+          if (juryId && juryId !== responsibleId) {
+            const workload = workloadMap.get(juryId);
+            if (workload) {
+              workload.juryCount += 1;
+              workload.totalCount += 1;
+            } else {
+              // Eğer instructor bulunamazsa yeni kayıt oluştur
+              const instructor = instructors.find((i: any) => i.id === juryId);
+              workloadMap.set(juryId, {
+                responsibleCount: 0,
+                juryCount: 1,
+                totalCount: 1,
+                instructor: instructor || { id: juryId, name: `Instructor ${juryId}` }
+              });
+            }
+          }
+        });
+      }
+    });
+
+    // Liste olarak döndür ve sırala (toplam yüküne göre azalan)
+    const workloadList = Array.from(workloadMap.values())
+      .map(item => ({
+        instructorId: item.instructor.id,
+        instructorName: item.instructor.name || item.instructor.full_name || `Instructor ${item.instructor.id}`,
+        responsibleCount: item.responsibleCount,
+        juryCount: item.juryCount,
+        totalCount: item.totalCount,
+        instructor: item.instructor
+      }))
+      .sort((a, b) => b.totalCount - a.totalCount);
+
+    return workloadList;
+  };
+
+  const analyzeLoadDistribution = (allInstructorWorkloads: any[], instructors: any[]) => {
+    // Instructor type/role mapping oluştur
+    const instructorTypeMap = new Map<number, { isSenior: boolean; type: string }>();
+    instructors.forEach((inst: any) => {
+      if (inst.id) {
+        const role = inst.role || '';
+        const type = (inst.type || '').toString().toLowerCase();
+        const isSenior = isSeniorInstructor(role) || type === 'instructor';
+        instructorTypeMap.set(inst.id, { isSenior, type });
+      }
+    });
+
+    // Senior ve assistant'ları ayır
+    const seniors = allInstructorWorkloads.filter(w => {
+      const typeInfo = instructorTypeMap.get(w.instructorId);
+      return typeInfo?.isSenior === true;
+    });
+    const assistants = allInstructorWorkloads.filter(w => {
+      const typeInfo = instructorTypeMap.get(w.instructorId);
+      return typeInfo?.isSenior === false;
+    });
+
+    // Sadece yükü olan instructor'ları al (totalCount > 0)
+    const seniorLoads = seniors.filter(s => s.totalCount > 0).map(s => s.totalCount);
+    const assistantLoads = assistants.filter(a => a.totalCount > 0).map(a => a.totalCount);
 
     const seniorMaxDiff = seniorLoads.length > 0 ? Math.max(...seniorLoads) - Math.min(...seniorLoads) : 0;
     const assistantMaxDiff = assistantLoads.length > 0 ? Math.max(...assistantLoads) - Math.min(...assistantLoads) : 0;
@@ -669,26 +842,21 @@ const Results: React.FC = () => {
     };
   };
 
-  const analyzeClassroomChanges = (instructors: any[], schedules: any[]) => {
+  const analyzeClassroomChanges = (schedules: any[]) => {
+    // Planner.tsx'teki implementasyon ile BİREBİR AYNI
     const instructorClassrooms = new Map<number, Set<number>>();
     let totalChanges = 0;
     let instructorsWithChanges = 0;
 
     schedules.forEach((schedule: any) => {
-      const project = projects.find(p => p.id === schedule.project_id);
-      if (!project) return;
-
-      // SADECE SORUMLU ÖĞRETİM ÜYESİ için sınıf değişimi kontrolü
-      // Assistant jüri üyeleri sınıf değiştirebilir, bu yüzden onları dahil etmiyoruz
-      if (project.responsible_instructor_id) {
-        if (!instructorClassrooms.has(project.responsible_instructor_id)) {
-          instructorClassrooms.set(project.responsible_instructor_id, new Set());
+      if (schedule.responsible_instructor_id && schedule.classroom_id) {
+        if (!instructorClassrooms.has(schedule.responsible_instructor_id)) {
+          instructorClassrooms.set(schedule.responsible_instructor_id, new Set());
         }
-        instructorClassrooms.get(project.responsible_instructor_id)!.add(schedule.classroom_id);
+        instructorClassrooms.get(schedule.responsible_instructor_id)!.add(schedule.classroom_id);
       }
     });
 
-    // Sadece responsible instructor'lar için sınıf değişimi kontrolü
     instructorClassrooms.forEach((classrooms, instructorId) => {
       if (classrooms.size > 1) {
         instructorsWithChanges++;
@@ -696,41 +864,43 @@ const Results: React.FC = () => {
       }
     });
 
-    // Sadece responsible instructor'ları say
-    const responsibleInstructorIds = projects.map((p: any) => p.responsible_instructor_id).filter(Boolean);
-    const responsibleInstructors = Array.from(new Set(responsibleInstructorIds));
-
     return {
       totalChanges,
       instructorsWithChanges,
-      totalInstructors: responsibleInstructors.length
+      totalInstructors: instructorClassrooms.size
     };
   };
 
   const calculateSatisfactionScore = (data: any) => {
     let score = 100;
+    const totalSchedules = data.assignedProjects || 0;
     
-    // Çakışma cezası (çakışma başına -10 puan)
-    score -= data.conflictCount * 10;
+    // Çakışma cezası - Toplam schedule'a göre normalize edilmiş (max 25 puan)
+    if (data.conflictCount > 0 && totalSchedules > 0) {
+      const conflictRate = data.conflictCount / totalSchedules;
+      score -= Math.min(conflictRate * 50, 25);
+    }
     
-    // Yük dağılımı cezası
+    // Yük dağılımı cezası - Daha toleranslı (max 20 puan)
     if (data.loadAnalysis.seniorMaxDiff > 2) {
-      score -= (data.loadAnalysis.seniorMaxDiff - 2) * 5;
+      const penalty = Math.min((data.loadAnalysis.seniorMaxDiff - 2) * 3, 10);
+      score -= penalty;
     }
     if (data.loadAnalysis.assistantMaxDiff > 2) {
-      score -= (data.loadAnalysis.assistantMaxDiff - 2) * 5;
+      const penalty = Math.min((data.loadAnalysis.assistantMaxDiff - 2) * 3, 10);
+      score -= penalty;
     }
     
-    // Sınıf değişimi cezası
-    if (data.classroomChanges.instructorsWithChanges > 0) {
+    // Sınıf değişimi cezası - Daha düşük (max 15 puan)
+    if (data.classroomChanges.instructorsWithChanges > 0 && data.classroomChanges.totalInstructors > 0) {
       const changeRate = data.classroomChanges.instructorsWithChanges / data.classroomChanges.totalInstructors;
-      score -= changeRate * 20;
+      score -= Math.min(changeRate * 30, 15);
     }
     
-    // Atanmamış proje cezası
-    if (data.unassignedProjects > 0) {
+    // Atanmamış proje cezası - Orantılı ama makul (max 30 puan)
+    if (data.unassignedProjects > 0 && data.totalProjects > 0) {
       const unassignedRate = data.unassignedProjects / data.totalProjects;
-      score -= unassignedRate * 30;
+      score -= Math.min(unassignedRate * 40, 30);
     }
     
     return Math.max(0, Math.round(score));
@@ -742,14 +912,27 @@ const Results: React.FC = () => {
     let conflictCount = 0;
 
     schedules.forEach((schedule: any) => {
-      if (!schedule.timeslot_id || !schedule.classroom_id || !schedule.responsible_instructor_id) return;
+      if (!schedule.timeslot_id || !schedule.classroom_id) return;
 
-      const instructorId = schedule.responsible_instructor_id;
-      if (!instructorTimeslots.has(instructorId)) {
-        instructorTimeslots.set(instructorId, new Set());
+      // Responsible instructor'ı bul - schedule'dan veya project'ten
+      let responsibleInstructorId = schedule.project?.responsible_instructor_id || 
+                                   schedule.responsible_instructor_id;
+      
+      // Eğer schedule.instructors array'i varsa, ilk eleman (role:'responsible') responsible instructor
+      if (!responsibleInstructorId && schedule.instructors && Array.isArray(schedule.instructors) && schedule.instructors.length > 0) {
+        const firstInstructor = schedule.instructors[0];
+        if (firstInstructor?.role === 'responsible' && firstInstructor?.id) {
+          responsibleInstructorId = firstInstructor.id;
+        }
       }
 
-      const existingTimeslots = instructorTimeslots.get(instructorId)!;
+      if (!responsibleInstructorId) return;
+
+      if (!instructorTimeslots.has(responsibleInstructorId)) {
+        instructorTimeslots.set(responsibleInstructorId, new Set());
+      }
+
+      const existingTimeslots = instructorTimeslots.get(responsibleInstructorId)!;
       if (existingTimeslots.has(schedule.timeslot_id)) {
         conflictCount++;
       } else {
@@ -767,22 +950,47 @@ const Results: React.FC = () => {
   const analyzeWorkloadDistributionDetailed = (schedules: any[], instructors: any[]) => {
     const workloadMap = new Map<number, number>();
     
-    // Her schedule için hem sorumlu hem de jüri üyelerini hesapla
-    schedules.forEach((schedule: any) => {
-      // Sorumlu öğretim üyesi
-      if (schedule.responsible_instructor_id) {
-        const count = workloadMap.get(schedule.responsible_instructor_id) || 0;
-        workloadMap.set(schedule.responsible_instructor_id, count + 1);
+    // Instructor type mapping - backend ile uyumlu
+    // Backend'de sadece "hoca" (type="instructor") öğretim üyeleri için yük dengesi hesaplanıyor
+    const instructorTypeMap = new Map<number, string>();
+    instructors.forEach((inst: any) => {
+      if (inst.id) {
+        // Type kontrolü: type, role veya instructor_type alanlarından biri olabilir
+        const type = (inst.type || inst.role || inst.instructor_type || '').toString().toLowerCase();
+        instructorTypeMap.set(inst.id, type);
       }
-      
-      // Jüri üyeleri (instructors array'inde)
+    });
+    
+    // Her schedule için hem sorumlu hem de jüri üyelerini hesapla
+    // Backend'den gelen schedule.instructors array'i formatı:
+    // [responsible (role:'responsible'), jury1 (role:'jury'), jury2_placeholder, ...]
+    schedules.forEach((schedule: any) => {
+      // Tüm instructors array'ini kullanarak workload hesapla
+      // Responsible instructor zaten array'in ilk elemanı, tekrar eklemeye gerek yok
       if (schedule.instructors && Array.isArray(schedule.instructors)) {
         schedule.instructors.forEach((instructor: any) => {
-          if (instructor.id) {
-            const count = workloadMap.get(instructor.id) || 0;
-            workloadMap.set(instructor.id, count + 1);
+          // Placeholder'ları (J2) dahil etme - sadece gerçek instructor'ları say
+          if (instructor && !instructor.is_placeholder && instructor.id && instructor.id !== -1) {
+            // Backend ile uyumlu: sadece "hoca" (instructor) tipindeki öğretim üyelerini dahil et
+            const instructorType = instructorTypeMap.get(instructor.id) || '';
+            // Type kontrolü: "instructor", "hoca" veya boş (varsayılan olarak instructor kabul et)
+            if (!instructorType || instructorType === 'instructor' || instructorType === 'hoca' || instructorType.includes('instructor')) {
+              const count = workloadMap.get(instructor.id) || 0;
+              workloadMap.set(instructor.id, count + 1);
+            }
           }
         });
+      } else {
+        // Fallback: Eğer instructors array yoksa, responsible_instructor_id'yi kullan
+        const responsibleId = schedule.responsible_instructor_id || schedule.project?.responsible_instructor_id;
+        if (responsibleId) {
+          const instructorType = instructorTypeMap.get(responsibleId) || '';
+          // Sadece "instructor" tipindeki öğretim üyelerini dahil et
+          if (!instructorType || instructorType === 'instructor' || instructorType === 'hoca' || instructorType.includes('instructor')) {
+            const count = workloadMap.get(responsibleId) || 0;
+            workloadMap.set(responsibleId, count + 1);
+          }
+        }
       }
     });
 
@@ -794,6 +1002,9 @@ const Results: React.FC = () => {
         minWorkload: 0,
         avgWorkload: 0,
         maxDifference: 0,
+        stdDeviation: 0,
+        variance: 0,
+        loadBalanceScore: 0,
         totalInstructors: 0
       };
     }
@@ -801,12 +1012,29 @@ const Results: React.FC = () => {
     const maxWorkload = Math.max(...workloads);
     const minWorkload = Math.min(...workloads);
     const avgWorkload = workloads.reduce((a, b) => a + b, 0) / workloads.length;
+    
+    // Standart sapma hesaplama (backend performans metrikleri ile uyumlu)
+    const variance = workloads.reduce((sum, load) => sum + Math.pow(load - avgWorkload, 2), 0) / workloads.length;
+    const stdDeviation = Math.sqrt(variance);
+    
+    // Load Balance Score hesaplama (backend ile uyumlu)
+    // Backend'de: std <= 0.5 -> 100, std >= 2.0 -> 0 (threshold=0.5, span=1.5)
+    const loadStdThreshold = 0.5;
+    const loadStdSpan = 1.5;
+    let loadBalanceScore = 100.0;
+    if (stdDeviation > loadStdThreshold) {
+      const over = Math.min(1.0, (stdDeviation - loadStdThreshold) / Math.max(1e-6, loadStdSpan));
+      loadBalanceScore = Math.max(0, Math.min(100, 100.0 * (1.0 - over)));
+    }
 
     return {
       maxWorkload,
       minWorkload,
       avgWorkload: Math.round(avgWorkload * 10) / 10,
       maxDifference: maxWorkload - minWorkload,
+      stdDeviation: Math.round(stdDeviation * 100) / 100,
+      variance: Math.round(variance * 100) / 100,
+      loadBalanceScore: Math.round(loadBalanceScore * 10) / 10,
       totalInstructors: workloadMap.size
     };
   };
@@ -817,24 +1045,25 @@ const Results: React.FC = () => {
     let instructorsWithChanges = 0;
 
     schedules.forEach((schedule: any) => {
-      // Sorumlu öğretim üyesi
-      if (schedule.responsible_instructor_id && schedule.classroom_id) {
-        if (!instructorClassrooms.has(schedule.responsible_instructor_id)) {
-          instructorClassrooms.set(schedule.responsible_instructor_id, new Set());
-        }
-        instructorClassrooms.get(schedule.responsible_instructor_id)!.add(schedule.classroom_id);
-      }
+      // Responsible instructor'ı bul - schedule'dan veya project'ten
+      let responsibleInstructorId = schedule.project?.responsible_instructor_id || 
+                                   schedule.responsible_instructor_id;
       
-      // Jüri üyeleri (instructors array'inde)
-      if (schedule.instructors && Array.isArray(schedule.instructors) && schedule.classroom_id) {
-        schedule.instructors.forEach((instructor: any) => {
-          if (instructor.id) {
-            if (!instructorClassrooms.has(instructor.id)) {
-              instructorClassrooms.set(instructor.id, new Set());
-            }
-            instructorClassrooms.get(instructor.id)!.add(schedule.classroom_id);
-          }
-        });
+      // Eğer schedule.instructors array'i varsa, ilk eleman (role:'responsible') responsible instructor
+      if (!responsibleInstructorId && schedule.instructors && Array.isArray(schedule.instructors) && schedule.instructors.length > 0) {
+        const firstInstructor = schedule.instructors[0];
+        if (firstInstructor?.role === 'responsible' && firstInstructor?.id) {
+          responsibleInstructorId = firstInstructor.id;
+        }
+      }
+
+      // SADECE SORUMLU ÖĞRETİM ÜYESİ için sınıf değişimi kontrolü
+      // Assistant jüri üyeleri sınıf değiştirebilir, bu yüzden onları dahil etmiyoruz
+      if (responsibleInstructorId && schedule.classroom_id) {
+        if (!instructorClassrooms.has(responsibleInstructorId)) {
+          instructorClassrooms.set(responsibleInstructorId, new Set());
+        }
+        instructorClassrooms.get(responsibleInstructorId)!.add(schedule.classroom_id);
       }
     });
 
@@ -854,25 +1083,32 @@ const Results: React.FC = () => {
 
   const calculateSatisfactionScoreDetailed = (data: any) => {
     let score = 100;
+    const totalSchedules = data.totalSchedules || data.conflictAnalysis?.totalSchedules || 0;
     
-    // Çakışma cezası
-    score -= data.conflictAnalysis.totalConflicts * 10;
-    
-    // Yük dağılımı cezası
-    if (data.workloadAnalysis.maxDifference > 2) {
-      score -= (data.workloadAnalysis.maxDifference - 2) * 5;
+    // Çakışma cezası - Toplam schedule'a göre normalize edilmiş (max 25 puan)
+    const totalConflicts = data.conflictAnalysis?.totalConflicts || 0;
+    if (totalConflicts > 0 && totalSchedules > 0) {
+      const conflictRate = totalConflicts / totalSchedules;
+      score -= Math.min(conflictRate * 50, 25);
     }
     
-    // Sınıf değişimi cezası
-    if (data.classroomChangeAnalysis.instructorsWithChanges > 0) {
+    // Yük dağılımı cezası - Daha toleranslı (max 20 puan)
+    const maxDifference = data.workloadAnalysis?.maxDifference || 0;
+    if (maxDifference > 2) {
+      const penalty = Math.min((maxDifference - 2) * 3, 20);
+      score -= penalty;
+    }
+    
+    // Sınıf değişimi cezası - Daha düşük (max 15 puan)
+    if (data.classroomChangeAnalysis?.instructorsWithChanges > 0 && data.classroomChangeAnalysis?.totalInstructors > 0) {
       const changeRate = data.classroomChangeAnalysis.instructorsWithChanges / data.classroomChangeAnalysis.totalInstructors;
-      score -= changeRate * 20;
+      score -= Math.min(changeRate * 30, 15);
     }
     
-    // Atanmamış proje cezası
-    if (data.unassignedProjects > 0) {
+    // Atanmamış proje cezası - Orantılı ama makul (max 30 puan)
+    if (data.unassignedProjects > 0 && data.totalProjects > 0) {
       const unassignedRate = data.unassignedProjects / data.totalProjects;
-      score -= unassignedRate * 30;
+      score -= Math.min(unassignedRate * 40, 30);
     }
     
     return Math.max(0, Math.round(score));
@@ -1155,11 +1391,38 @@ const Results: React.FC = () => {
               const schedule = schedules.find((s: any) => s.project_id === project.id);
               // SADECE algoritmanın ürettiği gerçek jüri üyelerini kullan (schedule.instructors)
               // Placeholder jürileri (assistant_instructors) tamamen kaldır
+              // Sadece jüri üyelerini dahil et (sorumlu hariç)
+              // İlk instructor sorumlu, geri kalanlar jüri
+              // Backend'den gelen schedule.instructors array'i formatı:
+              // [responsible (role:'responsible'), jury1 (role:'jury'), jury2_placeholder, ...]
+              // Sadece jüri üyelerini (role:'jury') ve placeholder'ları göster
               const juryMembers = schedule?.instructors && Array.isArray(schedule.instructors) 
-                ? schedule.instructors.map((inst: any) => ({ 
-                    name: inst.full_name || inst.name || `Hoca ${inst.id}`, 
-                    role: inst.role === 'hoca' ? 'Öğretim Üyesi' : 'Araştırma Görevlisi' 
-                  }))
+                ? schedule.instructors
+                    .filter((inst: any) => {
+                      // Placeholder'ları dahil et
+                      if (inst?.is_placeholder === true || inst?.id === -1 || inst?.name === '[Araştırma Görevlisi]') {
+                        return true;
+                      }
+                      // Responsible instructor'ı hariç tut (role:'responsible' veya ilk eleman)
+                      if (inst?.role === 'responsible') {
+                        return false;
+                      }
+                      // Jüri üyelerini dahil et (role:'jury' veya role belirtilmemiş)
+                      return inst.id && inst.id !== project.responsible_instructor_id;
+                    })
+                    .map((inst: any) => {
+                      // Placeholder için özel işleme
+                      if (inst?.is_placeholder === true || inst?.id === -1 || inst?.name === '[Araştırma Görevlisi]') {
+                        return {
+                          name: '[Araştırma Görevlisi]',
+                          role: 'Araştırma Görevlisi'
+                        };
+                      }
+                      return {
+                        name: inst.full_name || inst.name || `Hoca ${inst.id}`,
+                        role: inst.type === 'instructor' || inst.role === 'jury' ? 'Öğretim Üyesi' : 'Araştırma Görevlisi'
+                      };
+                    })
                 : [];
               
               return (
@@ -1455,22 +1718,50 @@ const Results: React.FC = () => {
                       </Box>
 
                       {/* Yük Dağılımı Analizi */}
-                      <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2, border: '1px solid', borderColor: performanceData?.workloadAnalysis?.maxDifference <= 2 ? 'success.main' : 'warning.main' }}>
+                      <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2, border: '1px solid', borderColor: performanceData?.workloadAnalysis?.stdDeviation <= 0.5 ? 'success.main' : performanceData?.workloadAnalysis?.stdDeviation <= 2.0 ? 'warning.main' : 'error.main' }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                          {performanceData?.workloadAnalysis?.maxDifference <= 2 ? 
+                          {performanceData?.workloadAnalysis?.stdDeviation <= 0.5 ? 
                             <CheckCircle sx={{ fontSize: 20, color: 'success.main' }} /> : 
-                            <Warning sx={{ fontSize: 20, color: 'warning.main' }} />
+                            performanceData?.workloadAnalysis?.stdDeviation <= 2.0 ?
+                            <Warning sx={{ fontSize: 20, color: 'warning.main' }} /> :
+                            <Error sx={{ fontSize: 20, color: 'error.main' }} />
                           }
                           <Typography variant="body2" sx={{ fontWeight: 600 }}>
                             Yük Dağılımı
                           </Typography>
                         </Box>
-                        <Typography variant="h6" sx={{ fontWeight: 600, color: performanceData?.workloadAnalysis?.maxDifference <= 2 ? 'success.main' : 'warning.main' }}>
-                          {performanceData?.workloadAnalysis?.maxDifference || 0}
+                        <Typography variant="h6" sx={{ fontWeight: 600, color: performanceData?.workloadAnalysis?.stdDeviation <= 0.5 ? 'success.main' : performanceData?.workloadAnalysis?.stdDeviation <= 2.0 ? 'warning.main' : 'error.main' }}>
+                          {performanceData?.workloadAnalysis?.loadBalanceScore !== undefined 
+                            ? `${performanceData.workloadAnalysis.loadBalanceScore}` 
+                            : performanceData?.workloadAnalysis?.stdDeviation !== undefined 
+                            ? `${performanceData.workloadAnalysis.stdDeviation.toFixed(2)} σ`
+                            : '0'}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {performanceData?.workloadAnalysis?.maxDifference <= 2 ? 'Dengeli' : 'Dengesiz'}
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                          {performanceData?.workloadAnalysis?.stdDeviation <= 0.5 ? 'Mükemmel Denge' : 
+                           performanceData?.workloadAnalysis?.stdDeviation <= 2.0 ? 'Kabul Edilebilir' : 
+                           'Dengesiz'}
                         </Typography>
+                        {performanceData?.workloadAnalysis && (
+                          <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px solid', borderColor: 'grey.300' }}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                              <Typography variant="caption" color="text.secondary">Maks:</Typography>
+                              <Typography variant="caption" sx={{ fontWeight: 600 }}>{performanceData.workloadAnalysis.maxWorkload || 0}</Typography>
+                            </Box>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                              <Typography variant="caption" color="text.secondary">Min:</Typography>
+                              <Typography variant="caption" sx={{ fontWeight: 600 }}>{performanceData.workloadAnalysis.minWorkload || 0}</Typography>
+                            </Box>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                              <Typography variant="caption" color="text.secondary">Ortalama:</Typography>
+                              <Typography variant="caption" sx={{ fontWeight: 600 }}>{performanceData.workloadAnalysis.avgWorkload || 0}</Typography>
+                            </Box>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <Typography variant="caption" color="text.secondary">Fark:</Typography>
+                              <Typography variant="caption" sx={{ fontWeight: 600 }}>{performanceData.workloadAnalysis.maxDifference || 0}</Typography>
+                            </Box>
+                          </Box>
+                        )}
                       </Box>
 
                       {/* Sınıf Değişimi Analizi */}
@@ -1640,35 +1931,7 @@ const Results: React.FC = () => {
       </Box>
 
       {/* Zaman Analizi - Planner.tsx'teki gibi */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4, 1fr)' }, gap: 3, mb: 4 }}>
-        <Card
-          sx={{
-            height: '100%',
-            transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
-            '&:hover': {
-              transform: 'translateY(-4px)',
-              boxShadow: 4,
-            },
-          }}
-        >
-          <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-              <Timeline sx={{ fontSize: 40, color: 'primary.main' }} />
-              <Box sx={{ ml: 2, flexGrow: 1 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
-                  Aktif Zaman Slotu
-                </Typography>
-                <Typography variant="h4" sx={{ fontWeight: 600, color: 'primary.main', mb: 0.5 }}>
-                  {performanceData?.timeSlots || 0}
-                </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                  Kullanılan zaman slotu sayısı
-                      </Typography>
-                    </Box>
-            </Box>
-          </CardContent>
-        </Card>
-
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' }, gap: 3, mb: 4 }}>
         <Card
           sx={{
             height: '100%',
@@ -1754,66 +2017,92 @@ const Results: React.FC = () => {
         </Card>
       </Box>
 
-      {/* En Yoğun Zaman Slotları - Planner.tsx'teki gibi */}
-      <Card
-        sx={{
-          mb: 4,
-          transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
-          '&:hover': {
-            transform: 'translateY(-4px)',
-            boxShadow: 4,
-          },
-        }}
-      >
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-            <Timeline sx={{ fontSize: 40, color: 'warning.main' }} />
-            <Box sx={{ ml: 2, flexGrow: 1 }}>
-              <Typography variant="h6" sx={{ fontWeight: 600, mb: 2 }}>
-                En Yoğun Zaman Slotları
-              </Typography>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                {performanceData?.topTimeSlots?.length > 0 ? (
-                  performanceData.topTimeSlots.map(([timeSlot, count]: [string, number], index: number) => {
-                    // Zaman slotunu daha okunabilir formata çevir
-                    const [sessionType, time] = timeSlot.split('-');
-                    const sessionTypeText = sessionType === 'morning' ? 'Sabah' : 
-                                         sessionType === 'afternoon' ? 'Öğleden Sonra' : 
-                                         sessionType === 'break' ? 'Öğle Arası' : sessionType;
-                    const formattedTimeSlot = `${sessionTypeText} - ${time}`;
-                    
-                    return (
-                      <Box key={timeSlot} sx={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center',
-                        p: 1.5,
-                        bgcolor: 'grey.50',
-                        borderRadius: 1,
-                        border: '1px solid',
-                        borderColor: 'grey.200'
-                      }}>
-                        <Typography variant="body1" sx={{ fontWeight: 500 }}>
-                          {formattedTimeSlot}
-                        </Typography>
-                        <Chip 
-                          label={`${count} program`} 
-                          color={index < 2 ? 'error' : index < 3 ? 'warning' : 'default'}
-                          size="small"
-                        />
-                      </Box>
-                    );
-                  })
-                ) : (
-                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
-                    Zaman slotu bilgisi bulunamadı
-                  </Typography>
-                )}
+      {/* Jüri Metrikleri */}
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' }, gap: 3, mb: 4 }}>
+        <Card
+          sx={{
+            height: '100%',
+            transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
+            '&:hover': {
+              transform: 'translateY(-4px)',
+              boxShadow: 4,
+            },
+          }}
+        >
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+              <People sx={{ fontSize: 40, color: 'primary.main' }} />
+              <Box sx={{ ml: 2, flexGrow: 1 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+                  Toplam Jüri Üyesi
+                </Typography>
+                <Typography variant="h4" sx={{ fontWeight: 600, color: 'primary.main', mb: 0.5 }}>
+                  {metrics?.totalJuryMembers || 0}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Tüm projelerdeki toplam jüri üyesi sayısı
+                </Typography>
               </Box>
             </Box>
-          </Box>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+
+        <Card
+          sx={{
+            height: '100%',
+            transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
+            '&:hover': {
+              transform: 'translateY(-4px)',
+              boxShadow: 4,
+            },
+          }}
+        >
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+              <Assignment sx={{ fontSize: 40, color: 'secondary.main' }} />
+              <Box sx={{ ml: 2, flexGrow: 1 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+                  Ortalama Jüri/Proje
+                </Typography>
+                <Typography variant="h4" sx={{ fontWeight: 600, color: 'secondary.main', mb: 0.5 }}>
+                  {metrics?.averageJuryPerProject?.toFixed(1) || 0}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Proje başına ortalama jüri üyesi sayısı
+                </Typography>
+              </Box>
+            </Box>
+          </CardContent>
+        </Card>
+
+        <Card
+          sx={{
+            height: '100%',
+            transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
+            '&:hover': {
+              transform: 'translateY(-4px)',
+              boxShadow: 4,
+            },
+          }}
+        >
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+              <TrendingUp sx={{ fontSize: 40, color: 'success.main' }} />
+              <Box sx={{ ml: 2, flexGrow: 1 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+                  Jüri Atama Oranı
+                </Typography>
+                <Typography variant="h4" sx={{ fontWeight: 600, color: 'success.main', mb: 0.5 }}>
+                  {metrics?.totalJuryMembers > 0 ? Math.round((metrics.totalJuryMembers / (metrics.totalProjects * 2)) * 100) : 0}%
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Hedef jüri sayısına göre atama oranı
+                </Typography>
+              </Box>
+            </Box>
+          </CardContent>
+        </Card>
+      </Box>
 
       {/* Kalite Metrikleri - Planner.tsx'teki gibi */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(4, 1fr)' }, gap: 3, mb: 4 }}>
@@ -1930,7 +2219,7 @@ const Results: React.FC = () => {
         </Card>
       </Box>
 
-      {/* Çakışma Analizi - Planner.tsx'teki gibi */}
+      {/* Çakışma ve Öğretim Üyesi Analizi */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(2, 1fr)' }, gap: 3, mb: 4 }}>
         <Card
           sx={{
@@ -1972,17 +2261,37 @@ const Results: React.FC = () => {
         >
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-              <Warning sx={{ fontSize: 40, color: performanceData?.conflictAnalysis?.instructorsWithConflicts === 0 ? 'success.main' : 'warning.main' }} />
+              <Person sx={{ fontSize: 40, color: 'info.main' }} />
               <Box sx={{ ml: 2, flexGrow: 1 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
-                  Çakışmalı Öğretim Üyesi
+                <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
+                  En Az Yoğun Öğretim Üyesi
                 </Typography>
-                <Typography variant="h4" sx={{ fontWeight: 600, color: performanceData?.conflictAnalysis?.instructorsWithConflicts === 0 ? 'success.main' : 'warning.main', mb: 0.5 }}>
-                  {performanceData?.conflictAnalysis?.instructorsWithConflicts || 0}
+                <Typography variant="h4" sx={{ fontWeight: 600, color: 'info.main', mb: 0.5 }}>
+                  {performanceData?.minWorkloadInstructor?.name || 'N/A'}
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Çakışma yaşayan öğretim üyesi sayısı
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  {performanceData?.minWorkloadInstructor?.count || 0} görev
                 </Typography>
+                {performanceData?.workloadAnalysis?.minWorkloadInstructors && 
+                 performanceData.workloadAnalysis.minWorkloadInstructors.length > 0 && (
+                  <Box sx={{ mt: 1 }}>
+                    {performanceData.workloadAnalysis.minWorkloadInstructors.map((name: string, index: number) => (
+                      <Chip
+                        key={index}
+                        label={name}
+                        size="small"
+                        sx={{ 
+                          fontSize: '0.75rem',
+                          height: '24px',
+                          mb: 0.5,
+                          mr: 0.5,
+                          bgcolor: 'info.lighter',
+                          color: 'info.main'
+                        }}
+                      />
+                    ))}
+                  </Box>
+                )}
               </Box>
             </Box>
           </CardContent>
@@ -2291,7 +2600,7 @@ const Results: React.FC = () => {
       </Box>
 
       {/* En Yoğun Kullanımlar */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' }, gap: 3, mb: 4 }}>
+      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(2, 1fr)' }, gap: 3, mb: 4 }}>
         <Card
           sx={{
             height: '100%',
@@ -2332,34 +2641,6 @@ const Results: React.FC = () => {
         >
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-              <Timeline sx={{ fontSize: 40, color: 'secondary.main' }} />
-              <Box sx={{ ml: 2, flexGrow: 1 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
-                  En Yoğun Zaman
-                </Typography>
-                <Typography variant="h4" sx={{ fontWeight: 600, color: 'secondary.main', mb: 0.5 }}>
-                  {performanceData?.mostUsedTimeslot?.time || 'N/A'}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {performanceData?.mostUsedTimeslot?.count || 0} kullanım
-                </Typography>
-              </Box>
-            </Box>
-          </CardContent>
-        </Card>
-
-        <Card
-          sx={{
-            height: '100%',
-            transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
-            '&:hover': {
-              transform: 'translateY(-4px)',
-              boxShadow: 4,
-            },
-          }}
-        >
-          <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
               <Person sx={{ fontSize: 40, color: 'success.main' }} />
               <Box sx={{ ml: 2, flexGrow: 1 }}>
                 <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
@@ -2371,54 +2652,6 @@ const Results: React.FC = () => {
                 <Typography variant="body2" color="text.secondary">
                   {performanceData?.mostBusyInstructor?.count || 0} görev
                 </Typography>
-              </Box>
-            </Box>
-          </CardContent>
-        </Card>
-
-        <Card
-          sx={{
-            height: '100%',
-            transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
-            '&:hover': {
-              transform: 'translateY(-4px)',
-              boxShadow: 4,
-            },
-          }}
-        >
-          <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-              <Person sx={{ fontSize: 40, color: 'info.main' }} />
-              <Box sx={{ ml: 2, flexGrow: 1 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600, mb: 1 }}>
-                  En Az Yoğun Öğretim Üyesi
-                </Typography>
-                <Typography variant="h4" sx={{ fontWeight: 600, color: 'info.main', mb: 0.5 }}>
-                  {performanceData?.minWorkloadInstructor?.name || 'N/A'}
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                  {performanceData?.minWorkloadInstructor?.count || 0} görev
-                </Typography>
-                {performanceData?.workloadAnalysis?.minWorkloadInstructors && 
-                 performanceData.workloadAnalysis.minWorkloadInstructors.length > 0 && (
-                  <Box sx={{ mt: 1 }}>
-                    {performanceData.workloadAnalysis.minWorkloadInstructors.map((name: string, index: number) => (
-                      <Chip
-                        key={index}
-                        label={name}
-                        size="small"
-                        sx={{ 
-                          fontSize: '0.75rem',
-                          height: '24px',
-                          mb: 0.5,
-                          mr: 0.5,
-                          bgcolor: 'info.lighter',
-                          color: 'info.main'
-                        }}
-                      />
-                    ))}
-                  </Box>
-                )}
               </Box>
             </Box>
           </CardContent>

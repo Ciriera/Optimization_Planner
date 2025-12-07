@@ -145,6 +145,20 @@ async def optimization_planner_exception_handler(
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """Handle FastAPI HTTPException."""
     
+    # HER ZAMAN log yaz - stderr'e de yaz
+    import sys
+    error_msg = f"""
+{'='*80}
+[HTTP EXCEPTION HANDLER]
+Status Code: {exc.status_code}
+Detail: {exc.detail}
+Path: {request.url.path}
+Method: {request.method}
+{'='*80}
+"""
+    print(error_msg, flush=True)
+    print(error_msg, file=sys.stderr, flush=True)
+    
     logger.warning(f"HTTPException: {exc.detail}", extra={
         "status_code": exc.status_code,
         "path": str(request.url),
@@ -216,11 +230,30 @@ async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError) -
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle generic exceptions."""
     
+    import sys
+    import traceback
+    
+    # HER ZAMAN log yaz - stderr'e de yaz
+    error_traceback = traceback.format_exc()
+    error_msg = f"""
+{'='*80}
+[GENERIC EXCEPTION HANDLER]
+Exception Type: {type(exc).__name__}
+Exception Message: {str(exc)}
+Path: {request.url.path}
+Method: {request.method}
+Traceback:
+{error_traceback}
+{'='*80}
+"""
+    print(error_msg, flush=True)
+    print(error_msg, file=sys.stderr, flush=True)
+    
     logger.error(f"Unexpected error: {str(exc)}", extra={
         "path": str(request.url),
         "method": request.method,
         "exception_type": type(exc).__name__,
-        "traceback": traceback.format_exc()
+        "traceback": error_traceback
     })
     
     # Log security event for unexpected errors

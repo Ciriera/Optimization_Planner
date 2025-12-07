@@ -89,9 +89,9 @@ class WebSocketService {
 
       try {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        // Development modunda backend portunu kullan
+        // Development modunda backend portunu kullan (localhost kullan çünkü 127.0.0.1 bazı tarayıcılarda sorun yaratabilir)
         const host = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-          ? '127.0.0.1:8000' 
+          ? 'localhost:8000' 
           : window.location.host;
         const wsUrl = `${protocol}//${host}/ws/${userId}`;
 

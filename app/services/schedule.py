@@ -114,10 +114,16 @@ class ScheduleService(BaseService[Schedule, ScheduleCreate, ScheduleUpdate]):
                 })
         
         # Instructor detaylarını al (schedule.instructors array'inden)
+        # Placeholder'ları da dahil et (mixed format: [id1, id2, {"id": -1, "name": "...", "is_placeholder": true}])
         all_instructor_ids = set()
+        
         for row in rows:
             if row.instructors and isinstance(row.instructors, list):
-                all_instructor_ids.update(row.instructors)
+                for inst_item in row.instructors:
+                    # Placeholder kontrolü: dict formatında ve is_placeholder = true ise - direkt row.instructors içinde işlenecek
+                    if isinstance(inst_item, int):
+                        # Gerçek instructor ID'si
+                        all_instructor_ids.add(inst_item)
         
         instructor_details = {}
         if all_instructor_ids:
@@ -145,10 +151,105 @@ class ScheduleService(BaseService[Schedule, ScheduleCreate, ScheduleUpdate]):
             
             # Schedule'dan gelen instructors array'i ile instructor detaylarını birleştir
             schedule_instructors = []
+            
+            # First, add the responsible instructor
+            if row.responsible_instructor_id and row.responsible_instructor_id in instructor_details:
+                responsible_instructor = instructor_details[row.responsible_instructor_id].copy()
+                responsible_instructor['role'] = 'responsible'  # Mark as responsible
+                schedule_instructors.append(responsible_instructor)
+            
+            # Then, add the jury members from schedule.instructors (excluding responsible instructor)
+            # Placeholder'ları da dahil et
+            # DEBUG: Log instructors array
             if row.instructors and isinstance(row.instructors, list):
-                for inst_id in row.instructors:
-                    if inst_id in instructor_details:
-                        schedule_instructors.append(instructor_details[inst_id])
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.debug(f"Schedule {row.id}: Processing {len(row.instructors)} instructors: {row.instructors}")
+                for inst_item in row.instructors:
+                    # Placeholder kontrolü
+                    if isinstance(inst_item, dict) and inst_item.get('is_placeholder', False):
+                        # Placeholder'ı jury olarak ekle
+                        placeholder_member = {
+                            "id": inst_item.get('id', -1),
+                            "name": inst_item.get('name', '[Araştırma Görevlisi]'),
+                            "full_name": inst_item.get('name', '[Araştırma Görevlisi]'),
+                            "type": "assistant",
+                            "role": "jury",
+                            "is_placeholder": True
+                        }
+                        schedule_instructors.append(placeholder_member)
+                    elif isinstance(inst_item, int):
+                        # Gerçek instructor ID'si (int formatında)
+                        inst_id = inst_item
+                        # Skip if this is the responsible instructor (avoid duplication)
+                        if inst_id != row.responsible_instructor_id and inst_id in instructor_details:
+                            jury_member = instructor_details[inst_id].copy()
+                            jury_member['role'] = 'jury'  # Mark as jury
+                            schedule_instructors.append(jury_member)
+                        elif inst_id != row.responsible_instructor_id:
+                            # Instructor details'te bulunamadı - fallback olarak ID ile oluştur
+                            logger.warning(f"Instructor {inst_id} not found in instructor_details but marked as jury for project {row.project_id}")
+                            schedule_instructors.append({
+                                "id": inst_id,
+                                "name": f"Instructor {inst_id}",
+                                "full_name": f"Instructor {inst_id}",
+                                "type": "instructor",
+                                "role": "jury"
+                            })
+                    elif isinstance(inst_item, str):
+                        # String formatında placeholder olabilir (Phase 2/3'ten gelen)
+                        if inst_item == '[Araştırma Görevlisi]':
+                            placeholder_member = {
+                                "id": -1,
+                                "name": '[Araştırma Görevlisi]',
+                                "full_name": '[Araştırma Görevlisi]',
+                                "type": "assistant",
+                                "role": "jury",
+                                "is_placeholder": True
+                            }
+                            schedule_instructors.append(placeholder_member)
+                    elif isinstance(inst_item, dict):
+                        # Dict formatında instructor (CP-SAT normalize etmiş veya Phase 2'den gelmiş)
+                        inst_id = inst_item.get('id')
+                        # Placeholder kontrolü (zaten yukarıda kontrol edildi ama tekrar kontrol)
+                        if inst_item.get('is_placeholder', False):
+                            # Placeholder'ı jury olarak ekle
+                            placeholder_member = {
+                                "id": inst_item.get('id', -1),
+                                "name": inst_item.get('name', '[Araştırma Görevlisi]'),
+                                "full_name": inst_item.get('full_name', inst_item.get('name', '[Araştırma Görevlisi]')),
+                                "type": inst_item.get('type', 'assistant'),
+                                "role": "jury",
+                                "is_placeholder": True
+                            }
+                            schedule_instructors.append(placeholder_member)
+                        elif inst_id and inst_id != row.responsible_instructor_id:
+                            # KRİTİK DÜZELTME: CP-SAT normalize etmiş object'i direkt kullan
+                            # Eğer object'te zaten name/full_name varsa onları kullan, lookup'a gerek yok!
+                            if inst_item.get('name') and inst_item.get('full_name'):
+                                # CP-SAT'in normalize ettiği object - direkt kullan
+                                jury_member = inst_item.copy()
+                                jury_member['role'] = 'jury'  # Mark as jury
+                                schedule_instructors.append(jury_member)
+                                logger.debug(f"Using normalized instructor object for {inst_id}: {inst_item.get('name')}")
+                            elif inst_id in instructor_details:
+                                # Fallback: instructor_details'ten lookup
+                                jury_member = instructor_details[inst_id].copy()
+                                jury_member['role'] = 'jury'  # Mark as jury
+                                schedule_instructors.append(jury_member)
+                            else:
+                                # Fallback: Object'teki bilgileri kullan veya default oluştur
+                                schedule_instructors.append({
+                                    "id": inst_id,
+                                    "name": inst_item.get('name', f"Instructor {inst_id}"),
+                                    "full_name": inst_item.get('full_name', inst_item.get('name', f"Instructor {inst_id}")),
+                                    "type": inst_item.get('type', 'instructor'),
+                                    "role": "jury"
+                                })
+                                logger.warning(f"Instructor {inst_id} (dict) not found in instructor_details, using object data for project {row.project_id}")
+            
+            # DEBUG: Final instructors count
+            logger.debug(f"Schedule {row.id}: Final schedule_instructors count: {len(schedule_instructors)}, Jury count: {len([i for i in schedule_instructors if i.get('role') == 'jury'])}")
             
             schedule_dict = {
                 "id": row.id,

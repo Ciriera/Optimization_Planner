@@ -89,5 +89,17 @@ class Settings(BaseSettings):
     
     # Parallel processing settings
     MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
+    
+    # Jury Refinement Configuration
+    JURY_REFINEMENT_ENABLED: bool = True
+    JURY_CONTINUITY_WEIGHT: float = 0.6  # consecutive slots weight
+    JURY_PROXIMITY_WEIGHT: float = 0.4   # proximity weight
+    JURY_WORKLOAD_WEIGHT: float = 0.5    # workload importance
+    JURY_SEMI_CONSECUTIVE_WEIGHT: float = 0.5  # REVISED: semi-consecutive value for 1-slot gap
+    JURY_SAME_CLASSROOM_SCORE: float = 1.0  # REVISED: normalized base
+    JURY_CROSS_CLASSROOM_SAME_TIME: float = 0.6  # REVISED: normalized penalty
+    JURY_CROSS_CLASSROOM_ADJACENT: float = 0.4  # REVISED: normalized penalty
+    JURY_CROSS_CLASSROOM_DISTANT: float = 0.2  # REVISED: normalized penalty
+    JURY_LOGGING_LEVEL: str = "INFO" # NEW: options: DEBUG, INFO, WARNING
 
 settings = Settings() 

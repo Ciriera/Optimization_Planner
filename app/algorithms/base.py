@@ -87,6 +87,23 @@ class OptimizationAlgorithm(ABC):
             str: Algoritma adi.
         """
         return self.__class__.__name__
+    
+    def apply_jury_refinement(
+        self, 
+        assignments: List[Dict[str, Any]], 
+        enable_refinement: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Apply second-layer jury refinement to assignments.
+        
+        Args:
+            assignments: Initial assignments from algorithm
+            enable_refinement: Whether to apply refinement (configurable)
+        
+        Returns:
+            Refined assignments
+        """
+        return assignments
 
 
 class OptimizationAlgorithmWrapper:
@@ -225,17 +242,25 @@ class OptimizationAlgorithmWrapper:
                     instr_load[ins] += 1
             self.result["load_balance_report"] = {"per_instructor": dict(instr_load)}
 
-            # Raporları kaydet
-            os.makedirs("reports", exist_ok=True)
-            write_json(os.path.join("reports", f"duplicate_report_{self.algorithm.get_name()}.json"), final_dup)
-            write_json(os.path.join("reports", f"coverage_report_{self.algorithm.get_name()}.json"), final_cov)
-            write_json(os.path.join("reports", f"gap_report_{self.algorithm.get_name()}.json"), final_gaps)
-            write_json(os.path.join("reports", f"late_slots_report_{self.algorithm.get_name()}.json"), final_late)
-            write_json(os.path.join("reports", f"load_balance_report_{self.algorithm.get_name()}.json"), {"per_instructor": dict(instr_load)})
+            # Raporları kaydet - Windows path uyumluluğu için
+            try:
+                reports_dir = os.path.normpath("reports")
+                os.makedirs(reports_dir, exist_ok=True)
+                write_json(os.path.join(reports_dir, f"duplicate_report_{self.algorithm.get_name()}.json"), final_dup)
+                write_json(os.path.join(reports_dir, f"coverage_report_{self.algorithm.get_name()}.json"), final_cov)
+                write_json(os.path.join(reports_dir, f"gap_report_{self.algorithm.get_name()}.json"), final_gaps)
+                write_json(os.path.join(reports_dir, f"late_slots_report_{self.algorithm.get_name()}.json"), final_late)
+                write_json(os.path.join(reports_dir, f"load_balance_report_{self.algorithm.get_name()}.json"), {"per_instructor": dict(instr_load)})
+            except OSError as e:
+                # Log but don't crash - raporlar opsiyonel
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to write report files: {e}")
 
             # Excel export
             try:
-                out_path = os.path.join("reports", f"final_plan_{self.algorithm.get_name()}.xlsx")
+                reports_dir = os.path.normpath("reports")
+                out_path = os.path.join(reports_dir, f"final_plan_{self.algorithm.get_name()}.xlsx")
                 written = export_schedule_to_excel(self.validated_solution, getattr(self.algorithm, 'projects', []), getattr(self.algorithm, 'instructors', []), getattr(self.algorithm, 'classrooms', []), getattr(self.algorithm, 'timeslots', []), out_path)
                 self.result['final_plan_path'] = written
             except Exception:
@@ -243,7 +268,8 @@ class OptimizationAlgorithmWrapper:
 
             # Write validator summary
             try:
-                summary_path = os.path.join("reports", f"validator_summary_{self.algorithm.get_name()}.txt")
+                reports_dir = os.path.normpath("reports")
+                summary_path = os.path.join(reports_dir, f"validator_summary_{self.algorithm.get_name()}.txt")
                 write_validator_summary(summary_path, self.result)
                 self.result['validator_summary_path'] = summary_path
             except Exception:

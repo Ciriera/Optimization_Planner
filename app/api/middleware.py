@@ -22,6 +22,9 @@ class APIResponseMiddleware(BaseHTTPMiddleware):
         if not request.url.path.startswith("/api"):
             return await call_next(request)
         
+        # HER ZAMAN log yaz - APIResponseMiddleware başlangıcı
+        print(f"[API RESPONSE MIDDLEWARE] {request.method} {request.url.path}")
+        
         start_time = time.time()
         
         try:
@@ -84,25 +87,35 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # Skip ALL processing for /api/v1/process to prevent terminal spam
+        # ProcessEndpointBlockerMiddleware handles it, but we skip logging here
+        if request.url.path == "/api/v1/process":
+            # Let ProcessEndpointBlockerMiddleware handle it, just skip logging
+            return await call_next(request)
+        
         # Generate a unique request ID
         request_id = id(request)
         
         start_time = time.time()
         
-        # Log the request
-        debug = getattr(settings, "DEBUG", False)
-        if debug:
-            print(f"Request {request_id}: {request.method} {request.url.path}")
+        # Log the request - HER ZAMAN log yaz (DEBUG kontrolü kaldırıldı)
+        print(f"[REQUEST] {request.method} {request.url.path} (ID: {request_id})")
+        if request.url.query:
+            print(f"         Query params: {request.url.query}")
         
         # Process the request
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as e:
+            # Log exception
+            print(f"[REQUEST ERROR] {request.method} {request.url.path} - {type(e).__name__}: {str(e)}")
+            raise
         
         # Calculate the request processing time
         process_time = time.time() - start_time
         
         # Log the response time
-        if debug:
-            print(f"Request {request_id} took {process_time:.4f} seconds to process")
+        print(f"[REQUEST] {request.method} {request.url.path} - {response.status_code} ({process_time:.4f}s)")
         
         return response
 
@@ -181,16 +194,41 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class ProcessEndpointBlockerMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to silently block all requests to /api/v1/process endpoint before any other processing.
+    This runs FIRST (added last, so executes first in the middleware chain).
+    Returns 204 No Content (instead of 404) to minimize browser retries and completely suppresses logging.
+    """
+    
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        # Silently block ALL requests to non-existent /api/v1/process endpoint
+        # Use 204 No Content to tell browser: "Nothing to see here, stop asking"
+        if request.url.path == "/api/v1/process":
+            # 204 No Content - tells browser to stop retrying
+            # CORS headers still included for preflight
+            from starlette.responses import Response
+            return Response(
+                status_code=204,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+                    "Access-Control-Allow-Headers": "*",
+                    "Access-Control-Max-Age": "86400",  # Cache for 24 hours
+                    "Cache-Control": "public, max-age=86400",  # Tell browser to cache this response
+                },
+                background=None  # Prevent any background tasks
+            )
+        
+        return await call_next(request)
+
+
 def setup_middleware(app: FastAPI) -> None:
     """
     Setup middleware for the application.
+    IMPORTANT: Middleware order matters! Last added = first executed.
     """
-    app.add_middleware(APIResponseMiddleware)
-    app.add_middleware(RequestLoggingMiddleware)
-    app.add_middleware(ExceptionMiddleware)
-    app.add_middleware(RateLimiterMiddleware, rate_limit=1000, time_window=60)
-    
-    # Add CORS middleware
+    # Add CORS middleware first (will be executed last)
     from fastapi.middleware.cors import CORSMiddleware
     app.add_middleware(
         CORSMiddleware,
@@ -198,4 +236,13 @@ def setup_middleware(app: FastAPI) -> None:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-    ) 
+    )
+    
+    # Add other middleware
+    app.add_middleware(APIResponseMiddleware)
+    app.add_middleware(RequestLoggingMiddleware)
+    app.add_middleware(ExceptionMiddleware)
+    app.add_middleware(RateLimiterMiddleware, rate_limit=1000, time_window=60)
+    
+    # Add ProcessEndpointBlockerMiddleware LAST so it executes FIRST
+    app.add_middleware(ProcessEndpointBlockerMiddleware) 

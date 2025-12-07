@@ -3,7 +3,11 @@ Reports API Endpoints
 """
 
 from typing import Any, List, Optional
+from datetime import datetime
+from io import BytesIO
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import deps
@@ -12,6 +16,7 @@ from app.services.report_generator_service import ReportGeneratorService
 from app.services.score_generator_service import ScoreGeneratorService
 from app.services.chart_generator_service import ChartGeneratorService
 from app.services.performance_metrics import compute, compute_many
+from app.services.planner_export_service import exportPlannerToExcel
 
 router = APIRouter()
 
@@ -120,3 +125,39 @@ async def compare_performance_metrics(
     weights = payload.get("weights")
     params = payload.get("params")
     return {"success": True, "results": compute_many(by_algo, weights=weights, params=params)}
+
+
+@router.post("/export-planner-excel")
+async def export_planner_excel(
+    *,
+    planner_data: dict,
+    db: AsyncSession = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Any:
+    """
+    Planner sayfasındaki jüri programını ve yük dağılımını Excel (.xlsx) olarak dışa aktar.
+
+    Beklenen payload şeması:
+        {
+          "classes": [...],
+          "timeSlots": [...],
+          "projects": [...],
+          "hocaLoad": {...},
+          "arsGorLoad": {...}
+        }
+    """
+    try:
+        excel_bytes = exportPlannerToExcel(planner_data)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        raise HTTPException(status_code=400, detail=f"Excel export failed: {exc}") from exc
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"planner_export_{timestamp}.xlsx"
+
+    return StreamingResponse(
+        BytesIO(excel_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        },
+    )

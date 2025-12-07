@@ -273,7 +273,8 @@ const Algorithms: React.FC = () => {
           const execRes = await api.post('/algorithms/execute', {
             algorithm: algorithm.type || algorithm.name,
             params: {
-              classroom_count: optimalCount  // Use optimal classroom count
+              classroom_count: optimalCount,  // Use optimal classroom count
+              jury_refinement_layer: true  // Force enable jury refinement
             },
             data: {
               projects: [],
@@ -303,7 +304,13 @@ const Algorithms: React.FC = () => {
           navigate('/planner');
           
         } catch (err: any) {
-          setSnack({ open: true, message: err?.response?.data?.detail || 'Algoritma calistirilamadi', severity: 'error' });
+          const errorMsg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || 'Algoritma çalıştırılamadı';
+          console.error('Algorithm execution error:', err);
+          setSnack({ 
+            open: true, 
+            message: `Hata: ${errorMsg}`, 
+            severity: 'error' 
+          });
         } finally {
           setExecuting(false);
           setOptimizing(false);
@@ -341,18 +348,69 @@ const Algorithms: React.FC = () => {
       }
       
       // 1) Execute
-      const execRes = await api.post('/algorithms/execute', {
-        algorithm: algorithm.type || algorithm.name,
-        params: {
-          classroom_count: selectedClassroomCount
-        },
-        data: {
-          projects: [],
-          instructors: [],
-          classrooms: [],
-          timeslots: []
+      let execRes;
+      try {
+        execRes = await api.post('/algorithms/execute', {
+          algorithm: algorithm.type || algorithm.name,
+          params: {
+            classroom_count: selectedClassroomCount,
+            jury_refinement_layer: true  // Force enable jury refinement
+          },
+          data: {
+            projects: [],
+            instructors: [],
+            classrooms: [],
+            timeslots: []
+          }
+        });
+      } catch (err: any) {
+        // Backend'den gelen detaylı hata mesajını al
+        // FastAPI error format: {detail: "..."} veya middleware format: {error: {...}}
+        const responseData = err?.response?.data || {};
+        const backendDetail = 
+          responseData.detail ||           // FastAPI HTTPException format
+          responseData.message ||          // Middleware error format
+          (responseData.error && (typeof responseData.error === 'string' 
+            ? responseData.error 
+            : responseData.error.detail || responseData.error.message)) || // Nested error format
+          err?.message || 
+          'Algoritma çalıştırılırken bir hata oluştu';
+        
+        // Detaylı error logging
+        console.error('=== Algorithm Execution Error ===');
+        console.error('Error object:', err);
+        console.error('Response:', err?.response);
+        console.error('Response status:', err?.response?.status);
+        console.error('Response data (full):', JSON.stringify(responseData, null, 2));
+        console.error('Response data (error):', responseData.error);
+        console.error('Response data (detail):', responseData.detail);
+        console.error('Response data (message):', responseData.message);
+        console.error('Extracted error message:', backendDetail);
+        console.error('===============================');
+        
+        // Kullanıcıya gösterilecek mesaj
+        let displayMessage = backendDetail;
+        if (backendDetail.includes('Errno 22') || backendDetail.includes('Invalid argument')) {
+          displayMessage = 'Dosya işlemi hatası: Rapor dosyaları yazılırken bir sorun oluştu. Backend log\'larını kontrol edin.';
+        } else if (backendDetail.includes('Veri yükleme hatası') || backendDetail.includes('NoneType') || backendDetail.includes('AttributeError')) {
+          displayMessage = 'Veri yükleme hatası: Veritabanında projeler, öğretmenler veya sınıflar eksik olabilir.';
+        } else if (backendDetail.includes('Veri formatı hatası') || backendDetail.includes('KeyError')) {
+          displayMessage = 'Veri formatı hatası: Gerekli veri alanları eksik.';
+        } else if (backendDetail.includes('Veritabanı bağlantı hatası') || backendDetail.includes('database') || backendDetail.includes('connection')) {
+          displayMessage = 'Veritabanı bağlantı hatası: Backend veritabanına bağlanamıyor.';
+        } else if (backendDetail.includes('Algorithm execution failed')) {
+          // Backend'den gelen detaylı mesajı göster
+          displayMessage = backendDetail.replace('Algorithm execution failed: ', '');
         }
-      });
+        
+        setSnack({ 
+          open: true, 
+          message: displayMessage || 'Algoritma çalıştırılırken bir hata oluştu. Lütfen console log\'larına bakın.', 
+          severity: 'error' 
+        });
+        setExecuting(false);
+        return;
+      }
       const run = execRes.data;
 
       setSnack({ open: true, message: `${algorithm.displayName} başlatıldı...`, severity: 'success' });
@@ -437,7 +495,8 @@ const Algorithms: React.FC = () => {
         algorithm: algorithm.name,
         params: {
           ...params,
-          classroom_count: selectedClassroomCount
+          classroom_count: selectedClassroomCount,
+          jury_refinement_layer: true  // Force enable jury refinement
         }
       });
       const run = execRes.data;
@@ -613,9 +672,9 @@ const Algorithms: React.FC = () => {
 
       {/* Algorithm Grid */}
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' }, gap: 3, mb: 4 }}>
-        {(filteredAlgorithms || []).map((algorithm) => (
+        {(filteredAlgorithms || []).map((algorithm, index) => (
           <Card
-            key={algorithm.name}
+            key={algorithm.type || algorithm.name || `algorithm-${index}`}
             sx={{
               height: '100%',
               transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
@@ -871,6 +930,20 @@ const Algorithms: React.FC = () => {
                 <Box>
                   <Typography variant="subtitle1" sx={{ mb: 2 }}>Common Parameters</Typography>
                 </Box>
+                
+                {/* Priority Selection */}
+                <FormControl fullWidth>
+                  <InputLabel>Proje Önceliği</InputLabel>
+                  <Select
+                    value={algorithmParams.project_priority || 'none'}
+                    onChange={(e) => setAlgorithmParams(prev => ({ ...prev, project_priority: e.target.value }))}
+                    label="Proje Önceliği"
+                  >
+                    <MenuItem value="final_exam_priority">Bitirme Ara Öncelikli</MenuItem>
+                    <MenuItem value="midterm_priority">Ara Proje Öncelikli</MenuItem>
+                    <MenuItem value="none">Önceliksiz</MenuItem>
+                  </Select>
+                </FormControl>
                 
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   <TextField

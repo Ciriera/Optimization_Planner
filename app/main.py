@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocket
 import os
 import datetime
+import logging
 from contextlib import asynccontextmanager
 
 # Import all models to ensure they are loaded
@@ -46,6 +47,125 @@ async def lifespan(app: FastAPI):
     # Initialize structured logging
     print("Structured logging initialized.")
     
+    # Filter out /api/v1/process requests from ALL uvicorn logs
+    class ProcessEndpointFilter(logging.Filter):
+        """Filter to suppress ALL logs for /api/v1/process endpoint"""
+        def filter(self, record):
+            # Filter out any log containing /api/v1/process in any attribute
+            message_str = ""
+            if hasattr(record, 'message'):
+                message_str = str(record.message)
+            if hasattr(record, 'msg'):
+                message_str += str(record.msg)
+            if hasattr(record, 'getMessage'):
+                message_str += record.getMessage()
+            
+            # Check all string attributes
+            for attr in ['message', 'msg', 'args', 'pathname', 'filename', 'funcName']:
+                if hasattr(record, attr):
+                    attr_value = str(getattr(record, attr))
+                    if '/api/v1/process' in attr_value:
+                        return False
+            
+            if '/api/v1/process' in message_str:
+                return False
+            
+            return True
+    
+    # Apply filter to ALL uvicorn loggers
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.addFilter(ProcessEndpointFilter())
+    
+    # Also apply to root uvicorn logger
+    uvicorn_logger = logging.getLogger("uvicorn")
+    uvicorn_logger.addFilter(ProcessEndpointFilter())
+    
+    print("Uvicorn log filter applied for /api/v1/process endpoint.")
+    
+    # Auto-create notification_logs table if it doesn't exist
+    try:
+        from sqlalchemy import text
+        from app.core.database import async_engine
+        
+        async with async_engine.begin() as conn:
+            print("Checking notification_logs table...")
+            
+            # Check if table exists and update columns if needed
+            try:
+                # Check if status column uses enum type
+                result = await conn.execute(text("""
+                    SELECT data_type 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'notification_logs' AND column_name = 'status'
+                """))
+                column_info = result.fetchone()
+                
+                if column_info and column_info[0] == 'USER-DEFINED':
+                    # Column exists and uses enum type, convert to VARCHAR
+                    print("Converting status column from enum to VARCHAR...")
+                    await conn.execute(text("""
+                        ALTER TABLE notification_logs 
+                        ALTER COLUMN status TYPE VARCHAR(20) 
+                        USING status::text
+                    """))
+                    print("✓ Status column converted to VARCHAR")
+                
+                # Check if instructor_id is NOT NULL and make it nullable
+                result = await conn.execute(text("""
+                    SELECT is_nullable 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'notification_logs' AND column_name = 'instructor_id'
+                """))
+                instructor_id_info = result.fetchone()
+                
+                if instructor_id_info and instructor_id_info[0] == 'NO':
+                    # Column exists and is NOT NULL, make it nullable
+                    print("Making instructor_id column nullable for custom emails...")
+                    await conn.execute(text("""
+                        ALTER TABLE notification_logs 
+                        ALTER COLUMN instructor_id DROP NOT NULL
+                    """))
+                    print("✓ instructor_id column is now nullable")
+            except Exception as e:
+                # Table might not exist yet, or column might not exist
+                pass
+            
+            # Create table (safe - won't fail if exists)
+            # Note: Using VARCHAR instead of enum type to avoid case sensitivity issues
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS notification_logs (
+                    id SERIAL PRIMARY KEY,
+                    instructor_id INTEGER,  -- Nullable for custom emails
+                    instructor_email VARCHAR(200) NOT NULL,
+                    instructor_name VARCHAR(200),
+                    planner_timestamp TIMESTAMP,
+                    subject VARCHAR(500),
+                    status VARCHAR(20) NOT NULL,
+                    error_message TEXT,
+                    sent_at TIMESTAMP,
+                    attempt_count INTEGER DEFAULT 0,
+                    meta_data JSONB,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    CONSTRAINT fk_notification_logs_instructor_id FOREIGN KEY (instructor_id) REFERENCES instructors(id)
+                )
+            """))
+            
+            # Create indexes (safe - won't fail if exists)
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_notification_logs_id ON notification_logs(id)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_notification_logs_instructor_id ON notification_logs(instructor_id)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_notification_logs_instructor_email ON notification_logs(instructor_email)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_notification_logs_status ON notification_logs(status)"))
+            
+            # Add email column to instructors if it doesn't exist
+            await conn.execute(text("ALTER TABLE instructors ADD COLUMN IF NOT EXISTS email VARCHAR(200)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_instructors_email ON instructors(email)"))
+            
+            print("✓ notification_logs table ready!")
+    except Exception as e:
+        print(f"⚠ Warning: Could not auto-create notification_logs table: {str(e)}")
+        print("   You can manually run migration at /api/v1/notification/migrate")
+    
     # Execute startup code
     yield
     
@@ -65,7 +185,7 @@ app = FastAPI(
     validate_responses=False,  # Disable response validation to avoid serialization issues
 )
 
-# CORS settings
+# CORS settings (add first to handle preflight)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
@@ -74,7 +194,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Setup middleware
+# Block all requests to non-existent /api/v1/process endpoint
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.api_route("/api/v1/process", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
+async def block_process_endpoint(request: Request):
+    """
+    Block all requests to /api/v1/process endpoint - This endpoint does not exist.
+    This handler should rarely be reached as ProcessEndpointBlockerMiddleware catches it first.
+    Returns 204 No Content to minimize browser retries.
+    """
+    # Return 204 No Content (instead of 404) to tell browser: "Nothing here, stop asking"
+    from starlette.responses import Response
+    return Response(
+        status_code=204,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Max-Age": "86400",  # Cache for 24 hours
+            "Cache-Control": "public, max-age=86400",  # Browser cache
+        },
+        background=None  # Prevent any background tasks
+    )
+
+# Setup middleware (after CORS and endpoint definition)
 setup_middleware(app)
 
 # Add exception handlers

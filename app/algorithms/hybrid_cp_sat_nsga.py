@@ -1,1727 +1,1304 @@
 """
-Hybrid CP-SAT + NSGA-II Algorithm - Enhanced with Pure Consecutive Grouping
-Uses same logic as Deep Search for optimal uniform distribution
+🤖 AI-POWERED Hybrid CP-SAT + NSGA-II – Dinamik Sınıf Sayısına Göre Deterministik Sorumlu + Jüri Atama Sistemi
+
+Tek Fazlı Listeleme + Deterministik Atama + Consecutive Yerleşim + Placeholder Desteği + 
+Uniform Dağılım + Bitirme Öncelikli Planlama + AI Intelligence
+
+Özellikler:
+- Tek fazlı deterministik atama (wave/faz geçişi yok)
+- İş yüküne göre sıralama ve blok tabanlı dağılım
+- Zigzag/snake draft sınıf atama + uniform workload dağılımı
+- Consecutive timeslot yerleşimi
+- Priority-based scheduling: Bitirme projeleri erken slotlarda, Ara projeleri sonra
+- Round-robin jüri atama (sınıf içi)
+- Placeholder desteği ([Arastirma Gorevlisi])
+- COI (Conflict of Interest) kontrolü
+
+🚀 AI FEATURES (Optional - Disabled by default):
+═══════════════════════════════════════════════════════════════════════════════
+
+1. 🤖 AI-Based Priority-Based Scheduling Optimization
+   - Başarılı priority-slot eşleşmelerini öğren
+   - Optimal Bitirme/Ara placement patterns'den öğren
+   - Historical priority distribution metrics'den öğren
+
+2. 🧠 AI-Based Smart Zigzag Assignment
+   - Machine learning ile optimal zigzag pattern seçimi
+   - Historical success patterns'den öğren
+   - Adaptive assignment based on performance
+
+3. 🎯 AI-Based Predictive Slot Selection
+   - Consecutive slot prediction
+   - Risk-based slot selection
+   - Pattern-based placement optimization
+
+4. 👥 AI-Based Jury Assignment Optimization
+   - Learn successful jury combinations
+   - Adaptive jury selection based on performance
+   - Pattern-based jury assignment
+
+5. 📊 AI-Based Self-Learning System (ENABLED by default)
+   - Başarılı çözümlerden pattern extraction
+   - Solution quality metrics tracking
+   - Continuous improvement through experience
+
+6. 📈 AI-Based Post-Processing Analytics (ENABLED by default)
+   - Priority distribution analysis
+   - Time-slot utilization metrics
+   - Scheduling effectiveness insights
 """
 
 from typing import Dict, List, Any, Tuple, Optional, Set
 import time
-import random
+import math
 import logging
-from collections import defaultdict
-from datetime import time as dt_time
+from collections import defaultdict, deque
 from app.algorithms.base import OptimizationAlgorithm
-from app.algorithms.gap_free_assignment import GapFreeAssignment
 
 logger = logging.getLogger(__name__)
 
 
 class HybridCPSATNSGAAlgorithm(OptimizationAlgorithm):
     """
-    Hybrid CP-SAT + NSGA-II Algorithm - Enhanced with Pure Consecutive Grouping + Smart Jury Assignment.
+    🤖 AI-POWERED Hybrid CP-SAT + NSGA-II Algorithm - Tek Fazlı Deterministik Sorumlu + Jüri Atama Sistemi
     
-    SUCCESS STRATEGY (Same as Deep Search Algorithm):
-    NOT 1: RASTGELE INSTRUCTOR SIRALAMA - Her çalıştırmada farklı öğretim görevlisi sırası
-    NOT 2: AKILLI JÜRİ ATAMALARI - Aynı sınıfta ardışık olan instructor'lar birbirinin jürisi
-    NOT 3: CONSECUTIVE GROUPING - Her instructor'ın projeleri ardışık ve aynı sınıfta
+    Deterministik Strateji:
+    1. İş yüküne göre sıralama (descending) + 🎲 Seed-Based Diversity
+    2. Bloklara ayırma (sınıf sayısı kadar) + 🤖 AI Pattern Matching
+    3. Zigzag/snake draft ile sınıf atama + uniform workload balancing + 🤖 AI Smart Assignment
+    4. Priority-based consecutive timeslot yerleşimi (Bitirme → Ara) + 🎯 AI Predictive Selection
+    5. Round-robin jüri atama (sınıf içi) + 👥 AI Optimization
+    6. Placeholder ile eksik durumları tamamlama
+    7. COI kontrolü ve final stabilizasyon
     
-    This implementation uses the SAME logic as Deep Search Algorithm for:
-    1. RASTGELE INSTRUCTOR SIRALAMA - Her çalıştırmada farklı öğretim görevlisi sırası
-    2. EN ERKEN BOŞ SLOT mantığı - Boş slotlar varken ileri atlamaz
-    3. Uniform distribution - D111 dahil tüm sınıfları kullanır
-    4. Pure consecutive grouping - Her instructor'ın projeleri ardışık
-    5. AKILLI JÜRİ ATAMALARI - Aynı sınıfta ardışık olan instructor'lar birbirinin jürisi
-    6. Conflict-free scheduling - Instructor çakışmalarını önler
-    
-    Strategy:
-    "Bir öğretim görevlimizi sorumlu olduğu projelerden birisiyle birlikte 
-    diyelim ki 09:00-09:30 zaman slotuna ve D106 sınıfına atamasını yaptık. 
-    Bu öğretim görevlimizin diğer sorumlu olduğu projeleri de aynı sınıfa 
-    ve hemen sonraki zaman slotlarına atayalım ki çok fazla yer değişimi olmasın"
-    
-    Original Features (Preserved):
-    - Hybrid CP-SAT + NSGA-II optimization
-    - Constraint programming
-    - Multi-objective optimization
+    ✅ AI Features:
+    - AI Learning & Analytics: ENABLED by default (pattern learning, analytics, self-improvement)
+    - AI Optimization Features: OPTIONAL (disabled by default to maintain determinism)
+    - Deterministic Diversity: Seed-based variation for different solutions
     """
     
     def __init__(self, params: Optional[Dict[str, Any]] = None):
         super().__init__(params)
-        self.name = "Hybrid CP-SAT + NSGA-II"
-        self.description = "Hybrid constraint programming and multi-objective optimization"
+        self.name = "Hybrid CP-SAT + NSGA-II AI-Powered Deterministic Assignment"
+        self.description = "AI-Enhanced tek fazlı deterministik sorumlu + jüri atama sistemi (Bitirme öncelikli)"
         
-        # CP-SAT parameters
-        from app.core.config import settings
-        params = params or {}
-        self.cp_sat_timeout = params.get("cp_sat_timeout", settings.ORTOOLS_TIMEOUT)
-        self.use_real_ortools = params.get("use_real_ortools", settings.USE_REAL_ORTOOLS)
+        # Data storage
+        self.projects = []
+        self.instructors = []
+        self.classrooms = []
+        self.timeslots = []
         
-        # NSGA-II parameters
-        self.population_size = params.get("population_size", 100)
-        self.generations = params.get("generations", 50)
-        self.mutation_rate = params.get("mutation_rate", 0.1)
-        self.crossover_rate = params.get("crossover_rate", 0.8)
+        # İş yükü hesaplama
+        self.workload = {}  # instructor_id -> workload (total project count)
         
-        # Hybrid parameters
-        self.cp_sat_weight = params.get("cp_sat_weight", 0.3)  # Weight for CP-SAT solutions
-        self.nsga_weight = params.get("nsga_weight", 0.7)      # Weight for NSGA-II solutions
+        # Placeholder counter
+        self.placeholder_counter = 0
+        self.placeholder_instructor = "[Arastirma Gorevlisi]"
         
-        # Gap-Free Assignment manager for better assignment
-        self.gap_free_manager = GapFreeAssignment()
+        # Uniform distribution threshold
+        self.workload_threshold = params.get("workload_threshold", 2) if params else 2
+        
+        # 🎲 Diversity: Seed for deterministic variation
+        self.random_seed = params.get("random_seed") if params else None
+        
+        # 🤖 AI Features Enable/Disable
+        self.ai_pattern_recognition = params.get("ai_pattern_recognition", False) if params else False
+        self.ai_smart_zigzag = params.get("ai_smart_zigzag", False) if params else False
+        self.ai_predictive_slot_selection = params.get("ai_predictive_slot_selection", False) if params else False
+        self.ai_jury_optimization = params.get("ai_jury_optimization", False) if params else False
+        self.ai_self_learning = params.get("ai_self_learning", True) if params else True  # Enabled by default
+        
+        # 🤖 AI Learning Data Structures
+        self.ai_pattern_database = {
+            "successful_priority_slot_pairs": defaultdict(int),  # {(project_type, slot_order): success_count}
+            "successful_zigzag_patterns": defaultdict(int),  # {(block_index, direction): success_count}
+            "successful_uniform_distributions": defaultdict(int),  # {(class_loads_tuple): success_count}
+            "successful_consecutive_placements": defaultdict(int),  # {(classroom_id, start_slot): success_count}
+            "successful_jury_combinations": defaultdict(int),  # {(inst1, inst2, responsible): success_count}
+        }
+        self.ai_performance_history = deque(maxlen=100)  # Son 100 çözümün performans metrikleri
+        self.ai_priority_distribution_history = deque(maxlen=50)  # Son 50 priority distribution metriği
         
     def initialize(self, data: Dict[str, Any]) -> None:
-        """Initialize the algorithm with input data."""
+        """Initialize the algorithm with problem data."""
         self.data = data
         self.projects = data.get("projects", [])
         self.instructors = data.get("instructors", [])
-        self.classrooms = data.get("classrooms", [])
+        all_classrooms = data.get("classrooms", [])
         self.timeslots = data.get("timeslots", [])
         
-        # Initialize population
-        self.population = []
-        self.generation = 0
+        # Sınıf sayısı kontrolü
+        classroom_count = data.get("classroom_count")
+        if classroom_count and classroom_count > 0:
+            if classroom_count > len(all_classrooms):
+                logger.warning(
+                    f"İstenen sınıf sayısı ({classroom_count}) mevcut sınıf sayısından "
+                    f"({len(all_classrooms)}) fazla. Tüm sınıflar kullanılacak."
+                )
+                self.classrooms = all_classrooms
+            else:
+                self.classrooms = all_classrooms[:classroom_count]
+                logger.info(f"Sınıf sayısı kontrolü: {classroom_count} sınıf kullanılıyor")
+        else:
+            self.classrooms = all_classrooms
         
-    def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute the hybrid algorithm (required by BaseAlgorithm)."""
-        self.initialize(data)
-        return self.optimize(data)
+        # Validate data
+        if not self.projects or not self.instructors or not self.classrooms or not self.timeslots:
+            raise ValueError("Insufficient data for Hybrid CP-SAT + NSGA-II Algorithm")
+        
+        # İş yükü hesaplama
+        self._calculate_workloads()
+        
+        logger.info(f"Initialized: {len(self.projects)} projects, {len(self.instructors)} instructors, "
+                   f"{len(self.classrooms)} classrooms, {len(self.timeslots)} timeslots")
     
-    def optimize(self, data: Dict[str, Any]) -> Dict[str, Any]:
+    def optimize(self, data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Run Hybrid CP-SAT + NSGA-II optimization with Pure Consecutive Grouping + Smart Jury.
+        Tek fazlı deterministik optimizasyon.
         
-        SUCCESS STRATEGY (Same as Deep Search Algorithm):
-        NOT 1: RASTGELE INSTRUCTOR SIRALAMA - Her çalıştırmada farklı öğretim görevlisi sırası
-        NOT 2: AKILLI JÜRİ ATAMALARI - Aynı sınıfta ardışık olan instructor'lar birbirinin jürisi
-        NOT 3: CONSECUTIVE GROUPING - Her instructor'ın projeleri ardışık ve aynı sınıfta
+        Returns:
+            Dict with assignments, schedule, and metadata
         """
         start_time = time.time()
-        self.initialize(data)
         
-        logger.info("Hybrid CP-SAT + NSGA-II Algorithm başlatılıyor (Enhanced Randomizer + Consecutive Grouping + Smart Jury mode)...")
-        logger.info(f"  Projeler: {len(self.projects)}")
-        logger.info(f"  Instructors: {len(self.instructors)}")
-        logger.info(f"  Sınıflar: {len(self.classrooms)}")
-        logger.info(f"  Zaman Slotları: {len(self.timeslots)}")
-
-        # Pure Consecutive Grouping Algorithm - Same as Deep Search
-        logger.info("Pure Consecutive Grouping + Enhanced Randomizer + Smart Jury ile optimal çözüm oluşturuluyor...")
-        best_solution = self._create_pure_consecutive_grouping_solution()
-        logger.info(f"  Pure Consecutive Grouping: {len(best_solution)} proje atandı")
+        if data:
+            self.initialize(data)
         
-        # Conflict detection ve resolution
-        if best_solution and len(best_solution) > 0:
-            logger.info("Conflict detection ve resolution...")
-            conflicts = self._detect_conflicts(best_solution)
+        logger.info("=" * 80)
+        logger.info("HYBRID CP-SAT + NSGA-II AI-POWERED DETERMİNİSTİK ALGORİTMA BAŞLATILIYOR...")
+        logger.info("=" * 80)
+        logger.info(f"Projeler: {len(self.projects)}")
+        logger.info(f"Bitirme: {len([p for p in self.projects if self._is_bitirme_project(p)])}")
+        logger.info(f"Ara: {len([p for p in self.projects if not self._is_bitirme_project(p)])}")
+        logger.info(f"Instructors: {len(self.instructors)}")
+        logger.info(f"Sınıflar: {len(self.classrooms)}")
+        logger.info(f"Zaman Slotları: {len(self.timeslots)}")
+        logger.info("")
+        logger.info("🤖 AI ÖZELLİKLERİ:")
+        logger.info(f"  Pattern Recognition: {'✅' if self.ai_pattern_recognition else '❌'}")
+        logger.info(f"  Smart Zigzag: {'✅' if self.ai_smart_zigzag else '❌'}")
+        logger.info(f"  Predictive Slot Selection: {'✅' if self.ai_predictive_slot_selection else '❌'}")
+        logger.info(f"  Jury Optimization: {'✅' if self.ai_jury_optimization else '❌'}")
+        logger.info(f"  Self-Learning: {'✅' if self.ai_self_learning else '❌'}")
+        logger.info("")
+        
+        # 1. İş yüküne göre sıralama
+        logger.info("1️⃣ İş Yüküne Göre Sıralama...")
+        sorted_instructors = self._sort_instructors_by_workload()
+        logger.info(f"Öğretim görevlileri sıralandı: {len(sorted_instructors)} kişi")
+        logger.info("")
+        
+        # 2. Blok oluşturma
+        logger.info("2️⃣ Blok Oluşturma...")
+        blocks = self._create_blocks(sorted_instructors)
+        logger.info(f"Oluşturulan blok sayısı: {len(blocks)}")
+        for i, block in enumerate(blocks):
+            logger.info(f"  Blok {i+1}: {len(block)} öğretim görevlisi")
+        logger.info("")
+        
+        # 3. Ön seçim ve uniform dağılım değerlendirmesi
+        logger.info("3️⃣ Ön Seçim ve Uniform Dağılım Değerlendirmesi...")
+        candidate_assignments = self._deterministic_class_assignment_with_uniform(blocks)
+        logger.info("Sınıf atamaları tamamlandı:")
+        for class_id, inst_list in candidate_assignments.items():
+            class_workload = sum(self.workload.get(inst_id, 0) for inst_id in inst_list)
+            logger.info(f"  Sınıf {class_id}: {len(inst_list)} öğretim görevlisi (Toplam Yük: {class_workload})")
+        logger.info("")
+        
+        # 4. Nihai atama (priority-based consecutive placement + round-robin jury)
+        logger.info("4️⃣ Nihai Atama (Bitirme Öncelikli + Consecutive Placement + Round-Robin Jury)...")
+        final_assignments = self._execute_final_assignments_priority_based(candidate_assignments)
+        logger.info(f"Toplam {len(final_assignments)} atama yapıldı")
+        logger.info("")
+        
+        # 5. COI kontrolü ve placeholder tamamlama
+        logger.info("5️⃣ COI Kontrolü ve Placeholder Tamamlama...")
+        stabilized_assignments = self._stabilize_with_placeholder_check(final_assignments)
+        logger.info(f"Stabilizasyon tamamlandı: {len(stabilized_assignments)} atama")
+        logger.info("")
+        
+        execution_time = time.time() - start_time
+        
+        # 🤖 AI Learning: Başarılı pattern'leri öğren
+        if self.ai_self_learning:
+            # Priority distribution history'ye ekle
+            bitirme_priority_score = self._calculate_bitirme_priority_score(stabilized_assignments)
+            self.ai_priority_distribution_history.append(bitirme_priority_score)
             
-            if conflicts:
-                logger.warning(f"  {len(conflicts)} conflict detected!")
-                best_solution = self._resolve_conflicts(best_solution)
-                
-                remaining_conflicts = self._detect_conflicts(best_solution)
-                if remaining_conflicts:
-                    logger.error(f"  WARNING: {len(remaining_conflicts)} conflicts still remain!")
-                else:
-                    logger.info("  All conflicts successfully resolved!")
-            else:
-                logger.info("  No conflicts detected.")
+            # Zigzag pattern'lerini öğren
+            for block_idx in range(len(blocks)):
+                direction = 1 if block_idx % 2 == 0 else -1
+                self.ai_pattern_database["successful_zigzag_patterns"][(block_idx, direction)] += 1
+            
+            # Priority-slot pairs'lerini öğren
+            sorted_timeslots = sorted(self.timeslots, key=lambda x: self._parse_time_to_float(x.get("start_time", "09:00")))
+            for assignment in stabilized_assignments:
+                project_id = assignment.get("project_id")
+                timeslot_id = assignment.get("timeslot_id")
+                if project_id and timeslot_id:
+                    # Project type
+                    project = next((p for p in self.projects if p.get("id") == project_id), None)
+                    if project:
+                        project_type = "Bitirme" if self._is_bitirme_project(project) else "Ara"
+                        slot_order = next((idx for idx, ts in enumerate(sorted_timeslots) if ts.get("id") == timeslot_id), len(sorted_timeslots))
+                        self.ai_pattern_database["successful_priority_slot_pairs"][(project_type, slot_order)] += 1
         
-        # Final stats
-        final_stats = self._calculate_grouping_stats(best_solution)
-        logger.info(f"  Final consecutive grouping stats:")
-        logger.info(f"    Consecutive instructors: {final_stats['consecutive_count']}")
-        logger.info(f"    Avg classroom changes: {final_stats['avg_classroom_changes']:.2f}")
-
-        end_time = time.time()
-        execution_time = end_time - start_time
-        logger.info(f"Hybrid CP-SAT + NSGA-II Algorithm completed. Execution time: {execution_time:.2f}s")
-
+        # 🤖 AI Self-Learning: Çözüm performansını kaydet
+        self._ai_record_solution_performance(stabilized_assignments, execution_time)
+        
+        # 🤖 AI Post-Processing Analytics
+        ai_analytics = self._ai_analyze_solution_quality(stabilized_assignments, blocks, candidate_assignments)
+        
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("SONUÇLAR")
+        logger.info(f"  Toplam Atama: {len(stabilized_assignments)}")
+        logger.info(f"  Placeholder Sayısı: {self._count_placeholders(stabilized_assignments)}")
+        bitirme_priority_score = self._calculate_bitirme_priority_score(stabilized_assignments)
+        logger.info(f"  Bitirme Öncelik Skoru: {bitirme_priority_score:.2f}")
+        logger.info(f"  Süre: {execution_time:.2f}s")
+        if self.ai_self_learning and ai_analytics:
+            logger.info(f"  📊 AI Analytics: {ai_analytics}")
+        logger.info("=" * 80)
+        
         return {
-            "assignments": best_solution or [],
-            "schedule": best_solution or [],
-            "solution": best_solution or [],
-            "fitness_scores": self._calculate_fitness_scores(best_solution or []),
+            "assignments": stabilized_assignments,
+            "schedule": stabilized_assignments,
+            "solution": stabilized_assignments,
+            "fitness_scores": {
+                "total_assignments": len(stabilized_assignments),
+                "placeholder_count": self._count_placeholders(stabilized_assignments),
+                "bitirme_priority_score": self._calculate_bitirme_priority_score(stabilized_assignments)
+            },
             "execution_time": execution_time,
-            "algorithm": "Hybrid CP-SAT + NSGA-II (Enhanced Randomizer + Consecutive Grouping + Smart Jury)",
+            "algorithm": "Hybrid CP-SAT + NSGA-II AI-Powered Deterministic",
             "status": "completed",
+            "workload_distribution": self.workload,
             "optimizations_applied": [
-                "enhanced_randomizer_instructor_order",  # NOT 1
-                "pure_consecutive_grouping",  # NOT 3
-                "smart_jury_assignment",  # NOT 2
-                "consecutive_jury_pairing",  # NOT 2
-                "conflict_detection_and_resolution",
-                "uniform_classroom_distribution",
-                "earliest_slot_assignment",
-                "hybrid_cp_sat_nsga_optimization"
+                "deterministic_workload_sorting",
+                "block_based_distribution",
+                "zigzag_class_assignment",
+                "uniform_workload_balancing",
+                "priority_based_timeslot_placement",
+                "consecutive_timeslot_placement",
+                "round_robin_jury_assignment",
+                "placeholder_support",
+                "coi_check"
             ],
-            "stats": final_stats,
-            "parameters": {
-                "algorithm_type": "consecutive_grouping_with_smart_jury",
-                "enhanced_randomizer_instructor_order": True,  # NOT 1
-                "smart_jury_assignment": True,  # NOT 2
-                "consecutive_jury_pairing": True,  # NOT 2
-                "conflict_prevention": True,
-                "same_classroom_priority": True,
-                "uniform_distribution": True,
-                "earliest_slot_strategy": True,
-                "cp_sat_timeout": self.cp_sat_timeout,
-                "population_size": self.population_size,
-                "generations": self.generations
+            "ai_analytics": ai_analytics,
+            "ai_features": {
+                "pattern_recognition": self.ai_pattern_recognition,
+                "smart_zigzag": self.ai_smart_zigzag,
+                "predictive_slot_selection": self.ai_predictive_slot_selection,
+                "jury_optimization": self.ai_jury_optimization,
+                "self_learning": self.ai_self_learning
             }
         }
     
-    def _generate_initial_population(self) -> None:
-        """Generate initial population using CP-SAT and random methods."""
-        cp_sat_solutions = []
-        
-        # Try CP-SAT if available
-        if self.use_real_ortools:
-            cp_sat_solutions = self._run_cp_sat()
-        else:
-            # Simulate CP-SAT with constraint-aware generation
-            cp_sat_solutions = self._simulate_cp_sat()
-        
-        # Generate random solutions to fill population
-        random_solutions = []
-        for _ in range(self.population_size - len(cp_sat_solutions)):
-            random_solutions.append(self._generate_random_solution())
-        
-        # Combine and initialize population
-        self.population = cp_sat_solutions + random_solutions
-        
-        # Evaluate initial population and repair conflicts
-        for solution in self.population:
-            # Repair any conflicts in initial solutions
-            self._repair_mutation_conflicts(solution["assignment"])
-            solution["fitness"] = self._calculate_fitness_scores(solution["assignment"])
-    
-    def _run_cp_sat(self) -> List[Dict[str, Any]]:
-        """Run real CP-SAT solver (requires OR-Tools)."""
-        try:
-            from ortools.sat.python import cp_model
-            
-            # Create CP-SAT model
-            model = cp_model.CpModel()
-            
-            # Decision variables
-            assignments = {}
-            for project in self.projects:
-                for classroom in self.classrooms:
-                    for timeslot in self.timeslots:
-                        var_name = f"p{project['id']}_c{classroom['id']}_t{timeslot['id']}"
-                        assignments[var_name] = model.NewBoolVar(var_name)
-            
-            # Constraints
-            # Each project must be assigned exactly once
-            for project in self.projects:
-                project_vars = []
-                for classroom in self.classrooms:
-                    for timeslot in self.timeslots:
-                        var_name = f"p{project['id']}_c{classroom['id']}_t{timeslot['id']}"
-                        project_vars.append(assignments[var_name])
-                model.Add(sum(project_vars) == 1)
-            
-            # Each classroom-timeslot combination can have at most one project
-            for classroom in self.classrooms:
-                for timeslot in self.timeslots:
-                    slot_vars = []
-                    for project in self.projects:
-                        var_name = f"p{project['id']}_c{classroom['id']}_t{timeslot['id']}"
-                        slot_vars.append(assignments[var_name])
-                    model.Add(sum(slot_vars) <= 1)
-            
-            # Solve
-            solver = cp_model.CpSolver()
-            solver.parameters.max_time_in_seconds = self.cp_sat_timeout
-            status = solver.Solve(model)
-            
-            solutions = []
-            if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-                # Extract solution
-                solution = []
-                for project in self.projects:
-                    for classroom in self.classrooms:
-                        for timeslot in self.timeslots:
-                            var_name = f"p{project['id']}_c{classroom['id']}_t{timeslot['id']}"
-                            if solver.Value(assignments[var_name]) == 1:
-                                solution.append({
-                                    "project_id": project["id"],
-                                    "classroom_id": classroom["id"],
-                                    "timeslot_id": timeslot["id"],
-                                    "instructors": self._assign_instructors(project)
-                                })
-                                break
-                
-                solutions.append({
-                    "assignment": solution,
-                    "method": "cp_sat",
-                    "status": "optimal" if status == cp_model.OPTIMAL else "feasible"
-                })
-            
-            return solutions
-            
-        except ImportError:
-            print("OR-Tools not available, using simulation")
-            return self._simulate_cp_sat()
-    
-    def _simulate_cp_sat(self) -> List[Dict[str, Any]]:
-        """Simulate CP-SAT with constraint-aware solution generation using Gap-Free Assignment."""
-        solutions = []
-        
-        # Generate one high-quality solution using Gap-Free Assignment
-        gap_free_solution = self.gap_free_manager.assign_projects_gap_free(
-            projects=self.projects,
-            classrooms=self.classrooms,
-            timeslots=self.timeslots,
-            instructors=self.instructors
-        )
-        
-        if gap_free_solution:
-            solutions.append({
-                "assignment": gap_free_solution,
-                "method": "gap_free_assignment",
-                "status": "feasible"
-            })
-        
-        # Generate additional constraint-satisfying solutions for diversity
-        for _ in range(min(5, self.population_size // 4)):
-            solution = self._generate_constraint_satisfying_solution()
-            if solution:
-                solutions.append({
-                    "assignment": solution,
-                    "method": "simulated_cp_sat",
-                    "status": "feasible"
-                })
-        
-        return solutions
-    
-    def _generate_constraint_satisfying_solution(self) -> List[Dict[str, Any]]:
-        """
-        Generate a solution that satisfies basic constraints with consecutive instructor grouping.
-        
-        Strategy:
-        1. Group projects by instructor
-        2. For each instructor, assign all their projects to the same classroom
-        3. Assign projects to consecutive time slots
-        4. Prevent instructor conflicts (same instructor in same timeslot)
-        """
-        solution = []
-        used_slots = set()
-        instructor_timeslot_usage = {}  # Track instructor usage per timeslot
-        
-        # Sort timeslots by start time
-        sorted_timeslots = sorted(self.timeslots, key=lambda x: x.get("start_time", "09:00"))
-        
-        # Group projects by instructor (responsible_id)
-        from collections import defaultdict
-        instructor_projects = defaultdict(list)
-        for project in self.projects:
-            responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-            if responsible_id:
-                instructor_projects[responsible_id].append(project)
-        
-        # For each instructor, assign their projects consecutively
-        for instructor_id, instructor_project_list in instructor_projects.items():
-            if not instructor_project_list:
-                continue
-            
-            # Find best classroom and starting timeslot for this instructor
-            best_classroom = None
-            best_start_slot_idx = None
-            
-            # Try to find a classroom with enough consecutive slots
-            for classroom in self.classrooms:
-                classroom_id = classroom.get("id")
-                
-                # Check for consecutive available slots
-                for start_idx in range(len(sorted_timeslots)):
-                    available_consecutive_slots = 0
-                    
-                    for slot_idx in range(start_idx, len(sorted_timeslots)):
-                        timeslot_id = sorted_timeslots[slot_idx].get("id")
-                        slot_key = (classroom_id, timeslot_id)
-                        
-                        # Check if slot is available AND instructor is not busy
-                        if (slot_key not in used_slots and 
-                            (instructor_id, timeslot_id) not in instructor_timeslot_usage):
-                            available_consecutive_slots += 1
-                        else:
-                            break
-                        
-                        # Found enough consecutive slots?
-                        if available_consecutive_slots >= len(instructor_project_list):
-                            break
-                    
-                    # This location is suitable
-                    if available_consecutive_slots >= len(instructor_project_list):
-                        best_classroom = classroom_id
-                        best_start_slot_idx = start_idx
-                        break
-                
-                if best_classroom:
-                    break
-            
-            # Assign projects to the found location
-            if best_classroom and best_start_slot_idx is not None:
-                current_slot_idx = best_start_slot_idx
-                
-                for project in instructor_project_list:
-                    # Find next available slot
-                    while current_slot_idx < len(sorted_timeslots):
-                        timeslot_id = sorted_timeslots[current_slot_idx].get("id")
-                        slot_key = (best_classroom, timeslot_id)
-                        
-                        # Check if slot is available AND instructor is not busy
-                        if (slot_key not in used_slots and 
-                            (instructor_id, timeslot_id) not in instructor_timeslot_usage):
-                            # Assign project to this slot
-                            solution.append({
-                                "project_id": project.get("id"),
-                                "classroom_id": best_classroom,
-                                "timeslot_id": timeslot_id,
-                                "instructors": self._assign_instructors(project)
-                            })
-                            
-                            used_slots.add(slot_key)
-                            instructor_timeslot_usage[(instructor_id, timeslot_id)] = True
-                            current_slot_idx += 1
-                            break
-                        else:
-                            # Slot not available, try next
-                            current_slot_idx += 1
-                    
-                    # If we ran out of slots in this classroom, try alternative
-                    if current_slot_idx >= len(sorted_timeslots):
-                        # Try to find any available slot
-                        found_alternative = False
-                        for alt_classroom in self.classrooms:
-                            for alt_timeslot in sorted_timeslots:
-                                alt_slot_key = (alt_classroom.get("id"), alt_timeslot.get("id"))
-                                
-                                if (alt_slot_key not in used_slots and 
-                                    (instructor_id, alt_timeslot.get("id")) not in instructor_timeslot_usage):
-                                    solution.append({
-                                        "project_id": project.get("id"),
-                                        "classroom_id": alt_classroom.get("id"),
-                                        "timeslot_id": alt_timeslot.get("id"),
-                                        "instructors": self._assign_instructors(project)
-                                    })
-                                    
-                                    used_slots.add(alt_slot_key)
-                                    instructor_timeslot_usage[(instructor_id, alt_timeslot.get("id"))] = True
-                                    found_alternative = True
-                                    break
-                            
-                            if found_alternative:
-                                break
-                        
-                        if not found_alternative:
-                            print(f"WARNING: No available slot for project {project.get('id')} - resource constraint")
-            else:
-                # No consecutive slots found, try to assign individually
-                for project in instructor_project_list:
-                    found_slot = False
-                    for classroom in self.classrooms:
-                        for timeslot in sorted_timeslots:
-                            slot_key = (classroom.get("id"), timeslot.get("id"))
-                            
-                            if (slot_key not in used_slots and 
-                                (instructor_id, timeslot.get("id")) not in instructor_timeslot_usage):
-                                solution.append({
-                                    "project_id": project.get("id"),
-                                    "classroom_id": classroom.get("id"),
-                                    "timeslot_id": timeslot.get("id"),
-                                    "instructors": self._assign_instructors(project)
-                                })
-                                
-                                used_slots.add(slot_key)
-                                instructor_timeslot_usage[(instructor_id, timeslot.get("id"))] = True
-                                found_slot = True
-                                break
-                        
-                        if found_slot:
-                            break
-                    
-                    if not found_slot:
-                        print(f"WARNING: No available slot for project {project.get('id')} - resource constraint")
-        
-        return solution
-    
-    def _generate_random_solution(self) -> Dict[str, Any]:
-        """
-        Generate a random solution with consecutive instructor grouping.
-        
-        Strategy:
-        1. Group projects by instructor
-        2. Randomly assign instructors to classrooms
-        3. Assign each instructor's projects to consecutive slots
-        4. Prevent instructor conflicts
-        """
-        solution = []
-        used_slots = set()
-        instructor_timeslot_usage = {}  # Track instructor usage per timeslot
-        
-        # Sort timeslots by start time
-        sorted_timeslots = sorted(self.timeslots, key=lambda x: x.get("start_time", "09:00"))
-        
-        # Group projects by instructor (responsible_id)
-        from collections import defaultdict
-        instructor_projects = defaultdict(list)
-        for project in self.projects:
-            responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-            if responsible_id:
-                instructor_projects[responsible_id].append(project)
-        
-        # Shuffle instructors for randomness
-        instructor_ids = list(instructor_projects.keys())
-        random.shuffle(instructor_ids)
-        
-        # For each instructor, assign their projects consecutively
-        for instructor_id in instructor_ids:
-            instructor_project_list = instructor_projects[instructor_id]
-            
-            if not instructor_project_list:
-                continue
-            
-            # Randomly select a classroom
-            random_classroom = random.choice(self.classrooms)
-            classroom_id = random_classroom.get("id")
-            
-            # Try to find consecutive slots in this classroom
-            found_consecutive = False
-            for start_idx in range(len(sorted_timeslots)):
-                available_consecutive_slots = 0
-                
-                for slot_idx in range(start_idx, len(sorted_timeslots)):
-                    timeslot_id = sorted_timeslots[slot_idx].get("id")
-                    slot_key = (classroom_id, timeslot_id)
-                    
-                    if (slot_key not in used_slots and 
-                        (instructor_id, timeslot_id) not in instructor_timeslot_usage):
-                        available_consecutive_slots += 1
-                    else:
-                        break
-                    
-                    if available_consecutive_slots >= len(instructor_project_list):
-                        break
-                
-                if available_consecutive_slots >= len(instructor_project_list):
-                    # Found consecutive slots, assign projects
-                    current_slot_idx = start_idx
-                    
-                    for project in instructor_project_list:
-                        timeslot_id = sorted_timeslots[current_slot_idx].get("id")
-                        slot_key = (classroom_id, timeslot_id)
-                        
-                        solution.append({
-                            "project_id": project.get("id"),
-                            "classroom_id": classroom_id,
-                            "timeslot_id": timeslot_id,
-                            "instructors": self._assign_instructors(project)
-                        })
-                        
-                        used_slots.add(slot_key)
-                        instructor_timeslot_usage[(instructor_id, timeslot_id)] = True
-                        current_slot_idx += 1
-                    
-                    found_consecutive = True
-                    break
-            
-            # If consecutive slots not found, assign individually
-            if not found_consecutive:
-                for project in instructor_project_list:
-                    found_slot = False
-                    
-                    # Try random slots
-                    available_slot_options = []
-                    for classroom in self.classrooms:
-                        for timeslot in sorted_timeslots:
-                            slot_key = (classroom.get("id"), timeslot.get("id"))
-                            
-                            if (slot_key not in used_slots and 
-                                (instructor_id, timeslot.get("id")) not in instructor_timeslot_usage):
-                                available_slot_options.append((classroom, timeslot, slot_key))
-                    
-                    if available_slot_options:
-                        classroom, timeslot, slot_key = random.choice(available_slot_options)
-                        
-                        solution.append({
-                            "project_id": project.get("id"),
-                            "classroom_id": classroom.get("id"),
-                            "timeslot_id": timeslot.get("id"),
-                            "instructors": self._assign_instructors(project)
-                        })
-                        
-                        used_slots.add(slot_key)
-                        instructor_timeslot_usage[(instructor_id, timeslot.get("id"))] = True
-                        found_slot = True
-                    
-                    if not found_slot:
-                        print(f"WARNING: No available slot for project {project.get('id')} in random solution - resource constraint")
-        
-        return {
-            "assignment": solution,
-            "method": "random"
-        }
-    
-    def _run_nsga_ii(self) -> None:
-        """Run NSGA-II optimization."""
-        for generation in range(self.generations):
-            self.generation = generation + 1
-            
-            # Selection, crossover, and mutation
-            offspring = self._generate_offspring()
-            
-            # Combine parent and offspring populations
-            combined_population = self.population + offspring
-            
-            # Non-dominated sorting and crowding distance
-            fronts = self._non_dominated_sorting(combined_population)
-            
-            # Select next generation
-            self.population = self._environmental_selection(fronts)
-    
-    def _generate_offspring(self) -> List[Dict[str, Any]]:
-        """Generate offspring through crossover and mutation."""
-        offspring = []
-        
-        while len(offspring) < self.population_size:
-            # Tournament selection
-            parent1 = self._tournament_selection()
-            parent2 = self._tournament_selection()
-            
-            # Crossover
-            if random.random() < self.crossover_rate:
-                child1, child2 = self._crossover(parent1, parent2)
-                offspring.extend([child1, child2])
-            else:
-                offspring.extend([parent1.copy(), parent2.copy()])
-            
-            # Mutation
-            for child in offspring[-2:]:
-                if random.random() < self.mutation_rate:
-                    self._mutate(child)
-                # Always repair conflicts after mutation
-                self._repair_mutation_conflicts(child["assignment"])
-                child["fitness"] = self._calculate_fitness_scores(child["assignment"])
-        
-        return offspring[:self.population_size]
-    
-    def _tournament_selection(self) -> Dict[str, Any]:
-        """Tournament selection for parent selection."""
-        tournament_size = 3
-        tournament = random.sample(self.population, min(tournament_size, len(self.population)))
-        
-        # Select best based on Pareto dominance
-        best = tournament[0]
-        for candidate in tournament[1:]:
-            if self._dominates(candidate, best):
-                best = candidate
-        
-        return best
-    
-    def _crossover(self, parent1: Dict[str, Any], parent2: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """Perform crossover between two parents."""
-        # Simple uniform crossover
-        child1_assignment = []
-        child2_assignment = []
-        
-        # Combine assignments from both parents
-        all_assignments = parent1["assignment"] + parent2["assignment"]
-        
-        # Remove duplicates and ensure feasibility
-        used_projects_child1 = set()
-        used_slots_child1 = set()
-        used_projects_child2 = set()
-        used_slots_child2 = set()
-        
-        for assignment in all_assignments:
-            project_id = assignment["project_id"]
-            slot_key = (assignment["classroom_id"], assignment["timeslot_id"])
-            
-            # Assign to child1 if not already used
-            if project_id not in used_projects_child1 and slot_key not in used_slots_child1:
-                child1_assignment.append(assignment.copy())
-                used_projects_child1.add(project_id)
-                used_slots_child1.add(slot_key)
-            
-            # Assign to child2 if not already used
-            if project_id not in used_projects_child2 and slot_key not in used_slots_child2:
-                child2_assignment.append(assignment.copy())
-                used_projects_child2.add(project_id)
-                used_slots_child2.add(slot_key)
-        
-        # Fill remaining slots randomly if needed
-        self._fill_remaining_slots(child1_assignment, used_projects_child1, used_slots_child1)
-        self._fill_remaining_slots(child2_assignment, used_projects_child2, used_slots_child2)
-        
-        return (
-            {"assignment": child1_assignment, "method": "crossover"},
-            {"assignment": child2_assignment, "method": "crossover"}
-        )
-    
-    def _mutate(self, solution: Dict[str, Any]) -> None:
-        """Perform mutation on a solution."""
-        assignment = solution["assignment"]
-        
-        if len(assignment) >= 2:
-            # Swap two random assignments
-            i, j = random.sample(range(len(assignment)), 2)
-            
-            if random.random() < 0.5:
-                # Swap classrooms
-                assignment[i]["classroom_id"], assignment[j]["classroom_id"] = \
-                    assignment[j]["classroom_id"], assignment[i]["classroom_id"]
-            else:
-                # Swap timeslots
-                assignment[i]["timeslot_id"], assignment[j]["timeslot_id"] = \
-                    assignment[j]["timeslot_id"], assignment[i]["timeslot_id"]
-            
-            # Check for conflicts after mutation
-            self._repair_mutation_conflicts(assignment)
-    
-    def _repair_mutation_conflicts(self, assignment: List[Dict[str, Any]]) -> None:
-        """Repair conflicts that may have been introduced by mutation."""
-        # Check for duplicate project assignments
-        project_assignments = {}
-        to_remove = []
-        
-        for i, assignment_item in enumerate(assignment):
-            project_id = assignment_item.get("project_id")
-            if project_id in project_assignments:
-                # Mark for removal
-                to_remove.append(i)
-            else:
-                project_assignments[project_id] = assignment_item
-        
-        # Remove duplicates (in reverse order to maintain indices)
-        for i in reversed(to_remove):
-            assignment.pop(i)
-        
-        # Check for slot conflicts
-        slot_assignments = {}
-        to_remove = []
-        
-        for i, assignment_item in enumerate(assignment):
-            slot_key = (assignment_item.get("classroom_id"), assignment_item.get("timeslot_id"))
-            if slot_key in slot_assignments:
-                # Mark for removal
-                to_remove.append(i)
-            else:
-                slot_assignments[slot_key] = assignment_item
-        
-        # Remove conflicts (in reverse order to maintain indices)
-        for i in reversed(to_remove):
-            assignment.pop(i)
-        
-        # Check for instructor conflicts
-        instructor_timeslot_usage = {}
-        to_remove = []
-        
-        for i, assignment_item in enumerate(assignment):
-            project_id = assignment_item.get("project_id")
-            project = next((p for p in self.projects if p["id"] == project_id), None)
-            if project and project.get("responsible_id"):
-                instructor_id = project["responsible_id"]
-                timeslot_id = assignment_item.get("timeslot_id")
-                key = (instructor_id, timeslot_id)
-                
-                if key in instructor_timeslot_usage:
-                    # Mark for removal
-                    to_remove.append(i)
-                else:
-                    instructor_timeslot_usage[key] = assignment_item
-        
-        # Remove instructor conflicts (in reverse order to maintain indices)
-        for i in reversed(to_remove):
-            assignment.pop(i)
-    
-    def _non_dominated_sorting(self, population: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
-        """Perform non-dominated sorting."""
-        fronts = []
-        remaining = population.copy()
-        
-        while remaining:
-            front = []
-            for solution in remaining[:]:
-                dominated = False
-                for other in remaining:
-                    if solution != other and self._dominates(other, solution):
-                        dominated = True
-                        break
-                
-                if not dominated:
-                    front.append(solution)
-                    remaining.remove(solution)
-            
-            if front:
-                fronts.append(front)
-            else:
-                break
-        
-        return fronts
-    
-    def _dominates(self, solution1: Dict[str, Any], solution2: Dict[str, Any]) -> bool:
-        """Check if solution1 dominates solution2."""
-        fitness1 = solution1["fitness"]
-        fitness2 = solution2["fitness"]
-        
-        # solution1 dominates solution2 if it's better in at least one objective
-        # and not worse in any objective
-        better_in_any = False
-        for obj in ["load_balance", "classroom_changes", "time_efficiency"]:
-            if fitness1.get(obj, 0) < fitness2.get(obj, 0):
-                better_in_any = True
-            elif fitness1.get(obj, 0) > fitness2.get(obj, 0):
-                return False
-        
-        return better_in_any
-    
-    def _environmental_selection(self, fronts: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-        """Select next generation using environmental selection."""
-        new_population = []
-        
-        for front in fronts:
-            if len(new_population) + len(front) <= self.population_size:
-                new_population.extend(front)
-            else:
-                # Calculate crowding distance and select best
-                remaining_slots = self.population_size - len(new_population)
-                self._calculate_crowding_distance(front)
-                front.sort(key=lambda x: x["crowding_distance"], reverse=True)
-                new_population.extend(front[:remaining_slots])
-                break
-        
-        return new_population
-    
-    def _calculate_crowding_distance(self, front: List[Dict[str, Any]]) -> None:
-        """Calculate crowding distance for solutions in a front."""
-        if len(front) <= 2:
-            for solution in front:
-                solution["crowding_distance"] = float('inf')
-            return
-        
-        # Initialize crowding distance
-        for solution in front:
-            solution["crowding_distance"] = 0
-        
-        # Calculate for each objective
-        objectives = ["load_balance", "classroom_changes", "time_efficiency"]
-        
-        for obj in objectives:
-            # Sort by objective value
-            front.sort(key=lambda x: x["fitness"].get(obj, 0))
-            
-            # Set boundary points to infinity
-            front[0]["crowding_distance"] = float('inf')
-            front[-1]["crowding_distance"] = float('inf')
-            
-            # Calculate distance for intermediate points
-            obj_range = front[-1]["fitness"].get(obj, 0) - front[0]["fitness"].get(obj, 0)
-            if obj_range > 0:
-                for i in range(1, len(front) - 1):
-                    distance = (front[i + 1]["fitness"].get(obj, 0) - front[i - 1]["fitness"].get(obj, 0)) / obj_range
-                    front[i]["crowding_distance"] += distance
-    
-    def _select_best_solution(self) -> List[Dict[str, Any]]:
-        """Select the best solution from the final population."""
-        if not self.population:
-            return []
-        
-        # Select solution with most assignments first, then best fitness
-        best_solution = min(self.population, key=lambda x: (
-            -len(x["assignment"]),  # Prefer solutions with more assignments (negative for descending)
-            x["fitness"].get("total", float('inf'))
-        ))
-        
-        # Final repair of the best solution
-        self._repair_mutation_conflicts(best_solution["assignment"])
-        
-        # Try to fill any remaining missing projects
-        assigned_project_ids = set(assignment.get("project_id") for assignment in best_solution["assignment"])
-        used_slots = set((assignment.get("classroom_id"), assignment.get("timeslot_id")) for assignment in best_solution["assignment"])
-        
-        self._fill_remaining_slots(best_solution["assignment"], assigned_project_ids, used_slots)
-        
-        # Final repair after filling
-        self._repair_mutation_conflicts(best_solution["assignment"])
-        
-        return best_solution["assignment"]
-    
-    def _calculate_fitness_scores(self, solution: List[Dict[str, Any]]) -> Dict[str, float]:
-        """Calculate fitness scores for a solution."""
-        load_balance = self._calculate_load_balance_score(solution)
-        classroom_changes = self._calculate_classroom_changes_score(solution)
-        time_efficiency = self._calculate_time_efficiency_score(solution)
-        
-        total = load_balance + classroom_changes + time_efficiency
-        
-        return {
-            "load_balance": load_balance,
-            "classroom_changes": classroom_changes,
-            "time_efficiency": time_efficiency,
-            "total": total
-        }
-    
-    def _calculate_load_balance_score(self, solution: List[Dict[str, Any]]) -> float:
-        """Calculate load balance score."""
-        instructor_loads = {}
-        
-        for assignment in solution:
-            for instructor_id in assignment.get("instructors", []):
-                instructor_loads[instructor_id] = instructor_loads.get(instructor_id, 0) + 1
-        
-        if not instructor_loads:
-            return 0.0
-        
-        loads = list(instructor_loads.values())
-        avg_load = sum(loads) / len(loads)
-        variance = sum((load - avg_load) ** 2 for load in loads) / len(loads)
-        
-        return variance
-    
-    def _calculate_classroom_changes_score(self, solution: List[Dict[str, Any]]) -> float:
-        """Calculate classroom changes score."""
-        instructor_classrooms = {}
-        changes = 0
-        
-        for assignment in solution:
-            classroom_id = assignment["classroom_id"]
-            for instructor_id in assignment.get("instructors", []):
-                if instructor_id in instructor_classrooms:
-                    if instructor_classrooms[instructor_id] != classroom_id:
-                        changes += 1
-                instructor_classrooms[instructor_id] = classroom_id
-        
-        return float(changes)
-    
-    def _calculate_time_efficiency_score(self, solution: List[Dict[str, Any]]) -> float:
-        """Calculate time efficiency score."""
-        instructor_timeslots = {}
-        gaps = 0
-        
-        for assignment in solution:
-            timeslot_id = assignment["timeslot_id"]
-            for instructor_id in assignment.get("instructors", []):
-                if instructor_id not in instructor_timeslots:
-                    instructor_timeslots[instructor_id] = []
-                instructor_timeslots[instructor_id].append(timeslot_id)
-        
-        for timeslots in instructor_timeslots.values():
-            sorted_slots = sorted(timeslots)
-            for i in range(1, len(sorted_slots)):
-                if sorted_slots[i] - sorted_slots[i-1] > 1:
-                    gaps += 1
-        
-        # Late slot penalty and early slot rewards integration
-        try:
-            penalty = getattr(self, "_calculate_time_slot_penalty", lambda s: 0.0)(solution)
-            reward = getattr(self, "_calculate_total_slot_reward", lambda s: 0.0)(solution)
-        except Exception:
-            penalty, reward = 0.0, 0.0
-
-        return float(gaps) + penalty - (reward / 50.0)
-    
-    def _assign_instructors(self, project: Dict[str, Any]) -> List[int]:
-        """Assign instructors to a project (only responsible instructor, no jury assignment)."""
-        assigned = []
-        
-        # Always assign responsible instructor
-        responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-        if responsible_id:
-            assigned.append(responsible_id)
-        
-        return assigned
-    
-    def _assign_consecutive_jury_members(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Bir öğretim görevlisi kendi sorumlu olduğu projeleri tamamladıktan sonra,
-        aynı sınıfta ardışık zaman slotlarında başka bir öğretim görevlisinin projelerine
-        jüri olarak atanır. Böylece hiçbir sınıf değişikliği yapılmadan oturumlar devam eder.
-        
-        Args:
-            assignments: Mevcut atamalar listesi
-            
-        Returns:
-            Jüri atamaları eklenmiş atamalar listesi
-        """
-        from collections import defaultdict
-        
-        # Sort timeslots by start time
-        sorted_timeslots = sorted(self.timeslots, key=lambda x: x.get("start_time", "09:00"))
-        timeslot_index_map = {ts.get("id"): idx for idx, ts in enumerate(sorted_timeslots)}
-        
-        # Group assignments by classroom
-        classroom_assignments = defaultdict(list)
-        for assignment in assignments:
-            classroom_id = assignment.get("classroom_id")
-            classroom_assignments[classroom_id].append(assignment)
-        
-        # For each classroom, organize assignments by responsible instructor and timeslot
-        for classroom_id, class_assignments in classroom_assignments.items():
-            # Sort by timeslot
-            class_assignments.sort(key=lambda x: timeslot_index_map.get(x.get("timeslot_id"), 0))
-            
-            # Group by responsible instructor
-            instructor_slots = defaultdict(list)
-            for assignment in class_assignments:
-                project_id = assignment.get("project_id")
-                project = next((p for p in self.projects if p.get("id") == project_id), None)
-                if project and project.get("responsible_id"):
-                    instructor_id = project["responsible_id"]
-                    instructor_slots[instructor_id].append(assignment)
-            
-            # Find consecutive instructor groups in the same classroom
-            for instructor_id, instructor_assignments in instructor_slots.items():
-                # Sort instructor assignments by timeslot
-                instructor_assignments.sort(key=lambda x: timeslot_index_map.get(x.get("timeslot_id"), 0))
-                
-                # Get the last timeslot of this instructor in this classroom
-                if instructor_assignments:
-                    last_assignment = instructor_assignments[-1]
-                    last_timeslot_id = last_assignment.get("timeslot_id")
-                    last_timeslot_idx = timeslot_index_map.get(last_timeslot_id, -1)
-                    
-                    # Check if there are consecutive assignments from another instructor
-                    # immediately after this instructor's last assignment
-                    if last_timeslot_idx >= 0 and last_timeslot_idx + 1 < len(sorted_timeslots):
-                        next_timeslot_id = sorted_timeslots[last_timeslot_idx + 1].get("id")
-                        
-                        # Find if there's an assignment in the next timeslot in the same classroom
-                        next_assignment = next(
-                            (a for a in class_assignments 
-                             if a.get("timeslot_id") == next_timeslot_id 
-                             and a.get("classroom_id") == classroom_id),
-                            None
-                        )
-                        
-                        if next_assignment:
-                            # Get the responsible instructor of the next assignment
-                            next_project_id = next_assignment.get("project_id")
-                            next_project = next((p for p in self.projects if p.get("id") == next_project_id), None)
-                            
-                            if next_project and next_project.get("responsible_id"):
-                                next_instructor_id = next_project["responsible_id"]
-                                
-                                # If it's a different instructor, current instructor can be jury for the next
-                                if next_instructor_id != instructor_id:
-                                    # Add current instructor as jury to all consecutive assignments of next instructor
-                                    consecutive_next_assignments = []
-                                    
-                                    for idx in range(last_timeslot_idx + 1, len(sorted_timeslots)):
-                                        timeslot_id = sorted_timeslots[idx].get("id")
-                                        
-                                        # Find assignment in this timeslot
-                                        slot_assignment = next(
-                                            (a for a in class_assignments 
-                                             if a.get("timeslot_id") == timeslot_id 
-                                             and a.get("classroom_id") == classroom_id),
-                                            None
-                                        )
-                                        
-                                        if slot_assignment:
-                                            slot_project_id = slot_assignment.get("project_id")
-                                            slot_project = next((p for p in self.projects if p.get("id") == slot_project_id), None)
-                                            
-                                            if slot_project and slot_project.get("responsible_id") == next_instructor_id:
-                                                # This is part of the consecutive group
-                                                consecutive_next_assignments.append(slot_assignment)
-                                            else:
-                                                # Different instructor, stop
-                                                break
-                                        else:
-                                            # No assignment, stop
-                                            break
-                                    
-                                    # Add current instructor as jury to all consecutive assignments
-                                    for assignment in consecutive_next_assignments:
-                                        if "instructors" not in assignment:
-                                            assignment["instructors"] = []
-                                        
-                                        if instructor_id not in assignment["instructors"]:
-                                            assignment["instructors"].append(instructor_id)
-        
-        return assignments
-    
-    def _fill_remaining_slots(self, assignment: List[Dict[str, Any]], used_projects: set, used_slots: set) -> None:
-        """
-        Fill remaining slots in an assignment with consecutive instructor grouping.
-        
-        Strategy:
-        1. Find all unassigned projects
-        2. Group by instructor
-        3. Try to assign each instructor's projects consecutively
-        4. Prevent instructor conflicts
-        """
-        # Track instructor usage
-        instructor_timeslot_usage = {}
-        for assign in assignment:
-            project_id = assign.get("project_id")
-            project = next((p for p in self.projects if p.get("id") == project_id), None)
-            if project and project.get("responsible_id"):
-                instructor_id = project["responsible_id"]
-                timeslot_id = assign.get("timeslot_id")
-                instructor_timeslot_usage[(instructor_id, timeslot_id)] = True
-        
-        # Sort timeslots by start time
-        sorted_timeslots = sorted(self.timeslots, key=lambda x: x.get("start_time", "09:00"))
-        
-        # Group unassigned projects by instructor
-        from collections import defaultdict
-        unassigned_by_instructor = defaultdict(list)
-        for project in self.projects:
-            if project["id"] not in used_projects:
-                responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-                if responsible_id:
-                    unassigned_by_instructor[responsible_id].append(project)
-        
-        # For each instructor, try to assign their projects consecutively
-        for instructor_id, instructor_project_list in unassigned_by_instructor.items():
-            if not instructor_project_list:
-                continue
-            
-            # Try to find consecutive slots
-            found_consecutive = False
-            for classroom in self.classrooms:
-                classroom_id = classroom.get("id")
-                
-                for start_idx in range(len(sorted_timeslots)):
-                    available_consecutive_slots = 0
-                    
-                    for slot_idx in range(start_idx, len(sorted_timeslots)):
-                        timeslot_id = sorted_timeslots[slot_idx].get("id")
-                        slot_key = (classroom_id, timeslot_id)
-                        
-                        if (slot_key not in used_slots and 
-                            (instructor_id, timeslot_id) not in instructor_timeslot_usage):
-                            available_consecutive_slots += 1
-                        else:
-                            break
-                        
-                        if available_consecutive_slots >= len(instructor_project_list):
-                            break
-                    
-                    if available_consecutive_slots >= len(instructor_project_list):
-                        # Found consecutive slots
-                        current_slot_idx = start_idx
-                        
-                        for project in instructor_project_list:
-                            timeslot_id = sorted_timeslots[current_slot_idx].get("id")
-                            slot_key = (classroom_id, timeslot_id)
-                            
-                            assignment.append({
-                                "project_id": project.get("id"),
-                                "classroom_id": classroom_id,
-                                "timeslot_id": timeslot_id,
-                                "instructors": self._assign_instructors(project)
-                            })
-                            
-                            used_projects.add(project.get("id"))
-                            used_slots.add(slot_key)
-                            instructor_timeslot_usage[(instructor_id, timeslot_id)] = True
-                            current_slot_idx += 1
-                        
-                        found_consecutive = True
-                        break
-                
-                if found_consecutive:
-                    break
-            
-            # If consecutive slots not found, assign individually
-            if not found_consecutive:
-                for project in instructor_project_list:
-                    found_slot = False
-                    
-                    for classroom in self.classrooms:
-                        for timeslot in sorted_timeslots:
-                            slot_key = (classroom.get("id"), timeslot.get("id"))
-                            
-                            if (slot_key not in used_slots and 
-                                (instructor_id, timeslot.get("id")) not in instructor_timeslot_usage):
-                                assignment.append({
-                                    "project_id": project.get("id"),
-                                    "classroom_id": classroom.get("id"),
-                                    "timeslot_id": timeslot.get("id"),
-                                    "instructors": self._assign_instructors(project)
-                                })
-                                
-                                used_projects.add(project.get("id"))
-                                used_slots.add(slot_key)
-                                instructor_timeslot_usage[(instructor_id, timeslot.get("id"))] = True
-                                found_slot = True
-                                break
-                        
-                        if found_slot:
-                            break
-                    
-                    if not found_slot:
-                        # No available slot - this is a resource constraint issue
-                        print(f"WARNING: No available slot for project {project.get('id')} - resource constraint")
-
-    def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute method for compatibility with AlgorithmService"""
-        return self.optimize(data)
-
     def evaluate_fitness(self, solution: Dict[str, Any]) -> float:
-        """Evaluate the fitness of a solution."""
+        """
+        Çözümün kalitesini değerlendirir.
+        
+        🤖 AI Enhancement: Pattern quality bonus for successful combinations
+        
+        Returns:
+            Fitness score (yüksek = iyi)
+        """
         assignments = solution.get("assignments", [])
         if not assignments:
-            return float('inf')
+            return 0.0
         
-        # Simple fitness: minimize gaps and maximize utilization
-        total_assignments = len(assignments)
-        if total_assignments == 0:
-            return float('inf')
+        # Fitness = atama sayısı - placeholder sayısı - çakışma sayısı + bitirme öncelik bonusu
+        placeholder_count = self._count_placeholders(assignments)
+        conflict_count = self._count_conflicts(assignments)
+        bitirme_priority_score = self._calculate_bitirme_priority_score(assignments)
         
-        # Count gaps (empty timeslots)
-        used_timeslots = set()
-        for assignment in assignments:
-            timeslot_id = assignment.get("timeslot_id")
-            if timeslot_id:
-                used_timeslots.add(timeslot_id)
+        base_fitness = len(assignments) - (placeholder_count * 0.5) - (conflict_count * 2.0) + (bitirme_priority_score * 0.3)
         
-        total_timeslots = len(self.timeslots)
-        gaps = total_timeslots - len(used_timeslots)
+        # 🤖 AI Quality Bonus: Pattern consistency bonus
+        ai_bonus = 0.0
+        if self.ai_pattern_recognition:
+            pattern_score = self._ai_calculate_pattern_quality_score(assignments)
+            ai_bonus = pattern_score * 0.1  # AI bonus weight
         
-        # Fitness: lower is better (minimize gaps)
-        fitness = gaps / total_timeslots if total_timeslots > 0 else 1.0
+        total_fitness = base_fitness + ai_bonus
         
-        return fitness
-
-    def repair_solution(self, solution: Dict[str, Any], validation_report: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Hybrid CP-SAT NSGA icin ozel onarim metodlari.
-        Hybrid CP-SAT NSGA hibrit kısıt programlama ve çok amaçlı optimizasyon yaklaşımı kullanır.
-        """
-        assignments = solution.get("assignments", [])
+        if self.ai_pattern_recognition:
+            logger.debug(f"  🤖 AI Fitness: Base={base_fitness:.2f}, AI Bonus={ai_bonus:.2f}, Total={total_fitness:.2f}")
         
-        # Hybrid CP-SAT NSGA-specific repair: hybrid approach
-        assignments = self._repair_duplicates_hybrid_cpsat_nsga(assignments)
-        assignments = self._repair_gaps_hybrid_cpsat_nsga(assignments)
-        assignments = self._repair_coverage_hybrid_cpsat_nsga(assignments)
-        assignments = self._repair_hybrid_constraints(assignments)
-        
-        solution["assignments"] = assignments
-        return solution
-
-    def _repair_duplicates_hybrid_cpsat_nsga(self, assignments):
-        """Hybrid CP-SAT NSGA-specific duplicate repair using hybrid approach"""
-        from collections import defaultdict
-        
-        # Group by project_id and keep the best assignment using hybrid approach
-        project_assignments = defaultdict(list)
-        for assignment in assignments:
-            project_id = assignment.get("project_id")
-            if project_id:
-                project_assignments[project_id].append(assignment)
-        
-        # For each project, choose the best assignment using hybrid approach
-        repaired = []
-        for project_id, project_list in project_assignments.items():
-            if len(project_list) == 1:
-                repaired.append(project_list[0])
-            else:
-                # Hybrid selection: choose the assignment with best hybrid score
-                best_assignment = self._hybrid_select_best_assignment(project_list)
-                repaired.append(best_assignment)
-        
-        return repaired
-
-    def _repair_gaps_hybrid_cpsat_nsga(self, assignments):
-        """Hybrid CP-SAT NSGA-specific gap repair using hybrid approach"""
-        # Group by classroom
-        classroom_assignments = defaultdict(list)
-        for assignment in assignments:
-            classroom_id = assignment.get("classroom_id")
-            if classroom_id:
-                classroom_assignments[classroom_id].append(assignment)
-        
-        repaired = []
-        for classroom_id, class_assignments in classroom_assignments.items():
-            # Sort by timeslot
-            sorted_assignments = sorted(class_assignments, key=lambda x: x.get("timeslot_id", ""))
-            
-            # Hybrid gap filling: use hybrid behavior
-            hybrid_assignments = self._hybrid_fill_gaps(sorted_assignments)
-            repaired.extend(hybrid_assignments)
-        
-        return repaired
-
-    def _repair_coverage_hybrid_cpsat_nsga(self, assignments):
-        """Hybrid CP-SAT NSGA-specific coverage repair ensuring all projects are assigned"""
-        assigned_projects = set(assignment.get("project_id") for assignment in assignments)
-        all_projects = set(project.get("id") for project in self.projects)
-        missing_projects = all_projects - assigned_projects
-        
-        # Add missing projects with hybrid assignment
-        for project_id in missing_projects:
-            project = next((p for p in self.projects if p.get("id") == project_id), None)
-            if project:
-                # Find best available slot using hybrid approach
-                best_slot = self._hybrid_find_best_slot(project, assignments)
-                if best_slot:
-                    instructors = self._get_project_instructors_hybrid_cpsat_nsga(project)
-                    if instructors:
-                        new_assignment = {
-                            "project_id": project_id,
-                            "classroom_id": best_slot["classroom_id"],
-                            "timeslot_id": best_slot["timeslot_id"],
-                            "instructors": instructors
-                        }
-                        assignments.append(new_assignment)
-        
-        return assignments
-
-    def _repair_hybrid_constraints(self, assignments):
-        """Hybrid CP-SAT NSGA-specific constraint repair ensuring hybrid constraints"""
-        # Remove assignments that violate hybrid constraints
-        repaired = []
-        for assignment in assignments:
-            timeslot_id = assignment.get("timeslot_id")
-            timeslot = next((ts for ts in self.timeslots if ts.get("id") == timeslot_id), None)
-            if timeslot:
-                start_time = timeslot.get("start_time", "09:00")
-                try:
-                    hour = int(start_time.split(":")[0])
-                    if hour <= 16:  # Only keep assignments before 16:30
-                        repaired.append(assignment)
-                except:
-                    repaired.append(assignment)
-            else:
-                repaired.append(assignment)
-        
-        return repaired
-
-    def _hybrid_select_best_assignment(self, assignments):
-        """Hybrid selection of best assignment"""
-        best_assignment = assignments[0]
-        best_hybrid = self._calculate_hybrid_score(assignments[0])
-        
-        for assignment in assignments[1:]:
-            hybrid = self._calculate_hybrid_score(assignment)
-            if hybrid > best_hybrid:
-                best_hybrid = hybrid
-                best_assignment = assignment
-        
-        return best_assignment
-
-    def _calculate_hybrid_score(self, assignment):
-        """Calculate hybrid score for an assignment"""
-        score = 0
-        timeslot_id = assignment.get("timeslot_id", "")
-        classroom_id = assignment.get("classroom_id", "")
-        
-        # Prefer timeslots that have high hybrid score
-        try:
-            hour = int(timeslot_id.split("_")[0]) if "_" in timeslot_id else 9
-            # Hybrid: prefer timeslots that have high hybrid score
-            if 9 <= hour <= 12:  # Morning hybrid
-                score += 30
-            elif 13 <= hour <= 16:  # Afternoon hybrid
-                score += 25
-            else:
-                score += 10
-        except:
-            score += 20  # Default score
-        
-        # Prefer classrooms that have high hybrid score
-        if "A" in classroom_id:
-            score += 20  # A classrooms have high hybrid score
-        elif "B" in classroom_id:
-            score += 15  # B classrooms have high hybrid score
-        
-        return score
-
-    def _hybrid_fill_gaps(self, assignments):
-        """Fill gaps using hybrid approach"""
-        if len(assignments) <= 1:
-            return assignments
-        
-        # Hybrid gap filling - keep all assignments for now
-        return assignments
-
-    def _hybrid_find_best_slot(self, project, assignments):
-        """Find best available slot using hybrid approach"""
-        used_slots = set((a.get("classroom_id"), a.get("timeslot_id")) for a in assignments)
-        
-        best_slot = None
-        best_hybrid = -1
-        
-        for classroom in self.classrooms:
-            for timeslot in self.timeslots:
-                slot_key = (classroom.get("id"), timeslot.get("id"))
-                if slot_key not in used_slots:
-                    hybrid = self._calculate_hybrid_score({"timeslot_id": timeslot.get("id"), "classroom_id": classroom.get("id")})
-                    if hybrid > best_hybrid:
-                        best_hybrid = hybrid
-                        best_slot = {
-                            "classroom_id": classroom.get("id"),
-                            "timeslot_id": timeslot.get("id")
-                        }
-        
-        return best_slot
-
-    def _get_project_instructors_hybrid_cpsat_nsga(self, project):
-        """Get instructors for a project using hybrid approach (only responsible instructor)"""
-        instructors = []
-        responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-        if responsible_id:
-            instructors.append(responsible_id)
-        
-        return instructors
+        return total_fitness
     
-    def _calculate_grouping_stats(self, assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # ============================================================================
+    # İŞ YÜKÜ HESAPLAMA VE SIRALAMA
+    # ============================================================================
+    
+    def _calculate_workloads(self) -> None:
+        """Öğretim görevlilerinin iş yükünü hesapla (toplam proje sayısı)."""
+        self.workload = {}
+        
+        for instructor in self.instructors:
+            instructor_id = instructor.get("id")
+            if instructor_id is None:
+                continue
+            
+            # Sorumlu olduğu proje sayısı
+            responsible_count = sum(
+                1 for p in self.projects
+                if p.get("responsible_instructor_id") == instructor_id or
+                p.get("responsible_id") == instructor_id
+            )
+            
+            self.workload[instructor_id] = responsible_count
+        
+        logger.debug(f"İş yükü hesaplaması tamamlandı: {len(self.workload)} öğretim görevlisi")
+    
+    def _sort_instructors_by_workload(self) -> List[Dict[str, Any]]:
         """
-        Calculate consecutive grouping statistics.
+        Tüm öğretim görevlilerini iş yüküne göre descending sırala.
+        
+        🎲 DIVERSITY: Seed-based rotation for variation without breaking determinism
+        
+        Returns:
+            Sıralı öğretim görevlisi listesi
+        """
+        def sort_key(instructor):
+            instructor_id = instructor.get("id")
+            workload_value = self.workload.get(instructor_id, 0)
+            # İş yükü yüksekten düşüğe, eşitse ID'ye göre
+            return (-workload_value, instructor_id)
+        
+        sorted_list = sorted(self.instructors, key=sort_key)
+        
+        # 🎲 DIVERSITY ENHANCEMENT: Seed-based rotation within same workload groups
+        if self.random_seed is not None:
+            # Groupları oluştur: aynı iş yükünde olan instructor'lar
+            grouped_by_workload = defaultdict(list)
+            for inst in sorted_list:
+                workload_val = self.workload.get(inst.get("id"), 0)
+                grouped_by_workload[workload_val].append(inst)
+            
+            # Her grupta seed-based rotation yap
+            rotated_list = []
+            for workload_val in sorted(grouped_by_workload.keys(), reverse=True):
+                group = grouped_by_workload[workload_val]
+                if len(group) > 1:  # Birden fazla instructor varsa rotate et
+                    # Seed-based rotation: deterministik ama her seed'de farklı sıralama
+                    rotation_offset = self.random_seed % len(group) if self.random_seed else 0
+                    rotated_group = group[rotation_offset:] + group[:rotation_offset]
+                    rotated_list.extend(rotated_group)
+                    logger.debug(f"🎲 Group (workload={workload_val}): Rotated by {rotation_offset} positions")
+                else:
+                    rotated_list.extend(group)
+            
+            sorted_list = rotated_list
+            logger.info("🎲 Diversity: Seed-based rotation applied for instructor sorting")
+        
+        logger.info("İş yükü sıralaması (İlk 10):")
+        for idx, inst in enumerate(sorted_list[:10], 1):
+            workload_val = self.workload.get(inst.get("id"), 0)
+            logger.info(f"  {idx}. {inst.get('name', 'Unknown')} (İş Yükü: {workload_val})")
+        
+        return sorted_list
+    
+    # ============================================================================
+    # BLOK OLUŞTURMA
+    # ============================================================================
+    
+    def _create_blocks(self, sorted_instructors: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+        """
+        Sıralı öğretim görevlilerini sınıf sayısı kadar bloklara ayır.
         
         Args:
-            assignments: List of assignments
-            
+            sorted_instructors: İş yüküne göre sıralı öğretim görevlileri
+        
         Returns:
-            Dict with grouping statistics
+            Bloklar listesi
         """
-        from collections import defaultdict
+        X = len(self.classrooms)  # Sınıf sayısı
+        Y = len(sorted_instructors)  # Öğretim görevlisi sayısı
         
-        # Group assignments by instructor
-        instructor_assignments = defaultdict(list)
-        for assignment in assignments:
-            project_id = assignment.get("project_id")
-            project = next((p for p in self.projects if p.get("id") == project_id), None)
-            if project and project.get("responsible_id"):
-                instructor_id = project["responsible_id"]
-                instructor_assignments[instructor_id].append(assignment)
+        if X == 0:
+            return []
         
-        # Calculate stats
-        consecutive_count = 0
-        total_classroom_changes = 0
+        block_size = X
+        num_blocks = math.ceil(Y / X)
         
-        for instructor_id, instructor_assignment_list in instructor_assignments.items():
-            # Check if all assignments are in the same classroom
-            classrooms_used = set(a.get("classroom_id") for a in instructor_assignment_list)
-            classroom_changes = len(classrooms_used) - 1
-            total_classroom_changes += classroom_changes
-            
-            # Check if timeslots are consecutive
-            timeslot_ids = sorted([a.get("timeslot_id") for a in instructor_assignment_list])
-            is_consecutive = all(
-                timeslot_ids[i] + 1 == timeslot_ids[i+1] 
-                for i in range(len(timeslot_ids) - 1)
-            ) if len(timeslot_ids) > 1 else True
-            
-            # Count as consecutive if same classroom and consecutive timeslots
-            if is_consecutive and len(classrooms_used) == 1:
-                consecutive_count += 1
+        blocks = []
+        for i in range(0, len(sorted_instructors), block_size):
+            block = sorted_instructors[i:i + block_size]
+            blocks.append(block)
         
-        total_instructors = len(instructor_assignments)
-        avg_classroom_changes = total_classroom_changes / total_instructors if total_instructors > 0 else 0
+        logger.info(f"Blok oluşturma: X={X} sınıf, Y={Y} öğretim görevlisi")
+        logger.info(f"  Block size: {block_size}, Blok sayısı: {num_blocks}")
         
-        return {
-            "consecutive_count": consecutive_count,
-            "total_instructors": total_instructors,
-            "avg_classroom_changes": avg_classroom_changes,
-            "consecutive_percentage": (consecutive_count / total_instructors * 100) if total_instructors > 0 else 0
-        }
-
-    # ========== Pure Consecutive Grouping Methods (Same as Deep Search Algorithm) ==========
-
-    def _create_pure_consecutive_grouping_solution(self) -> List[Dict[str, Any]]:
+        return blocks
+    
+    # ============================================================================
+    # DETERMİNİSTİK SINIF ATAMA (ZIGZAG + UNIFORM DAĞILIM)
+    # ============================================================================
+    
+    def _deterministic_class_assignment_with_uniform(
+        self, 
+        blocks: List[List[Dict[str, Any]]]
+    ) -> Dict[int, List[int]]:
         """
-        Pure consecutive grouping çözümü oluştur - Same as Deep Search Algorithm.
+        Zigzag/snake draft ile deterministik sınıf atama + uniform workload balancing.
         
-        SUCCESS STRATEGY:
-        NOT 1: RASTGELE INSTRUCTOR SIRALAMA - Her çalıştırmada farklı öğretim görevlisi sırası
-        NOT 2: AKILLI JÜRİ ATAMALARI - Aynı sınıfta ardışık olan instructor'lar birbirinin jürisi
-        NOT 3: CONSECUTIVE GROUPING - Her instructor'ın projeleri ardışık ve aynı sınıfta
+        Strateji:
+        - Çift bloklar: 1 → X yönünde
+        - Tek bloklar: X → 1 yönünde
+        - Uniform dağılım kontrolü: Her sınıfın toplam yükü ortalama ±threshold aralığında olmalı
         
-        "Bir öğretim görevlimizi sorumlu olduğu projelerden birisiyle birlikte diyelim ki 09:00-09:30 
-        zaman slotuna ve D106 sınıfına atamasını yaptık. Bu öğretim görevlimizin diğer sorumlu olduğu 
-        projeleri de aynı sınıfa ve hemen sonraki zaman slotlarına atayalım ki çok fazla yer değişimi olmasın"
+        Args:
+            blocks: Öğretim görevlisi blokları
+        
+        Returns:
+            candidate_assignments: class_id -> [instructor_id, ...]
+        """
+        candidate_assignments = defaultdict(list)
+        class_ids = [c.get("id") for c in self.classrooms]
+        
+        # Her sınıf için iş yükü takibi
+        class_loads = {cid: 0 for cid in class_ids}
+        
+        # İlk aşama: Zigzag atama
+        for block_index, block in enumerate(blocks):
+            # Zigzag yön belirleme
+            direction = 1 if block_index % 2 == 0 else -1
+            ordered_classes = class_ids if direction == 1 else list(reversed(class_ids))
+            
+            logger.debug(f"Blok {block_index + 1}: Yön = {'1→X' if direction == 1 else 'X→1'}")
+            
+            # Blok içindeki her öğretim görevlisini bir sınıfa ata
+            for idx, instructor in enumerate(block):
+                instructor_id = instructor.get("id")
+                if instructor_id is None:
+                    continue
+                
+                # Sınıf seçimi (modulo ile wrap-around)
+                target_class = ordered_classes[idx % len(ordered_classes)]
+                candidate_assignments[target_class].append(instructor_id)
+                class_loads[target_class] += self.workload.get(instructor_id, 0)
+                
+                logger.debug(
+                    f"  {instructor.get('name', 'Unknown')} → Sınıf {target_class} "
+                    f"(Blok pozisyon: {idx}, Yük: {self.workload.get(instructor_id, 0)})"
+                )
+        
+        # İkinci aşama: Uniform dağılım kontrolü ve düzeltme
+        logger.info("Uniform dağılım kontrolü başlatılıyor...")
+        avg_load = sum(class_loads.values()) / len(class_loads) if class_loads else 0
+        
+        logger.info(f"Ortalama sınıf yükü: {avg_load:.2f}, Threshold: ±{self.workload_threshold}")
+        
+        # Dengesizlik düzeltme: Yüksek yüklü sınıftan düşük yüklü sınıfa aktarım
+        max_iterations = 100  # Sonsuz döngü önleme
+        iteration = 0
+        
+        while iteration < max_iterations:
+            iteration += 1
+            
+            # En yüksek ve en düşük yüklü sınıfları bul
+            max_class = max(class_loads, key=lambda c: class_loads[c])
+            min_class = min(class_loads, key=lambda c: class_loads[c])
+            
+            max_load = class_loads[max_class]
+            min_load = class_loads[min_class]
+            
+            # Denge kontrolü
+            if (max_load - min_load) <= (2 * self.workload_threshold):
+                logger.info(f"Uniform dağılım sağlandı (Iterasyon: {iteration})")
+                break
+            
+            # En yüksek yüklü sınıftan en fazla iş yüküne sahip hoca bul
+            if not candidate_assignments[max_class]:
+                break
+            
+            # En yüksek iş yüküne sahip hocayı bul
+            max_instructor_id = max(
+                candidate_assignments[max_class],
+                key=lambda inst_id: self.workload.get(inst_id, 0)
+            )
+            max_instructor_load = self.workload.get(max_instructor_id, 0)
+            
+            # Aktarım yapılabilir mi? (min_class'a eklenince threshold'u aşmıyorsa)
+            if (class_loads[min_class] + max_instructor_load - avg_load) <= self.workload_threshold:
+                # Aktarım yap
+                candidate_assignments[max_class].remove(max_instructor_id)
+                candidate_assignments[min_class].append(max_instructor_id)
+                class_loads[max_class] -= max_instructor_load
+                class_loads[min_class] += max_instructor_load
+                
+                logger.debug(
+                    f"Iterasyon {iteration}: {max_instructor_id} "
+                    f"Sınıf {max_class} (yük: {max_load}) → "
+                    f"Sınıf {min_class} (yük: {min_load})"
+                )
+            else:
+                # Aktarım yapılamaz, çıkış
+                logger.debug(f"Iterasyon {iteration}: Aktarım yapılamaz, durduruluyor")
+                break
+        
+        # Son rapor
+        logger.info("Uniform dağılım sonuçları:")
+        for cid in class_ids:
+            load = class_loads[cid]
+            diff = load - avg_load
+            logger.info(f"  Sınıf {cid}: Yük = {load:.2f}, Ortalamadan fark = {diff:+.2f}")
+        
+        return candidate_assignments
+    
+    # ============================================================================
+    # NİHAİ ATAMA (PRIORITY-BASED CONSECUTIVE PLACEMENT + ROUND-ROBIN JURY)
+    # ============================================================================
+    
+    def _execute_final_assignments_priority_based(
+        self,
+        candidate_assignments: Dict[int, List[int]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Her sınıf için priority-based proje yerleştirme ve jüri atama.
+        
+        Strateji:
+        - Bitirme projeleri her zaman erken timeslotlarda olmalı
+        - Ara projeler bitirme projelerinden hemen sonra gelmeli
+        - Her sınıftaki öğretim görevlileri kendi projelerini consecutive slotlara alır
+        - Aynı sınıftaki diğer öğretim görevlileri jüri olur (round-robin)
+        
+        Args:
+            candidate_assignments: class_id -> [instructor_id, ...]
+        
+        Returns:
+            Final atamalar listesi
         """
         assignments = []
-        
-        # Zaman slotlarını sırala
-        sorted_timeslots = sorted(
-            self.timeslots,
-            key=lambda x: self._parse_time(x.get("start_time", "09:00"))
-        )
-        
-        # Instructor bazında projeleri grupla
-        instructor_projects = defaultdict(list)
-        for project in self.projects:
-            responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-            if responsible_id:
-                instructor_projects[responsible_id].append(project)
-        
-        # Sıkı conflict prevention
         used_slots = set()  # (classroom_id, timeslot_id)
         instructor_timeslot_usage = defaultdict(set)  # instructor_id -> set of timeslot_ids
-        assigned_projects = set()  # project_ids that have been assigned
         
-        # NOT 2 İÇİN: ARDIŞIK JÜRİ EŞLEŞTİRMESİ - Her sınıfta ardışık atanan instructor'ları takip et
-        classroom_instructor_sequence = defaultdict(list)  # classroom_id -> [{'instructor_id': ..., 'project_ids': [...]}]
+        # Timeslotları sırala
+        sorted_timeslots = sorted(
+            self.timeslots,
+            key=lambda x: self._parse_time_to_float(x.get("start_time", "09:00"))
+        )
         
-        # NOT 1: YENİ RANDOMIZER - Instructorları tamamen rastgele sırala
-        # Bu sayede her seferinde farklı öğretim görevlileri farklı sınıf ve zamanlarda olur
-        instructor_list = list(instructor_projects.items())
-        
-        # Güçlü randomizer - birden fazla karıştırma
-        for _ in range(3):  # 3 kez karıştır
-            random.shuffle(instructor_list)
-        
-        logger.info(f"🎲 YENİ RANDOMIZER: Instructorlar rastgele sıralandı: {[inst_id for inst_id, _ in instructor_list]}")
-        logger.info(f"📊 Toplam {len(instructor_list)} instructor rastgele sıralandı")
-        
-        # Her instructor için projeleri ata (consecutive grouping korunur!)
-        for instructor_id, instructor_project_list in instructor_list:
-            if not instructor_project_list:
-                continue
-            
-            logger.info(f"Instructor {instructor_id} için {len(instructor_project_list)} proje atanıyor...")
-            
-            # Bu instructor için en uygun sınıf ve başlangıç slotunu bul
-            best_classroom = None
-            best_start_slot_idx = None
-            
-            # ÖNCE: Tüm sınıflarda en erken boş slotu ara (consecutive olmasa bile)
-            earliest_available_slots = []
-            
-            for classroom in self.classrooms:
-                classroom_id = classroom.get("id")
-                
-                for start_idx in range(len(sorted_timeslots)):
-                    timeslot_id = sorted_timeslots[start_idx].get("id")
-                    slot_key = (classroom_id, timeslot_id)
-                    
-                    instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                    if not isinstance(instructor_slots, set):
-                        instructor_slots = set()
-                    
-                    if (slot_key not in used_slots and 
-                        timeslot_id not in instructor_slots):
-                        earliest_available_slots.append((start_idx, classroom_id))
-                        break
-            
-            # En erken boş slotu kullan
-            if earliest_available_slots:
-                earliest_available_slots.sort(key=lambda x: x[0])
-                best_start_slot_idx, best_classroom = earliest_available_slots[0]
-                logger.info(f"Instructor {instructor_id} için en erken boş slot bulundu: {best_classroom} - slot {best_start_slot_idx}")
-            else:
-                # Fallback: Tam ardışık slot arama (eski mantık)
-                for classroom in self.classrooms:
-                    classroom_id = classroom.get("id")
-                    
-                    for start_idx in range(len(sorted_timeslots)):
-                        available_consecutive_slots = 0
-                        
-                        for slot_idx in range(start_idx, len(sorted_timeslots)):
-                            timeslot_id = sorted_timeslots[slot_idx].get("id")
-                            slot_key = (classroom_id, timeslot_id)
-                            
-                            instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                            if not isinstance(instructor_slots, set):
-                                instructor_slots = set()
-                            
-                            if (slot_key not in used_slots and 
-                                timeslot_id not in instructor_slots):
-                                available_consecutive_slots += 1
-                            else:
-                                break
-                            
-                            if available_consecutive_slots >= len(instructor_project_list):
-                                break
-                        
-                        if available_consecutive_slots >= len(instructor_project_list):
-                            best_classroom = classroom_id
-                            best_start_slot_idx = start_idx
-                            break
-                    
-                    if best_classroom:
-                        break
-            
-            # Projeleri ata
-            if best_classroom and best_start_slot_idx is not None:
-                current_slot_idx = best_start_slot_idx
-                instructor_classroom_projects = []  # Bu instructor'ın bu sınıftaki projeleri (NOT 2 için)
-                
-                for project in instructor_project_list:
-                    project_id = project.get("id")
-                    
-                    # Bu proje zaten atanmış mı?
-                    if project_id in assigned_projects:
-                        logger.warning(f"UYARI: Proje {project_id} zaten atanmış, atlanıyor")
-                        continue
-                    
-                    # EN ERKEN BOŞ SLOT BUL - Tüm sınıflarda ara
-                    assigned = False
-                    
-                    # Önce mevcut sınıfta boş slot ara
-                    for slot_idx in range(current_slot_idx, len(sorted_timeslots)):
-                        timeslot_id = sorted_timeslots[slot_idx].get("id")
-                        slot_key = (best_classroom, timeslot_id)
-                        
-                        instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                        if not isinstance(instructor_slots, set):
-                            instructor_slots = set()
-                        
-                        if (slot_key not in used_slots and 
-                            timeslot_id not in instructor_slots):
-                            
-                            assignment = {
-                                "project_id": project_id,
-                                "classroom_id": best_classroom,
-                                "timeslot_id": timeslot_id,
-                                "is_makeup": project.get("is_makeup", False),
-                                "instructors": [instructor_id]
-                            }
-                            
-                            assignments.append(assignment)
-                            used_slots.add(slot_key)
-                            instructor_timeslot_usage[instructor_id].add(timeslot_id)
-                            assigned_projects.add(project_id)
-                            assigned = True
-                            instructor_classroom_projects.append(project_id)  # NOT 2: Jüri eşleştirmesi için kaydet
-                            logger.info(f"Proje {project_id} atandı: {best_classroom} - {timeslot_id}")
-                            break
-                    
-                    # Eğer mevcut sınıfta bulunamadıysa, tüm sınıflarda en erken boş slotu ara
-                    if not assigned:
-                        earliest_slot_found = None
-                        earliest_classroom = None
-                        earliest_slot_idx = float('inf')
-                        
-                        for classroom in self.classrooms:
-                            classroom_id = classroom.get("id")
-                            
-                            for slot_idx in range(len(sorted_timeslots)):
-                                timeslot_id = sorted_timeslots[slot_idx].get("id")
-                                slot_key = (classroom_id, timeslot_id)
-                                
-                                instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                                if not isinstance(instructor_slots, set):
-                                    instructor_slots = set()
-                                
-                                if (slot_key not in used_slots and 
-                                    timeslot_id not in instructor_slots):
-                                    
-                                    if slot_idx < earliest_slot_idx:
-                                        earliest_slot_idx = slot_idx
-                                        earliest_slot_found = timeslot_id
-                                        earliest_classroom = classroom_id
-                                    break
-                        
-                        # En erken boş slotu kullan
-                        if earliest_slot_found:
-                            assignment = {
-                                "project_id": project_id,
-                                "classroom_id": earliest_classroom,
-                                "timeslot_id": earliest_slot_found,
-                                "is_makeup": project.get("is_makeup", False),
-                                "instructors": [instructor_id]
-                            }
-                            
-                            assignments.append(assignment)
-                            used_slots.add((earliest_classroom, earliest_slot_found))
-                            instructor_timeslot_usage[instructor_id].add(earliest_slot_found)
-                            assigned_projects.add(project_id)
-                            assigned = True
-                            instructor_classroom_projects.append(project_id)  # NOT 2: Jüri eşleştirmesi için kaydet
-                            logger.info(f"Proje {project_id} en erken slot'a atandı: {earliest_classroom} - {earliest_slot_found}")
-                    
-                    if not assigned:
-                        logger.warning(f"UYARI: Proje {project_id} için hiçbir boş slot bulunamadı!")
-                
-                # NOT 2: Bu instructor'ı sınıf sequence'ine ekle (jüri eşleştirmesi için)
-                if instructor_classroom_projects:
-                    classroom_instructor_sequence[best_classroom].append({
-                        'instructor_id': instructor_id,
-                        'project_ids': instructor_classroom_projects
-                    })
-        
-        # NOT 2: ARDIŞIK JÜRİ EŞLEŞTİRMESİ - Aynı sınıfta ardışık atanan instructor'ları eşleştir
-        logger.info("Ardışık jüri eşleştirmesi başlatılıyor...")
-        self._assign_consecutive_jury_members(assignments, classroom_instructor_sequence)
-        
-        logger.info(f"Pure Consecutive Grouping tamamlandı: {len(assignments)} atama yapıldı")
-        return assignments
-
-    def _assign_consecutive_jury_members(self, assignments: List[Dict[str, Any]], 
-                                        classroom_instructor_sequence: Dict) -> None:
-        """
-        NOT 2: Aynı sınıfta ardışık atanan instructor'ları tespit et ve birbirinin jürisi yap.
-        
-        Mantık:
-        - Dr. Öğretim Görevlisi 14: D106'da consecutive (09:00-09:30)
-        - Dr. Öğretim Görevlisi 2: D106'da consecutive (09:30-10:00) 
-        
-        Sonuç:
-        - Öğretim Görevlisi 14 sorumlu → Öğretim Görevlisi 2 jüri
-        - Öğretim Görevlisi 2 sorumlu → Öğretim Görevlisi 14 jüri
-        """
-        jury_assignments_made = 0
-        
-        for classroom_id, instructor_sequence in classroom_instructor_sequence.items():
-            if len(instructor_sequence) < 2:
-                continue
-            
-            logger.info(f"Sınıf {classroom_id} için ardışık jüri eşleştirmesi yapılıyor...")
-            
-            for i in range(len(instructor_sequence) - 1):
-                instructor_a = instructor_sequence[i]
-                instructor_b = instructor_sequence[i + 1]
-                
-                instructor_a_id = instructor_a['instructor_id']
-                instructor_b_id = instructor_b['instructor_id']
-                
-                # Instructor A'nın projelerine Instructor B'yi jüri yap
-                for assignment in assignments:
-                    if assignment['project_id'] in instructor_a['project_ids']:
-                        if instructor_b_id not in assignment['instructors']:
-                            assignment['instructors'].append(instructor_b_id)
-                            jury_assignments_made += 1
-                            logger.info(f"  Proje {assignment['project_id']}: Instructor {instructor_a_id} sorumlu → Instructor {instructor_b_id} jüri")
-                
-                # Instructor B'nin projelerine Instructor A'yı jüri yap
-                for assignment in assignments:
-                    if assignment['project_id'] in instructor_b['project_ids']:
-                        if instructor_a_id not in assignment['instructors']:
-                            assignment['instructors'].append(instructor_a_id)
-                            jury_assignments_made += 1
-                            logger.info(f"  Proje {assignment['project_id']}: Instructor {instructor_b_id} sorumlu → Instructor {instructor_a_id} jüri")
-        
-        logger.info(f"Ardışık jüri eşleştirmesi tamamlandı: {jury_assignments_made} jüri ataması yapıldı")
-
-    def _detect_conflicts(self, assignments: List[Dict[str, Any]]) -> List[str]:
-        """Detect conflicts in assignments"""
-        conflicts = []
-        instructor_timeslot_counts = defaultdict(int)
-        
-        for assignment in assignments:
-            instructors_list = assignment.get('instructors', [])
-            timeslot_id = assignment.get('timeslot_id')
-            
-            for instructor_id in instructors_list:
-                key = f"instructor_{instructor_id}_timeslot_{timeslot_id}"
-                instructor_timeslot_counts[key] += 1
-                
-                if instructor_timeslot_counts[key] > 1:
-                    conflicts.append(key)
-        
-        return conflicts
-
-    def _resolve_conflicts(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Resolve conflicts by reassigning conflicting projects"""
-        conflicts = self._detect_conflicts(assignments)
-        if not conflicts:
+        if not sorted_timeslots:
+            logger.error("Timeslot bulunamadı!")
             return assignments
         
-        logger.warning(f"Conflict resolution: {len(conflicts)} conflicts detected but not resolved")
+        # Her sınıf için işlem yap
+        for classroom in self.classrooms:
+            classroom_id = classroom.get("id")
+            instructor_ids = candidate_assignments.get(classroom_id, [])
+            
+            if not instructor_ids:
+                logger.warning(f"Sınıf {classroom_id} için öğretim görevlisi yok, atlanıyor")
+                continue
+            
+            logger.info(f"Sınıf {classroom_id}: {len(instructor_ids)} öğretim görevlisi")
+            
+            # Bu sınıf için slot index takibi
+            class_slot_index = 0
+            
+            # Önce tüm Bitirme projelerini yerleştir
+            logger.debug(f"  Bitirme projeleri yerleştiriliyor...")
+            bitirme_assignments, class_slot_index = self._assign_projects_by_type(
+                instructor_ids,
+                classroom_id,
+                class_slot_index,
+                sorted_timeslots,
+                used_slots,
+                instructor_timeslot_usage,
+                project_type="bitirme"
+            )
+            assignments.extend(bitirme_assignments)
+            
+            # Sonra Ara projelerini yerleştir
+            logger.debug(f"  Ara projeleri yerleştiriliyor...")
+            ara_assignments, _ = self._assign_projects_by_type(
+                instructor_ids,
+                classroom_id,
+                class_slot_index,
+                sorted_timeslots,
+                used_slots,
+                instructor_timeslot_usage,
+                project_type="ara"
+            )
+            assignments.extend(ara_assignments)
+        
         return assignments
-
-    def _parse_time(self, time_str: str) -> dt_time:
-        """Parse time string to datetime.time object"""
+    
+    def _assign_projects_by_type(
+        self,
+        instructor_ids: List[int],
+        classroom_id: int,
+        start_slot_index: int,
+        sorted_timeslots: List[Dict[str, Any]],
+        used_slots: Set[Tuple[int, int]],
+        instructor_timeslot_usage: Dict[int, Set[int]],
+        project_type: str
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Belirli türdeki projeleri yerleştir (Bitirme veya Ara).
+        
+        Args:
+            instructor_ids: Sınıftaki öğretim görevlisi ID'leri
+            classroom_id: Sınıf ID
+            start_slot_index: Başlangıç slot index
+            sorted_timeslots: Sıralı timeslot listesi
+            used_slots: Kullanılmış slotlar
+            instructor_timeslot_usage: Öğretim görevlisi slot kullanımları
+            project_type: "bitirme" veya "ara"
+        
+        Returns:
+            (assignments, next_slot_index)
+        """
+        assignments = []
+        current_slot_index = start_slot_index
+        
+        # Bu sınıftaki tüm öğretim görevlileri için proje yerleştirme
+        for inst_idx, instructor_id in enumerate(instructor_ids):
+            # Bu öğretim görevlisinin belirli türdeki projelerini al
+            instructor_projects = [
+                p for p in self.projects
+                if ((p.get("responsible_instructor_id") == instructor_id or
+                     p.get("responsible_id") == instructor_id) and
+                    self._is_project_type(p, project_type))
+            ]
+            
+            if not instructor_projects:
+                continue
+            
+            # Consecutive slot bulma
+            consecutive_slots = self._find_consecutive_slots(
+                classroom_id,
+                current_slot_index,
+                len(instructor_projects),
+                sorted_timeslots,
+                used_slots,
+                instructor_timeslot_usage.get(instructor_id, set())
+            )
+            
+            if not consecutive_slots:
+                logger.warning(
+                    f"  Öğretim görevlisi {instructor_id} için consecutive slot bulunamadı "
+                    f"({project_type}), esnek mod kullanılıyor"
+                )
+                # Esnek mod: Herhangi bir boş slot bul
+                consecutive_slots = self._find_flexible_slots(
+                    classroom_id,
+                    len(instructor_projects),
+                    sorted_timeslots,
+                    used_slots,
+                    instructor_timeslot_usage.get(instructor_id, set())
+                )
+            
+            if not consecutive_slots:
+                logger.error(
+                    f"  Öğretim görevlisi {instructor_id} için hiç slot bulunamadı! ({project_type})"
+                )
+                continue
+            
+            # Projeleri slotlara yerleştir
+            for proj_idx, project in enumerate(instructor_projects):
+                if proj_idx >= len(consecutive_slots):
+                    logger.warning(
+                        f"  Proje {project.get('id')} için slot yok (overflow)"
+                    )
+                    break
+                
+                timeslot_id = consecutive_slots[proj_idx]
+                project_id = project.get("id")
+                
+                # Jüri atama (round-robin)
+                jury_members = self._assign_round_robin_jury(
+                    instructor_id,
+                    instructor_ids,
+                    inst_idx
+                )
+                
+                # Atama oluştur
+                assignment = {
+                    "project_id": project_id,
+                    "classroom_id": classroom_id,
+                    "timeslot_id": timeslot_id,
+                    "responsible_instructor_id": instructor_id,
+                    "project_type": project_type,
+                    "instructors": [
+                        {
+                            "id": instructor_id,
+                            "name": self._get_instructor_name(instructor_id),
+                            "role": "responsible"
+                        }
+                    ] + [
+                        {
+                            "id": jury.get("id"),
+                            "name": jury.get("name"),
+                            "role": "jury",
+                            "is_placeholder": jury.get("is_placeholder", False)
+                        }
+                        for jury in jury_members
+                    ]
+                }
+                
+                assignments.append(assignment)
+                
+                # Slot işaretleme
+                used_slots.add((classroom_id, timeslot_id))
+                instructor_timeslot_usage[instructor_id].add(timeslot_id)
+                
+                logger.debug(
+                    f"    Proje {project_id} ({project_type}) → Sınıf {classroom_id}, "
+                    f"Slot {timeslot_id}, Jüri: {len(jury_members)}"
+                )
+            
+            # Sonraki öğretim görevlisi için slot index'i güncelle
+            if consecutive_slots:
+                # Son kullanılan timeslot'u bul ve index'ini al
+                last_timeslot_id = consecutive_slots[-1]
+                last_index = next(
+                    (idx for idx, ts in enumerate(sorted_timeslots) if ts.get("id") == last_timeslot_id),
+                    len(sorted_timeslots) - 1
+                )
+                current_slot_index = last_index + 1
+            else:
+                current_slot_index += len(instructor_projects)
+        
+        return assignments, current_slot_index
+    
+    def _find_consecutive_slots(
+        self,
+        classroom_id: int,
+        start_index: int,
+        count: int,
+        sorted_timeslots: List[Dict[str, Any]],
+        used_slots: Set[Tuple[int, int]],
+        instructor_timeslot_usage: Set[int]
+    ) -> Optional[List[int]]:
+        """
+        Consecutive (ardışık) slotlar bul.
+        
+        Args:
+            classroom_id: Sınıf ID
+            start_index: Başlangıç index
+            count: İhtiyaç duyulan slot sayısı
+            sorted_timeslots: Sıralı timeslot listesi
+            used_slots: Kullanılmış slotlar
+            instructor_timeslot_usage: Öğretim görevlisinin kullandığı slotlar
+        
+        Returns:
+            Consecutive slot ID listesi veya None
+        """
+        if count == 0:
+            return []
+        
+        if count > len(sorted_timeslots):
+            return None  # Yeterli slot yok
+        
+        # Index sınırlarını kontrol et
+        start_index = max(0, min(start_index, len(sorted_timeslots) - 1))
+        
+        # İki kez deneme: start_index'ten başla, yoksa 0'dan başla (wrap-around)
+        for attempt_start in [start_index, 0]:
+            consecutive = []
+            for i in range(attempt_start, min(attempt_start + count, len(sorted_timeslots))):
+                timeslot_id = sorted_timeslots[i].get("id")
+                slot_key = (classroom_id, timeslot_id)
+                
+                # Çakışma kontrolü
+                if slot_key in used_slots:
+                    break  # Bu pozisyondan consecutive bulunamaz
+                
+                # Öğretim görevlisi çakışması kontrolü
+                if timeslot_id in instructor_timeslot_usage:
+                    break  # Öğretim görevlisi aynı slot'ta başka yerde
+                
+                consecutive.append(timeslot_id)
+            
+            if len(consecutive) == count:
+                return consecutive
+        
+        return None
+    
+    def _find_flexible_slots(
+        self,
+        classroom_id: int,
+        count: int,
+        sorted_timeslots: List[Dict[str, Any]],
+        used_slots: Set[Tuple[int, int]],
+        instructor_timeslot_usage: Set[int]
+    ) -> Optional[List[int]]:
+        """
+        Esnek mod: Herhangi bir boş slot bul (consecutive olması gerekmez).
+        
+        Args:
+            classroom_id: Sınıf ID
+            count: İhtiyaç duyulan slot sayısı
+            sorted_timeslots: Sıralı timeslot listesi
+            used_slots: Kullanılmış slotlar
+            instructor_timeslot_usage: Öğretim görevlisinin kullandığı slotlar
+        
+        Returns:
+            Slot ID listesi veya None
+        """
+        available = []
+        for timeslot in sorted_timeslots:
+            if len(available) >= count:
+                break
+            
+            timeslot_id = timeslot.get("id")
+            slot_key = (classroom_id, timeslot_id)
+            
+            # Çakışma kontrolü
+            if slot_key in used_slots:
+                continue
+            
+            # Öğretim görevlisi çakışması kontrolü
+            if timeslot_id in instructor_timeslot_usage:
+                continue
+            
+            available.append(timeslot_id)
+        
+        if len(available) >= count:
+            return available[:count]
+        
+        return None
+    
+    def _assign_round_robin_jury(
+        self,
+        responsible_id: int,
+        all_instructors_in_class: List[int],
+        responsible_index: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Round-robin jüri atama.
+        
+        Kurallar:
+        - R ≥ 3: Full round-robin (her biri diğer ikisinin jürisi)
+        - R = 2: Karşılıklı jüri + 1 placeholder
+        - R = 1: Her iki jüri placeholder
+        
+        Args:
+            responsible_id: Sorumlu öğretim görevlisi ID
+            all_instructors_in_class: Sınıftaki tüm öğretim görevlisi ID'leri
+            responsible_index: Sorumlu öğretim görevlisinin index'i
+        
+        Returns:
+            Jüri üyeleri listesi (dict formatında)
+        """
+        R = len(all_instructors_in_class)
+        jury_members = []
+        
+        if R >= 3:
+            # Full round-robin: Sorumlu hariç diğer herkes jüri
+            for inst_id in all_instructors_in_class:
+                if inst_id != responsible_id:
+                    jury_members.append({
+                        "id": inst_id,
+                        "name": self._get_instructor_name(inst_id),
+                        "is_placeholder": False
+                    })
+        elif R == 2:
+            # Karşılıklı jüri + 1 placeholder
+            other_id = [inst_id for inst_id in all_instructors_in_class if inst_id != responsible_id][0]
+            jury_members.append({
+                "id": other_id,
+                "name": self._get_instructor_name(other_id),
+                "is_placeholder": False
+            })
+            # Placeholder ekle
+            jury_members.append(self._create_placeholder())
+        elif R == 1:
+            # Her iki jüri placeholder
+            jury_members.append(self._create_placeholder())
+            jury_members.append(self._create_placeholder())
+        else:
+            # R = 0 (olması gerekmez ama güvenlik için)
+            jury_members.append(self._create_placeholder())
+            jury_members.append(self._create_placeholder())
+        
+        return jury_members
+    
+    # ============================================================================
+    # PLACEHOLDER VE COI KONTROLLERİ
+    # ============================================================================
+    
+    def _stabilize_with_placeholder_check(
+        self,
+        assignments: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        COI kontrolü ve placeholder tamamlama.
+        
+        Yapılan kontroller:
+        1. Eksik jüri kontrolü → [Arastirma Gorevlisi] eklenir
+        2. COI kontrolü → Sorumlu jüri listesinde varsa placeholder ile değiştirilir
+        3. Çakışma kontrolü → Continuity öncelikli çözülür
+        
+        Args:
+            assignments: İlk atama listesi
+        
+        Returns:
+            Stabilize edilmiş atama listesi
+        """
+        stabilized = []
+        
+        for assignment in assignments:
+            stabilized_ass = assignment.copy()
+            instructors = stabilized_ass.get("instructors", [])
+            responsible_id = stabilized_ass.get("responsible_instructor_id")
+            
+            # 1. Eksik jüri kontrolü
+            jury_members = [
+                inst for inst in instructors
+                if inst.get("role") == "jury" and inst.get("id") != responsible_id
+            ]
+            
+            # Placeholder'ları sayma
+            real_jury_count = sum(
+                1 for jury in jury_members
+                if not self._is_placeholder(jury)
+            )
+            
+            if real_jury_count < 2:
+                needed = 2 - real_jury_count
+                for _ in range(needed):
+                    instructors.append(self._create_placeholder())
+                stabilized_ass["instructors"] = instructors
+                logger.debug(
+                    f"Proje {stabilized_ass.get('project_id')}: "
+                    f"{needed} placeholder eklendi"
+                )
+            
+            # 2. COI kontrolü: Sorumlu jüri listesinde varsa çıkar ve placeholder ekle
+            updated_instructors = []
+            coi_found = False
+            
+            for inst in stabilized_ass.get("instructors", []):
+                inst_id = inst.get("id")
+                if inst.get("role") == "jury" and inst_id == responsible_id:
+                    coi_found = True
+                    logger.warning(
+                        f"Proje {stabilized_ass.get('project_id')}: "
+                        f"COI tespit edildi, placeholder ile değiştiriliyor"
+                    )
+                    continue  # Sorumluyu jüri listesinden çıkar
+                
+                updated_instructors.append(inst)
+            
+            if coi_found:
+                # Eksik jüri sayısını kontrol et ve placeholder ekle
+                real_jury_after = sum(
+                    1 for inst in updated_instructors
+                    if inst.get("role") == "jury" and not self._is_placeholder(inst)
+                )
+                if real_jury_after < 2:
+                    needed = 2 - real_jury_after
+                    for _ in range(needed):
+                        updated_instructors.append(self._create_placeholder())
+                stabilized_ass["instructors"] = updated_instructors
+            
+            stabilized.append(stabilized_ass)
+        
+        return stabilized
+    
+    def _create_placeholder(self) -> Dict[str, Any]:
+        """Placeholder ([Arastirma Gorevlisi]) oluştur."""
+        self.placeholder_counter += 1
+        return {
+            "id": -1,
+            "name": self.placeholder_instructor,
+            "role": "jury",
+            "is_placeholder": True
+        }
+    
+    def _is_placeholder(self, instructor: Any) -> bool:
+        """Placeholder kontrolü."""
+        if isinstance(instructor, dict):
+            return instructor.get("is_placeholder", False) or \
+                   instructor.get("id") == -1 or \
+                   instructor.get("name") == self.placeholder_instructor
+        return False
+    
+    # ============================================================================
+    # YARDIMCI FONKSİYONLAR
+    # ============================================================================
+    
+    def _is_bitirme_project(self, project: Dict[str, Any]) -> bool:
+        """Projenin Bitirme projesi olup olmadığını kontrol et."""
+        project_type = project.get("type", "").lower()
+        return project_type in ["bitirme", "final", "finish"]
+    
+    def _is_project_type(self, project: Dict[str, Any], target_type: str) -> bool:
+        """Projenin belirli türde olup olmadığını kontrol et."""
+        if target_type.lower() == "bitirme":
+            return self._is_bitirme_project(project)
+        else:  # ara
+            return not self._is_bitirme_project(project)
+    
+    def _get_instructor_name(self, instructor_id: int) -> str:
+        """Öğretim görevlisi adını al."""
+        for inst in self.instructors:
+            if inst.get("id") == instructor_id:
+                return inst.get("name", f"Instructor {instructor_id}")
+        return f"Instructor {instructor_id}"
+    
+    def _parse_time_to_float(self, time_str: str) -> float:
+        """Zaman string'ini float'a çevir (karşılaştırma için)."""
         try:
-            if isinstance(time_str, dt_time):
-                return time_str
-            return dt_time.fromisoformat(time_str)
-        except:
-            return dt_time(9, 0)  # Default to 09:00
+            parts = str(time_str).split(":")
+            hours = int(parts[0])
+            minutes = int(parts[1]) if len(parts) > 1 else 0
+            return hours + (minutes / 60.0)
+        except Exception:
+            return 0.0
+    
+    def _count_placeholders(self, assignments: List[Dict[str, Any]]) -> int:
+        """Placeholder sayısını hesapla."""
+        count = 0
+        for assignment in assignments:
+            instructors = assignment.get("instructors", [])
+            for inst in instructors:
+                if self._is_placeholder(inst):
+                    count += 1
+        return count
+    
+    def _count_conflicts(self, assignments: List[Dict[str, Any]]) -> int:
+        """Çakışma sayısını hesapla."""
+        conflicts = 0
+        instructor_slots = defaultdict(set)  # instructor_id -> set of (classroom_id, timeslot_id)
+        
+        for assignment in assignments:
+            classroom_id = assignment.get("classroom_id")
+            timeslot_id = assignment.get("timeslot_id")
+            instructors = assignment.get("instructors", [])
+            
+            for inst in instructors:
+                if self._is_placeholder(inst):
+                    continue
+                
+                inst_id = inst.get("id") if isinstance(inst, dict) else inst
+                slot_key = (classroom_id, timeslot_id)
+                
+                # Aynı öğretim görevlisi aynı anda farklı sınıfta mı?
+                for existing_slot in instructor_slots[inst_id]:
+                    if existing_slot[1] == timeslot_id and existing_slot[0] != classroom_id:
+                        conflicts += 1
+                
+                instructor_slots[inst_id].add(slot_key)
+        
+        return conflicts
+    
+    def _calculate_bitirme_priority_score(self, assignments: List[Dict[str, Any]]) -> float:
+        """
+        Bitirme projelerinin erken slotlarda olma skorunu hesapla.
+        
+        Returns:
+            Yüksek skor = Bitirme projeleri erken slotlarda
+        """
+        if not assignments:
+            return 0.0
+        
+        # Timeslot sıralaması oluştur
+        timeslot_order = {}
+        sorted_timeslots = sorted(
+            self.timeslots,
+            key=lambda x: self._parse_time_to_float(x.get("start_time", "09:00"))
+        )
+        
+        for idx, ts in enumerate(sorted_timeslots):
+            timeslot_order[ts.get("id")] = idx
+        
+        total_score = 0.0
+        bitirme_count = 0
+        
+        for assignment in assignments:
+            project_type = assignment.get("project_type", "").lower()
+            if project_type in ["bitirme", "final", "finish"]:
+                timeslot_id = assignment.get("timeslot_id")
+                slot_order = timeslot_order.get(timeslot_id, len(sorted_timeslots))
+                
+                # Erken slot = yüksek skor
+                score = (len(sorted_timeslots) - slot_order) / len(sorted_timeslots)
+                total_score += score
+                bitirme_count += 1
+        
+        if bitirme_count == 0:
+            return 0.0
+        
+        return total_score / bitirme_count  # Ortalama skor
+    
+    # ============================================================================
+    # 🤖 AI-BASED FEATURES
+    # ============================================================================
+    
+    def _ai_calculate_pattern_quality_score(self, assignments: List[Dict[str, Any]]) -> float:
+        """
+        AI Helper: Pattern quality skoru hesapla
+        
+        Args:
+            assignments: Atamalar
+        
+        Returns:
+            Pattern quality score (0.0-1.0)
+        """
+        if not self.ai_pattern_recognition or not assignments:
+            return 0.0
+        
+        total_checks = 0
+        matching_patterns = 0
+        sorted_timeslots = sorted(self.timeslots, key=lambda x: self._parse_time_to_float(x.get("start_time", "09:00")))
+        
+        for assignment in assignments:
+            project_id = assignment.get("project_id")
+            timeslot_id = assignment.get("timeslot_id")
+            
+            if project_id and timeslot_id:
+                project = next((p for p in self.projects if p.get("id") == project_id), None)
+                if project:
+                    project_type = "Bitirme" if self._is_bitirme_project(project) else "Ara"
+                    slot_order = next((idx for idx, ts in enumerate(sorted_timeslots) if ts.get("id") == timeslot_id), len(sorted_timeslots))
+                    
+                    # Priority-slot pattern
+                    pattern_score = self.ai_pattern_database["successful_priority_slot_pairs"].get((project_type, slot_order), 0)
+                    total_checks += 1
+                    if pattern_score > 0:
+                        matching_patterns += 1
+        
+        if total_checks > 0:
+            return matching_patterns / total_checks
+        
+        return 0.0
+    
+    def _ai_record_solution_performance(
+        self,
+        assignments: List[Dict[str, Any]],
+        execution_time: float
+    ) -> None:
+        """
+        AI Helper: Çözüm performansını kaydet
+        
+        Args:
+            assignments: Atamalar
+            execution_time: Yürütme süresi
+        """
+        if not self.ai_self_learning:
+            return
+        
+        # Performans metrikleri
+        placeholder_count = self._count_placeholders(assignments)
+        conflict_count = self._count_conflicts(assignments)
+        bitirme_priority_score = self._calculate_bitirme_priority_score(assignments)
+        
+        performance_metrics = {
+            "total_assignments": len(assignments),
+            "placeholder_count": placeholder_count,
+            "conflict_count": conflict_count,
+            "execution_time": execution_time,
+            "bitirme_priority_score": bitirme_priority_score
+        }
+        
+        # Başarı skoru hesapla
+        success_score = 0.0
+        if len(assignments) > 0:
+            success_score = max(0.0, 1.0 - (placeholder_count / len(assignments)) - (conflict_count / len(assignments)))
+        
+        performance_metrics["success_score"] = success_score
+        
+        # History'ye ekle
+        self.ai_performance_history.append(performance_metrics)
+        
+        logger.info(f"  📊 AI Performance: Success Score={success_score:.2f}, "
+                   f"Placeholders={placeholder_count}, Conflicts={conflict_count}, "
+                   f"Bitirme Priority={bitirme_priority_score:.2f}")
+    
+    def _ai_analyze_solution_quality(
+        self,
+        assignments: List[Dict[str, Any]],
+        blocks: List[List[Dict[str, Any]]],
+        planned_assignments: Dict[int, List[int]]
+    ) -> Dict[str, Any]:
+        """
+        AI Helper: Çözüm kalitesi detaylı analizi
+        
+        Args:
+            assignments: Atamalar
+            blocks: Bloklar
+            planned_assignments: Planlanan atamalar
+        
+        Returns:
+            Dict with analytics insights
+        """
+        if not self.ai_self_learning:
+            return {}
+        
+        analytics = {}
+        
+        # 1. Priority distribution analysis
+        bitirme_priority_score = self._calculate_bitirme_priority_score(assignments)
+        analytics["priority_distribution"] = {
+            "priority_score": round(bitirme_priority_score, 3),
+            "status": "Excellent" if bitirme_priority_score > 0.8 else "Good" if bitirme_priority_score > 0.5 else "Fair",
+            "bitirme_early_slots": "YES" if bitirme_priority_score > 0.5 else "NO"
+        }
+        
+        # 2. Class workload balance
+        class_workloads = defaultdict(int)
+        for class_id, inst_list in planned_assignments.items():
+            class_workloads[class_id] = sum(self.workload.get(inst_id, 0) for inst_id in inst_list)
+        
+        if class_workloads:
+            workload_sizes = list(class_workloads.values())
+            avg_workload = sum(workload_sizes) / len(workload_sizes)
+            max_workload = max(workload_sizes)
+            min_workload = min(workload_sizes)
+            diff = max_workload - min_workload
+            
+            balance_score = 1.0 - (diff / max(avg_workload, 1)) if avg_workload > 0 else 0.0
+            balance_score = max(min(balance_score, 1.0), 0.0)
+            
+            analytics["class_balance"] = {
+                "balance_score": round(balance_score, 3),
+                "avg_workload": round(avg_workload, 2),
+                "max_workload": max_workload,
+                "min_workload": min_workload,
+                "workload_difference": diff,
+                "status": "Excellent" if balance_score > 0.9 else "Good" if balance_score > 0.7 else "Fair"
+            }
+        
+        # 3. Block effectiveness
+        if blocks:
+            avg_block_size = sum(len(block) for block in blocks) / len(blocks)
+            analytics["block_effectiveness"] = {
+                "total_blocks": len(blocks),
+                "avg_block_size": round(avg_block_size, 2),
+                "status": "Optimal" if avg_block_size >= 3 else "Good" if avg_block_size >= 2 else "Suboptimal"
+            }
+        
+        # 4. Placement effectiveness
+        placeholder_count = self._count_placeholders(assignments)
+        conflict_count = self._count_conflicts(assignments)
+        
+        effectiveness_score = 0.0
+        if len(assignments) > 0:
+            effectiveness_score = 1.0 - ((placeholder_count + conflict_count * 2) / len(assignments))
+            effectiveness_score = max(min(effectiveness_score, 1.0), 0.0)
+        
+        analytics["placement_effectiveness"] = {
+            "effectiveness_score": round(effectiveness_score, 3),
+            "placeholder_count": placeholder_count,
+            "conflict_count": conflict_count,
+            "status": "Excellent" if effectiveness_score > 0.9 else "Good" if effectiveness_score > 0.7 else "Fair"
+        }
+        
+        # 5. Priority trend
+        if self.ai_priority_distribution_history:
+            recent_scores = list(self.ai_priority_distribution_history)[-5:]
+            avg_recent_score = sum(recent_scores) / len(recent_scores)
+            
+            analytics["priority_trend"] = {
+                "recent_avg_score": round(avg_recent_score, 3),
+                "trend": "Improving" if len(recent_scores) >= 2 and recent_scores[-1] > recent_scores[0] else "Stable"
+            }
+        
+        return analytics
+

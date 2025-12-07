@@ -27,6 +27,8 @@ import {
   Assessment,
   AccountCircle,
   Logout,
+  Email,
+  Upload,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -39,6 +41,8 @@ const menuItems = [
   { text: 'Algorithms', icon: <Science />, path: '/algorithms', adminOnly: true },
   { text: 'Planner', icon: <CalendarToday />, path: '/planner' },
   { text: 'Results', icon: <Assessment />, path: '/results', adminOnly: true },
+  { text: 'Notifications', icon: <Email />, path: '/notifications', adminOnly: true },
+  { text: 'Import', icon: <Upload />, path: '/import', adminOnly: true },
 ];
 
 const Layout: React.FC = () => {

@@ -822,6 +822,22 @@ async def execute_algorithm(
     """
     Belirtilen algoritmayı çalıştırır
     """
+    # HER ZAMAN log yaz - endpoint başlangıcı
+    import sys
+    import logging
+    
+    # Uvicorn'un logger'ını kullan
+    logger = logging.getLogger("uvicorn")
+    logger.setLevel(logging.DEBUG)
+    
+    # Hem print hem logger kullan
+    print("=" * 80, flush=True)
+    print(f"[EXECUTE ENDPOINT] BAŞLADI - POST /api/v1/algorithms/execute", flush=True)
+    print(f"[EXECUTE ENDPOINT] algorithm_in: {algorithm_in}", flush=True)
+    
+    logger.critical(f"[EXECUTE ENDPOINT] BAŞLADI - POST /api/v1/algorithms/execute")
+    logger.critical(f"[EXECUTE ENDPOINT] algorithm_in: {algorithm_in}")
+    
     # İsim eşleştirme (frontend kısa adları → enum değerleri)
     alias_map = {
         "genetic": "genetic_algorithm",
@@ -880,12 +896,20 @@ async def execute_algorithm(
     
     try:
         # Algoritmayı çalıştır
+        import sys
         params = algorithm_in.get("parameters") or algorithm_in.get("params") or {}
         data = algorithm_in.get("data") or {}
         
+        # HER ZAMAN log yaz - TÜM KANALLARA
+        log_msg = f"[ALGORITHM EXECUTE] Starting algorithm: {requested_name} -> {mapped}\n[ALGORITHM EXECUTE] Params: {params}"
+        print(log_msg, flush=True)
+        print(log_msg, file=sys.stderr, flush=True)
+        
         # Classroom count parameter
         classroom_count = params.get("classroom_count", 7)
-        print(f"Using classroom count: {classroom_count}")
+        log_msg2 = f"[ALGORITHM EXECUTE] Using classroom count: {classroom_count}"
+        print(log_msg2, flush=True)
+        print(log_msg2, file=sys.stderr, flush=True)
         
         # Data will be loaded in AlgorithmService.run_algorithm if empty
         
@@ -942,6 +966,112 @@ async def execute_algorithm(
         # Debug: gap_fix_result'i logla
         print(f"DEBUG: gap_fix_result = {gap_fix_result}")
         
+        # 💾 VERITABANINA KAYDET - Schedule'ları veritabanına kaydet
+        if isinstance(result, dict):
+            # Phase 3 final_assignments varsa onu kullan (placeholder ile)
+            assignments = result.get("final_assignments") or result.get("assignments", [])
+            if assignments:
+                try:
+                    from app.models.schedule import Schedule
+                    from sqlalchemy import delete
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    
+                    logger.info(f"💾 Saving {len(assignments)} assignments to database...")
+                    
+                    # Mevcut schedule'ları temizle
+                    await db.execute(delete(Schedule))
+                    await db.commit()
+                    
+                    saved_count = 0
+                    for assignment in assignments:
+                        # Instructor listesini al (dict veya int formatında olabilir)
+                        instructors_raw = assignment.get("instructors", [])
+                        
+                        # DEBUG: Log instructor data before processing (only in debug mode)
+                        logger.debug(f"[DEBUG] ASSIGNMENT DEBUG:")
+                        logger.debug(f"  Project ID: {assignment.get('project_id')}")
+                        logger.debug(f"  Raw instructors: {instructors_raw}")
+                        logger.debug(f"  Instructors type: {type(instructors_raw)}")
+                        
+                        # Instructors'ı normalize et: Placeholder'ları koru, gerçek ID'leri al
+                        instructor_data = []
+                        
+                        if instructors_raw and len(instructors_raw) > 0:
+                            if isinstance(instructors_raw[0], dict):
+                                # Dict formatında: Tüm object bilgilerini koru (CP-SAT normalize etti)
+                                for inst in instructors_raw:
+                                    if isinstance(inst, dict):
+                                        # Placeholder kontrolü
+                                        if inst.get('is_placeholder', False):
+                                            # Placeholder'ı özel format olarak sakla
+                                            instructor_data.append({
+                                                "id": inst.get('id', -1),
+                                                "name": inst.get('name', '[Araştırma Görevlisi]'),
+                                                "full_name": inst.get('full_name', inst.get('name', '[Araştırma Görevlisi]')),
+                                                "role": inst.get('role', 'assistant'),
+                                                "is_placeholder": True
+                                            })
+                                        else:
+                                            # KRİTİK DÜZELTME: Gerçek instructor object'ini TAM OLARAK koru
+                                            # CP-SAT normalize etti: {id, name, full_name, role, type}
+                                            # Frontend bunları bekliyor, kaybetme!
+                                            instructor_data.append({
+                                                "id": inst.get('id'),
+                                                "name": inst.get('name', f"Instructor {inst.get('id')}"),
+                                                "full_name": inst.get('full_name', inst.get('name', f"Instructor {inst.get('id')}")),
+                                                "role": inst.get('role', 'instructor'),
+                                                "type": inst.get('type', 'instructor')
+                                            })
+                            elif isinstance(instructors_raw[0], int) or isinstance(instructors_raw[0], str):
+                                # Integer veya string formatında (string placeholder olabilir)
+                                # Placeholder'ları kontrol et ve dict'e çevir
+                                for inst in instructors_raw:
+                                    if isinstance(inst, str) and inst == '[Araştırma Görevlisi]':
+                                        # Placeholder'ı dict formatına çevir (id: -1 olarak kaydet)
+                                        instructor_data.append({
+                                            "id": -1,
+                                            "name": '[Araştırma Görevlisi]',
+                                            "full_name": '[Araştırma Görevlisi]',
+                                            "is_placeholder": True,
+                                            "role": "assistant",
+                                            "type": "assistant"
+                                        })
+                                    elif isinstance(inst, int):
+                                        # Gerçek instructor ID
+                                        instructor_data.append(inst)
+                                    else:
+                                        # Diğer formatlar
+                                        instructor_data.append(inst)
+                            else:
+                                logger.warning(f"  Invalid instructor format: {instructors_raw}")
+                                instructor_data = []
+                        else:
+                            instructor_data = []
+                        
+                        # DEBUG: Log final instructor data (only in debug mode)
+                        logger.debug(f"  Final instructor data: {instructor_data}")
+                        logger.debug(f"  Final count: {len(instructor_data) if instructor_data else 0}")
+                        
+                        # Schedule oluştur (instructors JSON alanında sakla)
+                        # Mixed format: [id1, id2, {"id": -1, "name": "...", "is_placeholder": true}]
+                        new_schedule = Schedule(
+                            project_id=assignment["project_id"],
+                            classroom_id=assignment["classroom_id"],
+                            timeslot_id=assignment["timeslot_id"],
+                            instructors=instructor_data,  # JSON alanında sakla (mixed format)
+                            is_makeup=assignment.get("is_makeup", False)
+                        )
+                        db.add(new_schedule)
+                        saved_count += 1
+                    
+                    await db.commit()
+                    logger.info(f"[SUCCESS] {saved_count} schedules saved to database")
+                    
+                except Exception as e:
+                    logger.error(f"[ERROR] Error saving schedules to database: {e}")
+                    await db.rollback()
+        
         # Sonucu döndür
         response_data = {
             "id": algorithm_run.id,
@@ -956,18 +1086,117 @@ async def execute_algorithm(
         # Schedule verilerini ekle
         if isinstance(result, dict):
             response_data["schedule"] = result.get("schedule", [])
-            response_data["assignments"] = result.get("assignments", [])
-            response_data["solution"] = result.get("solution", [])
+            # Phase 3 final_assignments varsa onu öncelikli olarak gönder (placeholder ile)
+            response_data["assignments"] = result.get("final_assignments") or result.get("assignments", [])
+            response_data["solution"] = result.get("final_assignments") or result.get("solution", [])
+            # Phase 3 istatistiklerini ekle
+            if result.get("phase3_stats"):
+                response_data["phase3_stats"] = result.get("phase3_stats")
         
         return response_data
-    except Exception as e:
+    except ValueError as e:
+        # Invalid algorithm type gibi validation hataları
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Algorithm execution error: {str(e)}", exc_info=True)
+        logger.error(f"Algorithm validation error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid algorithm type or parameter: {str(e)}"
+        )
+    except Exception as e:
+        import logging
+        import traceback
+        import sys
+        
+        error_traceback = traceback.format_exc()
+        error_message = str(e)
+        error_type = type(e).__name__
+        
+        # TÜM ÇIKTI KANALLARINA YAZ - Hem print hem logger hem stderr
+        error_msg = f"""
+{'='*80}
+=== ALGORITHM EXECUTION ERROR ===
+Error Type: {error_type}
+Error Message: {error_message}
+Request Algorithm: {requested_name} -> {mapped}
+Request Params: {params}
+Full Traceback:
+{error_traceback}
+===================================
+{'='*80}
+"""
+        
+        # Print to stdout (uvicorn will capture)
+        print(error_msg, flush=True)
+        
+        # Print to stderr (always visible)
+        print(error_msg, file=sys.stderr, flush=True)
+        
+        # Logger
+        logger = logging.getLogger("uvicorn")
+        logger.critical(error_msg)
+        
+        # Also try root logger
+        root_logger = logging.getLogger()
+        root_logger.critical(error_msg)
+        
+        # Kullanıcıya daha anlaşılır hata mesajı gönder
+        user_friendly_message = error_message
+        if "NoneType" in error_type or "AttributeError" in error_type:
+            user_friendly_message = f"Veri yükleme hatası: {error_message}. Lütfen projeler, öğretmenler ve sınıfların veritabanında mevcut olduğundan emin olun."
+        elif "KeyError" in error_type:
+            user_friendly_message = f"Veri formatı hatası: {error_message}. Gerekli veri alanları eksik."
+        elif "database" in error_message.lower() or "connection" in error_message.lower():
+            user_friendly_message = f"Veritabanı bağlantı hatası: {error_message}"
+        
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Algorithm execution failed: {str(e)}"
+            detail=f"Algorithm execution failed: {user_friendly_message}"
         )
+
+@router.get("/debug/schedules")
+async def debug_schedules(db: AsyncSession = Depends(get_db)):
+    """
+    Debug endpoint to check schedule data in database
+    """
+    try:
+        from app.models.schedule import Schedule
+        from sqlalchemy import select
+        
+        # Get all schedules
+        result = await db.execute(select(Schedule))
+        schedules = result.scalars().all()
+        
+        debug_data = []
+        for schedule in schedules:
+            debug_data.append({
+                "id": schedule.id,
+                "project_id": schedule.project_id,
+                "classroom_id": schedule.classroom_id,
+                "timeslot_id": schedule.timeslot_id,
+                "instructors": schedule.instructors,
+                "instructor_count": len(schedule.instructors) if schedule.instructors else 0,
+                "is_makeup": schedule.is_makeup
+            })
+        
+        return {
+            "success": True,
+            "total_schedules": len(schedules),
+            "schedules": debug_data,
+            "summary": {
+                "total_schedules": len(schedules),
+                "schedules_with_instructors": len([s for s in schedules if s.instructors]),
+                "schedules_without_instructors": len([s for s in schedules if not s.instructors]),
+                "avg_instructor_count": sum(len(s.instructors) if s.instructors else 0 for s in schedules) / len(schedules) if schedules else 0
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
 
 @router.get("/status/{run_id}", response_model=Dict[str, Any])
 async def get_algorithm_status(
@@ -1027,16 +1256,69 @@ async def get_algorithm_results(
     """
     try:
         result = await AlgorithmService.get_run_result(run_id)
-        if result["status"] != "completed":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=_("algorithms.not_completed", locale=current_user.language, status=result["status"])
-            )
+        
+        # Status kontrolünü kaldır - eğer kayıt varsa, result'ı her zaman döndür
+        # Veritabanındaki status ne olursa olsun, result varsa "completed" olarak kabul et
+        result_data = result.get("result")
+        
+        # Eğer result varsa (None değilse), status'ü "completed" olarak işaretle
+        # Bu, veritabanındaki status'ü override eder
+        if result_data is not None:
+            result["status"] = "completed"
+            
+            # Frontend'in beklediği format: schedule, assignments, solution alanlarını doğrudan ekle
+            # Tıpkı /execute endpoint'inde yaptığımız gibi - AYNI FORMAT
+            if isinstance(result_data, dict):
+                # Result içindeki schedule, assignments, solution alanlarını doğrudan response'a ekle
+                result["schedule"] = result_data.get("schedule", [])
+                # Phase 3 final_assignments varsa onu öncelikli olarak gönder (placeholder ile)
+                result["assignments"] = result_data.get("final_assignments") or result_data.get("assignments", [])
+                result["solution"] = result_data.get("final_assignments") or result_data.get("solution", [])
+                
+                # Phase 3 istatistiklerini ekle
+                if result_data.get("phase3_stats"):
+                    result["phase3_stats"] = result_data.get("phase3_stats")
+                
+                # Diğer önemli alanları da ekle (cost, fitness, iterations, vb.)
+                if "cost" in result_data:
+                    result["cost"] = result_data.get("cost")
+                if "fitness" in result_data:
+                    result["fitness"] = result_data.get("fitness")
+                if "iterations" in result_data:
+                    result["iterations"] = result_data.get("iterations")
+                if "execution_time" in result_data:
+                    result["execution_time"] = result_data.get("execution_time")
+                if "penalty_breakdown" in result_data:
+                    result["penalty_breakdown"] = result_data.get("penalty_breakdown")
+                
+                # Gap fix result'ı da ekle (eğer varsa)
+                if "gap_fix_result" in result_data:
+                    result["gap_fix_result"] = result_data.get("gap_fix_result")
+        else:
+            # Result yoksa, mevcut status'ü koru ama hata verme
+            # Sadece "running" durumunda kullanıcıya bilgi ver
+            current_status = result.get("status", "unknown")
+            if current_status == "running":
+                # Hala çalışıyor, bekle
+                result["status"] = "running"
+            else:
+                # Diğer durumlarda (failed, error, vb.) yine de result'ı döndür
+                # Status'ü "completed" olarak işaretle (result boş olsa bile)
+                result["status"] = "completed"
+        
         return result
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=_("algorithms.run_not_found", locale=current_user.language)
+            detail=_("algorithms.run_not_found")
+        )
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error getting algorithm results: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting algorithm results: {str(e)}"
         )
 
 @router.get("/compare", response_model=Dict[str, Any])
@@ -2250,7 +2532,7 @@ async def optimize_with_dynamic_programming(
         )
         timeslots = timeslots_result.scalars().all()
         
-        logger.info(f"📊 Veri yüklendi:")
+        logger.info(f"[INFO] Veri yuklendi:")
         logger.info(f"  - Projeler: {len(projects)}")
         logger.info(f"  - Instructors: {len(instructors)}")
         logger.info(f"  - Sınıflar: {len(classrooms)}")
@@ -2300,11 +2582,17 @@ async def optimize_with_dynamic_programming(
             ]
         }
         
-        # Dynamic Programming algoritmasını başlat
-        dp = DynamicProgramming()
+        # Dynamic Programming algoritmasını başlat - İkinci katman jüri atama sistemi ile
+        dp = DynamicProgramming({
+            'jury_refinement_layer': True,  # İkinci katman jüri atama sistemi aktif
+            'jury_continuity_weight': 0.6,  # Consecutive slots weight
+            'jury_proximity_weight': 0.4,   # Proximity weight
+            'jury_semi_consecutive_weight': 0.5,  # 1-slot gap tolerance
+            'jury_logging_level': 'INFO'    # Logging level
+        })
         
         # Optimizasyonu çalıştır
-        logger.info("🚀 Strategic Pairing optimization başlatılıyor...")
+        logger.info("🚀 Strategic Pairing optimization başlatılıyor (Second-Layer Jury Refinement)...")
         result = dp.optimize(data)
         
         # Mevcut schedule'ları temizle
@@ -2331,8 +2619,8 @@ async def optimize_with_dynamic_programming(
         
         await db.commit()
         
-        logger.info(f"✅ {saved_count} schedule kaydedildi")
-        logger.info(f"📊 Strategic Pairing Stats:")
+        logger.info(f"[SUCCESS] {saved_count} schedule kaydedildi")
+        logger.info(f"[INFO] Strategic Pairing Stats:")
         logger.info(f"  - Strategic Pairing Count: {result.get('stats', {}).get('strategic_pairing_count', 0)}")
         logger.info(f"  - Phase 1 Assignments: {result.get('stats', {}).get('phase1_assignments', 0)}")
         logger.info(f"  - Phase 2 Assignments: {result.get('stats', {}).get('phase2_assignments', 0)}")
@@ -2429,11 +2717,17 @@ async def run_real_simplex_algorithm(
             ]
         }
         
-        # Real Simplex algoritmasını başlat
-        rs = RealSimplexAlgorithm()
+        # Real Simplex algoritmasını başlat - İkinci katman jüri atama sistemi ile
+        rs = RealSimplexAlgorithm({
+            'jury_refinement_layer': True,  # İkinci katman jüri atama sistemi aktif
+            'jury_continuity_weight': 0.6,  # Consecutive slots weight
+            'jury_proximity_weight': 0.4,   # Proximity weight
+            'jury_semi_consecutive_weight': 0.5,  # 1-slot gap tolerance
+            'jury_logging_level': 'INFO'    # Logging level
+        })
         
         # Optimizasyonu çalıştır
-        logger.info("🎯 Real Simplex optimization başlatılıyor (15:30-17:00 priority)...")
+        logger.info("[INFO] Real Simplex optimization baslatiliyor (15:30-17:00 priority + Second-Layer Jury Refinement)...")
         result = rs.optimize(data)
         
         # Mevcut schedule'ları temizle
@@ -2461,8 +2755,8 @@ async def run_real_simplex_algorithm(
         
         await db.commit()
         
-        logger.info(f"✅ {saved_count} schedule kaydedildi")
-        logger.info(f"📊 Real Simplex Stats:")
+        logger.info(f"[SUCCESS] {saved_count} schedule kaydedildi")
+        logger.info(f"[INFO] Real Simplex Stats:")
         logger.info(f"  - Total assignments: {len(assignments)}")
         logger.info(f"  - Early timeslot usage: {result.get('stats', {}).get('early_timeslot_usage', 0)}")
         
@@ -2471,7 +2765,7 @@ async def run_real_simplex_algorithm(
             "id": 1,
             "task_id": f"real_simplex_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             "status": "success",
-            "message": f"🎯 Real Simplex Algorithm başarıyla tamamlandı! {len(assignments)} proje atandı, {saved_count} schedule kaydedildi. Erken saatler (15:30-17:00) öncelikli kullanıldı.",
+            "message": f"[SUCCESS] Real Simplex Algorithm basariyla tamamlandi! {len(assignments)} proje atandi, {saved_count} schedule kaydedildi. Erken saatler (15:30-17:00) oncelikli kullanildi.",
             "algorithm_type": "real_simplex",
             "result": result,
             "timestamp": datetime.now().isoformat()

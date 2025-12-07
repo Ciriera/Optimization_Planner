@@ -1,1600 +1,1369 @@
 """
-Tabu Search Algorithm - FULL AI-BASED Implementation (NO HARD CONSTRAINTS!)
+Tabu Search (Tabu Arama) Algoritmasi - Cok Kriterli Akademik Proje Sinavi/Juri Planlama
 
-🎯 AI-BASED FEATURES:
-1. ADAPTIVE TABU TENURE - Dinamik tabu list boyutu (diversification/intensification)
-2. FREQUENCY MEMORY - Hareket öğrenme ve başarı analizi
-3. ASPIRATION CRITERIA - Akıllı tabu override (best-so-far, rare moves, stuck detection)
-4. INTELLIGENT CLASSROOM SELECTION - AI-driven sınıf seçimi (consecutive + uniform)
-5. SMART NEIGHBORHOOD - Conflict-based ve load-balanced komşuluk üretimi
+Bu modul, universite donem sonu Ara Proje ve Bitirme Projesi degerlendirme surecleri icin
+ileri duzey optimizasyon teknikleri kullanan bir Sinav/Juri Planlama ve Atama Sistemidir.
 
-📊 CORE STRATEGY:
-- Instructor'ları proje sayısına göre sırala (EN FAZLA -> EN AZ)
-- İkiye böl ve üst/alt gruptan eşleştir (max-min pairing)
-- Consecutive grouping ile x sorumlu -> y jüri, sonra y sorumlu -> x jüri
-- Tüm kısıtlar SOFT (AI-based scoring, NO HARD CONSTRAINTS!)
+Temel Ozellikler:
+- Her proje icin 3 rol: Proje Sorumlusu (PS), 1. Juri (J1), 2. Juri (placeholder)
+- Back-to-back sinif ici yerlesim
+- Timeslotlar arasi gap engelleme
+- Is yuku uniformitesi (±2 bandi)
+- Proje turu onceliklendirme (ARA_ONCE, BITIRME_ONCE, ESIT)
+- Cok kriterli amac fonksiyonu: min Z = C1·H1(n) + C2·H2(n) + C3·H3(n)
 
-✅ NO HARD CONSTRAINTS - Tamamen AI-based soft constraint sistemi!
+Matematiksel Model:
+- H1: Zaman/Gap Cezasi (ardisik olmayan gorevler)
+- H2: Is Yuku Uniformite Cezasi
+- H3: Sinif Degisimi Cezasi
+
+Konfigurasyon:
+- priority_mode: {ARA_ONCE, BITIRME_ONCE, ESIT}
+- time_penalty_mode: {BINARY, GAP_PROPORTIONAL}
+- workload_constraint_mode: {SOFT_ONLY, SOFT_AND_HARD}
 """
-from __future__ import annotations
 
-from typing import Dict, Any, List, Tuple, Optional, Set
+from typing import Dict, Any, List, Tuple, Set, Optional
+from dataclasses import dataclass, field
+from enum import Enum
+from collections import defaultdict, deque
 import random
+import copy
+import hashlib
+import time
 import logging
-from collections import defaultdict
-from datetime import time as dt_time
+import numpy as np
 
 from app.algorithms.base import OptimizationAlgorithm
-from app.algorithms.gap_free_assignment import GapFreeAssignment
 
 logger = logging.getLogger(__name__)
 
+
+# ============================================================================
+# CONFIGURATION ENUMS
+# ============================================================================
+
+class PriorityMode(str, Enum):
+    """Proje turu onceliklendirme modu"""
+    ARA_ONCE = "ARA_ONCE"           # Ara projeler once
+    BITIRME_ONCE = "BITIRME_ONCE"   # Bitirme projeleri once
+    ESIT = "ESIT"                   # Oncelik yok
+
+
+class TimePenaltyMode(str, Enum):
+    """Zaman cezasi modu"""
+    BINARY = "BINARY"                       # Ardisik degilse 1 ceza
+    GAP_PROPORTIONAL = "GAP_PROPORTIONAL"   # Aradaki slot sayisi kadar ceza
+
+
+class WorkloadConstraintMode(str, Enum):
+    """Is yuku kisit modu"""
+    SOFT_ONLY = "SOFT_ONLY"           # Sadece ceza
+    SOFT_AND_HARD = "SOFT_AND_HARD"   # Ceza + sert kisit
+
+
+# ============================================================================
+# DATA CLASSES
+# ============================================================================
+
+@dataclass
+class TabuConfig:
+    """Tabu Search konfigurasyon parametreleri"""
+    # Temel parametreler
+    max_iterations: int = 500
+    time_limit: int = 120  # saniye
+    no_improve_limit: int = 50  # iyilesme olmadan max iterasyon
+    
+    # Tabu listesi parametreleri
+    tabu_tenure: int = 15  # yasak suresi
+    aspiration_enabled: bool = True
+    
+    # Komsu uretimi parametreleri
+    neighborhood_size: int = 50
+    
+    # Sinif sayisi
+    class_count: int = 6  # 5, 6 veya 7 olabilir
+    auto_class_count: bool = True  # True ise 5,6,7 icin en iyi sec
+    
+    # Onceliklendirme modu
+    priority_mode: PriorityMode = PriorityMode.ESIT
+    
+    # Zaman cezasi modu
+    time_penalty_mode: TimePenaltyMode = TimePenaltyMode.GAP_PROPORTIONAL
+    
+    # Is yuku kisit modu
+    workload_constraint_mode: WorkloadConstraintMode = WorkloadConstraintMode.SOFT_ONLY
+    workload_hard_limit: int = 4  # B_max: maksimum sapma
+    
+    # Agirlik katsayilari
+    weight_h1: float = 1.0   # C1: Zaman/Gap cezasi agirligi
+    weight_h2: float = 2.0   # C2: Is yuku cezasi agirligi (en onemli)
+    weight_h3: float = 1.0   # C3: Sinif degisimi cezasi agirligi
+    weight_h4: float = 0.5   # C4: Sinif yuk dengesi cezasi agirligi
+    
+    # Slot suresi
+    slot_duration: float = 0.5  # saat (30 dakika)
+    tolerance: float = 0.001
+
+
+@dataclass
+class Project:
+    """Proje veri yapisi"""
+    id: int
+    title: str
+    type: str  # "interim" (Ara) veya "final" (Bitirme)
+    responsible_id: int  # Proje Sorumlusu (PS)
+    is_makeup: bool = False
+
+
+@dataclass
+class Instructor:
+    """Ogretim gorevlisi veri yapisi"""
+    id: int
+    name: str
+    type: str  # "instructor" veya "assistant"
+
+
+@dataclass 
+class ProjectAssignment:
+    """Proje atama bilgisi"""
+    project_id: int
+    class_id: int
+    order_in_class: int  # sinif icindeki sira (0-indexed)
+    ps_id: int  # Proje Sorumlusu (sabit)
+    j1_id: int  # 1. Juri (karar degiskeni)
+    j2_id: int = -1  # 2. Juri (placeholder - modele girmez)
+
+
+@dataclass
+class Solution:
+    """Tam cozum temsili"""
+    assignments: List[ProjectAssignment] = field(default_factory=list)
+    class_count: int = 6
+    
+    def copy(self) -> 'Solution':
+        """Cozumun derin kopyasi"""
+        new_sol = Solution(class_count=self.class_count)
+        new_sol.assignments = [
+            ProjectAssignment(
+                project_id=a.project_id,
+                class_id=a.class_id,
+                order_in_class=a.order_in_class,
+                ps_id=a.ps_id,
+                j1_id=a.j1_id,
+                j2_id=a.j2_id
+            )
+            for a in self.assignments
+        ]
+        return new_sol
+    
+    def get_class_projects(self, class_id: int) -> List[ProjectAssignment]:
+        """Belirli siniftaki projeleri sirayla getir"""
+        class_projects = [a for a in self.assignments if a.class_id == class_id]
+        return sorted(class_projects, key=lambda x: x.order_in_class)
+    
+    def get_project_assignment(self, project_id: int) -> Optional[ProjectAssignment]:
+        """Proje atamasini getir"""
+        for a in self.assignments:
+            if a.project_id == project_id:
+                return a
+        return None
+
+
+@dataclass
+class TabuEntry:
+    """Tabu listesi girdisi"""
+    move_type: str
+    project_id: int
+    attribute: Any  # class_id, j1_id, vb.
+    expiry: int  # tabu'nun bitis iterasyonu
+
+
+# ============================================================================
+# PENALTY CALCULATOR
+# ============================================================================
+
+class PenaltyCalculator:
+    """Ceza fonksiyonlari hesaplayici"""
+    
+    def __init__(
+        self,
+        projects: List[Project],
+        instructors: List[Instructor],
+        config: TabuConfig
+    ):
+        self.projects = {p.id: p for p in projects}
+        self.instructors = {i.id: i for i in instructors}
+        self.config = config
+        
+        # Sadece ogretim gorevlilerini al (asistanlar dahil degil)
+        self.faculty_instructors = {
+            i.id: i for i in instructors 
+            if i.type == "instructor"
+        }
+        
+        # Ortalama is yuku hesapla
+        num_projects = len(projects)
+        num_faculty = len(self.faculty_instructors)
+        self.total_workload = 2 * num_projects  # Her proje 2 gorev: PS + J1
+        self.avg_workload = self.total_workload / num_faculty if num_faculty > 0 else 0
+    
+    def calculate_total_penalty(self, solution: Solution) -> float:
+        """
+        Toplam ceza degerini hesapla.
+        
+        min Z = C1·H1(n) + C2·H2(n) + C3·H3(n) + C4·H4(n)
+        """
+        h1 = self.calculate_h1_time_penalty(solution)
+        h2 = self.calculate_h2_workload_penalty(solution)
+        h3 = self.calculate_h3_class_change_penalty(solution)
+        h4 = self.calculate_h4_class_load_penalty(solution)
+        
+        total = (
+            self.config.weight_h1 * h1 +
+            self.config.weight_h2 * h2 +
+            self.config.weight_h3 * h3 +
+            self.config.weight_h4 * h4
+        )
+        
+        return total
+    
+    def calculate_h1_time_penalty(self, solution: Solution) -> float:
+        """
+        H1: Zaman/Gap cezasi - ardisik olmayan gorevler icin ceza.
+        
+        Her ogretim gorevlisi icin zaman sirasina gore gorevlerini analiz et.
+        Iki ardisik gorev arasinda bosluk varsa ceza uygula.
+        """
+        total_penalty = 0.0
+        
+        # Her ogretim gorevlisi icin gorev matrisini olustur
+        instructor_tasks = self._build_instructor_task_matrix(solution)
+        
+        for instructor_id, tasks in instructor_tasks.items():
+            if len(tasks) <= 1:
+                continue
+            
+            # Gorevleri zaman sirasina gore sirala (class_id, order)
+            tasks.sort(key=lambda x: (x['class_id'], x['order']))
+            
+            # Ardisik gorevleri kontrol et
+            for r in range(len(tasks) - 1):
+                current = tasks[r]
+                next_task = tasks[r + 1]
+                
+                # Ayni siniftaysalar ve ardisik degilseler ceza
+                if current['class_id'] == next_task['class_id']:
+                    gap = next_task['order'] - current['order'] - 1
+                    
+                    if gap > 0:
+                        if self.config.time_penalty_mode == TimePenaltyMode.BINARY:
+                            total_penalty += 1
+                        else:  # GAP_PROPORTIONAL
+                            total_penalty += gap
+                else:
+                    # Farkli siniflara gecis - bu da bir kesinti
+                    if self.config.time_penalty_mode == TimePenaltyMode.BINARY:
+                        total_penalty += 1
+                    else:
+                        total_penalty += 1  # Sinif degisimi 1 birim ceza
+        
+        return total_penalty
+    
+    def calculate_h2_workload_penalty(self, solution: Solution) -> float:
+        """
+        H2: Is yuku uniformite cezasi.
+        
+        Her ogretim gorevlisinin is yuku Avg ± 2 bandinda olmali.
+        Bant disindaki her birim icin ceza.
+        
+        IsYukuCezasi_i = max(0, |GorevSayisi_i - L_avg| - 2)
+        H2(n) = sum(IsYukuCezasi_i)
+        """
+        total_penalty = 0.0
+        
+        # Her ogretim gorevlisi icin gorev sayisini hesapla
+        workload = self._calculate_instructor_workloads(solution)
+        
+        for instructor_id in self.faculty_instructors.keys():
+            load = workload.get(instructor_id, 0)
+            deviation = abs(load - self.avg_workload)
+            
+            # ±2 tolerans
+            penalty = max(0, deviation - 2)
+            total_penalty += penalty
+            
+            # Sert kisit kontrolu
+            if self.config.workload_constraint_mode == WorkloadConstraintMode.SOFT_AND_HARD:
+                if deviation > self.config.workload_hard_limit:
+                    total_penalty += 1000  # Cok buyuk ceza
+        
+        return total_penalty
+    
+    def calculate_h3_class_change_penalty(self, solution: Solution) -> float:
+        """
+        H3: Sinif degisimi cezasi.
+        
+        Her ogretim gorevlisinin gorev yaptigi sinif sayisi.
+        1-2 sinif idealdir, daha fazla sinif icin ceza.
+        
+        ClassChangeCezasi_i = max(0, ClassCount(i) - 2)
+        H3(n) = sum(ClassChangeCezasi_i)
+        """
+        total_penalty = 0.0
+        
+        # Her ogretim gorevlisi icin sinif sayisini hesapla
+        instructor_classes = defaultdict(set)
+        
+        for assignment in solution.assignments:
+            instructor_classes[assignment.ps_id].add(assignment.class_id)
+            instructor_classes[assignment.j1_id].add(assignment.class_id)
+        
+        for instructor_id in self.faculty_instructors.keys():
+            class_count = len(instructor_classes.get(instructor_id, set()))
+            penalty = max(0, class_count - 2)
+            total_penalty += penalty
+        
+        return total_penalty
+    
+    def calculate_h4_class_load_penalty(self, solution: Solution) -> float:
+        """
+        H4: Sinif is yuku dengesi cezasi.
+        
+        Her sinifin is yuku hedef degere yakin olmali.
+        Target = 2 * num_projects / class_count
+        """
+        total_penalty = 0.0
+        
+        num_projects = len(solution.assignments)
+        target_per_class = (2 * num_projects) / solution.class_count
+        
+        # Sinif basina proje sayisi
+        class_loads = defaultdict(int)
+        for assignment in solution.assignments:
+            class_loads[assignment.class_id] += 2  # Her proje 2 is yuku
+        
+        for class_id in range(solution.class_count):
+            load = class_loads.get(class_id, 0)
+            penalty = abs(load - target_per_class)
+            total_penalty += penalty
+        
+        return total_penalty
+    
+    def calculate_continuity_penalty(self, solution: Solution) -> float:
+        """
+        Devamlililk cezasi (ek olarak).
+        
+        Her ogretim gorevlisi icin her siniftaki blok sayisini hesapla.
+        Ideal: 1 blok (arka arkaya gorevler)
+        """
+        total_penalty = 0.0
+        
+        for instructor_id in self.faculty_instructors.keys():
+            for class_id in range(solution.class_count):
+                blocks = self._count_blocks(solution, instructor_id, class_id)
+                penalty = max(0, blocks - 1)
+                total_penalty += penalty
+        
+        return total_penalty
+    
+    def _build_instructor_task_matrix(
+        self, 
+        solution: Solution
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        """Her ogretim gorevlisi icin gorev matrisi olustur"""
+        instructor_tasks = defaultdict(list)
+        
+        for assignment in solution.assignments:
+            # PS gorevi
+            instructor_tasks[assignment.ps_id].append({
+                'project_id': assignment.project_id,
+                'class_id': assignment.class_id,
+                'order': assignment.order_in_class,
+                'role': 'PS'
+            })
+            
+            # J1 gorevi
+            instructor_tasks[assignment.j1_id].append({
+                'project_id': assignment.project_id,
+                'class_id': assignment.class_id,
+                'order': assignment.order_in_class,
+                'role': 'J1'
+            })
+        
+        return instructor_tasks
+    
+    def _calculate_instructor_workloads(
+        self, 
+        solution: Solution
+    ) -> Dict[int, int]:
+        """Her ogretim gorevlisi icin toplam is yukunu hesapla"""
+        workload = defaultdict(int)
+        
+        for assignment in solution.assignments:
+            workload[assignment.ps_id] += 1
+            workload[assignment.j1_id] += 1
+        
+        return workload
+    
+    def _count_blocks(
+        self, 
+        solution: Solution, 
+        instructor_id: int, 
+        class_id: int
+    ) -> int:
+        """Ogretim gorevlisinin belirli siniftaki blok sayisini hesapla"""
+        class_projects = solution.get_class_projects(class_id)
+        
+        if not class_projects:
+            return 0
+        
+        # Binary presence dizisi olustur
+        presence = []
+        for assignment in class_projects:
+            is_present = (assignment.ps_id == instructor_id or 
+                         assignment.j1_id == instructor_id)
+            presence.append(1 if is_present else 0)
+        
+        if sum(presence) == 0:
+            return 0
+        
+        # 0->1 gecislerini say (blok sayisi)
+        blocks = 0
+        for i in range(len(presence)):
+            if presence[i] == 1:
+                if i == 0 or presence[i-1] == 0:
+                    blocks += 1
+        
+        return blocks
+
+
+# ============================================================================
+# NEIGHBORHOOD GENERATOR
+# ============================================================================
+
+class NeighborhoodGenerator:
+    """Komsu cozum uretici"""
+    
+    def __init__(
+        self,
+        projects: List[Project],
+        instructors: List[Instructor],
+        config: TabuConfig
+    ):
+        self.projects = {p.id: p for p in projects}
+        self.instructors = {i.id: i for i in instructors}
+        self.config = config
+        
+        # Sadece ogretim gorevlileri
+        self.faculty_ids = [
+            i.id for i in instructors 
+            if i.type == "instructor"
+        ]
+    
+    def generate_neighbors(
+        self, 
+        solution: Solution, 
+        count: int = None
+    ) -> List[Tuple[Solution, str, int, Any]]:
+        """
+        Komsu cozumler uret.
+        
+        Returns:
+            List of (neighbor_solution, move_type, project_id, attribute)
+        """
+        if count is None:
+            count = self.config.neighborhood_size
+        
+        neighbors = []
+        move_types = [
+            'j1_swap',          # Ayni sinifta J1 degistir
+            'j1_reassign',      # J1 yeniden ata
+            'project_move',     # Projeyi baska sinifa tasi
+            'project_swap',     # Iki projenin sinifini degistir
+            'order_swap'        # Sinif ici sira degistir
+        ]
+        
+        for _ in range(count):
+            move_type = random.choice(move_types)
+            neighbor = None
+            project_id = -1
+            attribute = None
+            
+            if move_type == 'j1_swap':
+                result = self._generate_j1_swap(solution)
+            elif move_type == 'j1_reassign':
+                result = self._generate_j1_reassign(solution)
+            elif move_type == 'project_move':
+                result = self._generate_project_move(solution)
+            elif move_type == 'project_swap':
+                result = self._generate_project_swap(solution)
+            elif move_type == 'order_swap':
+                result = self._generate_order_swap(solution)
+            else:
+                continue
+            
+            if result is not None:
+                neighbors.append(result)
+        
+        return neighbors
+    
+    def _generate_j1_swap(
+        self, 
+        solution: Solution
+    ) -> Optional[Tuple[Solution, str, int, Any]]:
+        """
+        Hareket Tipi 1: J1 Swap (ayni sinif icinde)
+        Ayni siniftaki iki projenin J1'lerini degistir.
+        """
+        # Rastgele bir sinif sec
+        class_id = random.randint(0, solution.class_count - 1)
+        class_projects = solution.get_class_projects(class_id)
+        
+        if len(class_projects) < 2:
+            return None
+        
+        # Iki proje sec
+        idx1, idx2 = random.sample(range(len(class_projects)), 2)
+        p1 = class_projects[idx1]
+        p2 = class_projects[idx2]
+        
+        # J1'leri swap et (kendi projesine juri olma kuralini kontrol et)
+        if p1.j1_id == p2.ps_id or p2.j1_id == p1.ps_id:
+            return None
+        
+        # Yeni cozum olustur
+        new_solution = solution.copy()
+        
+        for a in new_solution.assignments:
+            if a.project_id == p1.project_id:
+                a.j1_id = p2.j1_id
+            elif a.project_id == p2.project_id:
+                a.j1_id = p1.j1_id
+        
+        return (new_solution, 'j1_swap', p1.project_id, p2.j1_id)
+    
+    def _generate_j1_reassign(
+        self, 
+        solution: Solution
+    ) -> Optional[Tuple[Solution, str, int, Any]]:
+        """
+        Hareket Tipi 2: J1 Reassignment
+        Bir projenin J1'ini degistir.
+        """
+        if not solution.assignments:
+            return None
+        
+        # Rastgele bir proje sec
+        assignment = random.choice(solution.assignments)
+        project = self.projects.get(assignment.project_id)
+        
+        if not project:
+            return None
+        
+        # PS haric ogretim gorevlilerinden sec
+        available_j1 = [
+            i_id for i_id in self.faculty_ids 
+            if i_id != project.responsible_id and i_id != assignment.j1_id
+        ]
+        
+        if not available_j1:
+            return None
+        
+        new_j1 = random.choice(available_j1)
+        
+        # Yeni cozum olustur
+        new_solution = solution.copy()
+        
+        for a in new_solution.assignments:
+            if a.project_id == assignment.project_id:
+                old_j1 = a.j1_id
+                a.j1_id = new_j1
+                break
+        
+        return (new_solution, 'j1_reassign', assignment.project_id, new_j1)
+    
+    def _generate_project_move(
+        self, 
+        solution: Solution
+    ) -> Optional[Tuple[Solution, str, int, Any]]:
+        """
+        Hareket Tipi 3: Proje Sinif Degisimi
+        Bir projeyi baska sinifa tasi.
+        """
+        if not solution.assignments:
+            return None
+        
+        # Rastgele bir proje sec
+        assignment = random.choice(solution.assignments)
+        
+        # Farkli bir sinif sec
+        available_classes = [
+            c for c in range(solution.class_count) 
+            if c != assignment.class_id
+        ]
+        
+        if not available_classes:
+            return None
+        
+        new_class = random.choice(available_classes)
+        
+        # Yeni cozum olustur
+        new_solution = solution.copy()
+        
+        # Eski siniftan cikar ve yeni sinifa ekle
+        for a in new_solution.assignments:
+            if a.project_id == assignment.project_id:
+                old_class = a.class_id
+                a.class_id = new_class
+                # Yeni sinifin sonuna ekle
+                new_class_projects = [
+                    x for x in new_solution.assignments 
+                    if x.class_id == new_class and x.project_id != a.project_id
+                ]
+                a.order_in_class = len(new_class_projects)
+                break
+        
+        # Eski siniftaki siralari guncelle
+        self._reorder_class(new_solution, old_class)
+        
+        return (new_solution, 'project_move', assignment.project_id, new_class)
+    
+    def _generate_project_swap(
+        self, 
+        solution: Solution
+    ) -> Optional[Tuple[Solution, str, int, Any]]:
+        """
+        Hareket Tipi 4: Proje Swap (iki sinif arasinda)
+        Farkli siniflardaki iki projenin siniflarini degistir.
+        """
+        if len(solution.assignments) < 2:
+            return None
+        
+        # Farkli siniflarda iki proje sec
+        assignments = solution.assignments.copy()
+        random.shuffle(assignments)
+        
+        p1 = assignments[0]
+        p2 = None
+        
+        for a in assignments[1:]:
+            if a.class_id != p1.class_id:
+                p2 = a
+                break
+        
+        if p2 is None:
+            return None
+        
+        # Yeni cozum olustur
+        new_solution = solution.copy()
+        
+        for a in new_solution.assignments:
+            if a.project_id == p1.project_id:
+                a.class_id = p2.class_id
+                a.order_in_class = p2.order_in_class
+            elif a.project_id == p2.project_id:
+                a.class_id = p1.class_id
+                a.order_in_class = p1.order_in_class
+        
+        return (new_solution, 'project_swap', p1.project_id, (p2.project_id, p2.class_id))
+    
+    def _generate_order_swap(
+        self, 
+        solution: Solution
+    ) -> Optional[Tuple[Solution, str, int, Any]]:
+        """
+        Hareket Tipi 5: Sinif Ici Sira Degisimi
+        Ayni siniftaki iki projenin sirasini degistir.
+        """
+        # Rastgele bir sinif sec
+        class_id = random.randint(0, solution.class_count - 1)
+        class_projects = solution.get_class_projects(class_id)
+        
+        if len(class_projects) < 2:
+            return None
+        
+        # Iki proje sec
+        idx1, idx2 = random.sample(range(len(class_projects)), 2)
+        p1 = class_projects[idx1]
+        p2 = class_projects[idx2]
+        
+        # Yeni cozum olustur
+        new_solution = solution.copy()
+        
+        for a in new_solution.assignments:
+            if a.project_id == p1.project_id:
+                a.order_in_class = p2.order_in_class
+            elif a.project_id == p2.project_id:
+                a.order_in_class = p1.order_in_class
+        
+        return (new_solution, 'order_swap', p1.project_id, p2.project_id)
+    
+    def _reorder_class(self, solution: Solution, class_id: int) -> None:
+        """Sinif icindeki siralari yeniden duzelt"""
+        class_projects = [a for a in solution.assignments if a.class_id == class_id]
+        class_projects.sort(key=lambda x: x.order_in_class)
+        
+        for i, a in enumerate(class_projects):
+            for assignment in solution.assignments:
+                if assignment.project_id == a.project_id:
+                    assignment.order_in_class = i
+                    break
+
+
+# ============================================================================
+# MAIN TABU SEARCH ALGORITHM
+# ============================================================================
+
 class TabuSearch(OptimizationAlgorithm):
     """
-    Tabu Search Algorithm - AI-BASED with Project Count Sorting + Paired Jury Assignment.
+    Tabu Search (Tabu Arama) algoritmasi - Cok Kriterli Akademik Proje Planlama.
     
-    YENİ STRATEJİ (AI-BASED, HARD KISITLAR YOK):
-    1. PROJE SAYISINA GÖRE SIRALAMA - Instructor'ları proje sorumluluk sayısına göre sırala (EN FAZLA -> EN AZ)
-    2. İKİYE BÖLME - Sıralamayı bozmadan ikiye böl (çift: n/2, n/2 | tek: n, n+1)
-    3. EŞLEŞTİRME - Üst ve alt gruptan birer kişi alarak eşleştir
-    4. CONSECUTIVE GROUPING + JÜRİ - x sorumlu -> y jüri, sonra y sorumlu -> x jüri
-    5. TAMAMEN AI-BASED - Hard kısıt yok, tamamen algoritma tabanlı
-    
-    Mantık:
-    "Instructor'ları proje sorumluluk sayısına göre sıralayıp eşleştiriyoruz. 
-    En fazla projesi olan ile en az projesi olan eşleşir. Consecutive grouping ile 
-    x sorumlu olunca y jüri olur, hemen sonrasında y sorumlu olunca x jüri olur."
-    
-    Implementation Features:
-    1. Project count-based instructor sorting (EN FAZLA -> EN AZ)
-    2. Balanced group splitting (çift/tek kontrol)
-    3. Upper-Lower group pairing
-    4. Consecutive grouping with paired jury assignment
-    5. Conflict-free scheduling
-    6. Early timeslot optimization
-    7. Uniform classroom distribution
-    
-    Tabu Search Features (Preserved):
-    - Tabu list management
-    - Neighborhood search
-    - Local optimization
+    Tek fazli calisma prensibi:
+    - Tum projeler, hocalar, sinif sayisi tek seferde modele verilir
+    - Tabu Search iteratif olarak calisir
+    - En iyi cozum tek seferde planner'a aktarilir
     """
-
+    
     def __init__(self, params: Dict[str, Any] = None):
         """
-        Initialize Tabu Search Algorithm with AI-BASED features.
-
+        Tabu Search algoritmasi baslatici.
+        
         Args:
-            params: Algorithm parameters.
+            params: Algoritma parametreleri
         """
         super().__init__(params)
         params = params or {}
-
-        # Tabu Search basic parameters
-        self.max_iterations = params.get("max_iterations", 100)  # Reduced for faster execution
-        self.neighborhood_size = params.get("neighborhood_size", 30)
-
-        # 🎯 AI-BASED FEATURE 1: ADAPTIVE TABU TENURE
-        self.initial_tabu_tenure = params.get("tabu_tenure", 10)
-        self.tabu_tenure = self.initial_tabu_tenure
-        self.min_tabu_tenure = params.get("min_tabu_tenure", 5)
-        self.max_tabu_tenure = params.get("max_tabu_tenure", 20)
-        self.adaptive_tabu = params.get("adaptive_tabu", True)
         
-        # 📊 AI-BASED FEATURE 2: FREQUENCY MEMORY
-        self.move_frequency = defaultdict(int)  # Hareket sıklığı
-        self.classroom_transitions = defaultdict(lambda: defaultdict(int))  # Sınıf geçişleri
-        self.instructor_pair_success = defaultdict(float)  # Başarılı eşleşmeler
-        self.solution_quality_history = []  # Çözüm kalitesi geçmişi
+        # Konfigurasyon olustur
+        self.config = TabuConfig(
+            max_iterations=params.get("max_iterations", 500),
+            time_limit=params.get("time_limit", 120),
+            no_improve_limit=params.get("no_improve_limit", 50),
+            tabu_tenure=params.get("tabu_tenure", 15),
+            neighborhood_size=params.get("neighborhood_size", 50),
+            class_count=params.get("class_count", 6),
+            auto_class_count=params.get("auto_class_count", True),
+            priority_mode=PriorityMode(params.get("priority_mode", "ESIT")),
+            time_penalty_mode=TimePenaltyMode(params.get("time_penalty_mode", "GAP_PROPORTIONAL")),
+            workload_constraint_mode=WorkloadConstraintMode(
+                params.get("workload_constraint_mode", "SOFT_ONLY")
+            ),
+            weight_h1=params.get("weight_h1", 1.0),
+            weight_h2=params.get("weight_h2", 2.0),
+            weight_h3=params.get("weight_h3", 1.0),
+            weight_h4=params.get("weight_h4", 0.5)
+        )
         
-        # ✨ AI-BASED FEATURE 3: ASPIRATION CRITERIA
-        self.aspiration_enabled = params.get("aspiration_enabled", True)
-        self.best_known_quality = float('inf')
-        self.diversification_counter = 0
+        # Veri yapilari
+        self.projects: List[Project] = []
+        self.instructors: List[Instructor] = []
+        self.classrooms: List[Dict[str, Any]] = []
+        self.timeslots: List[Dict[str, Any]] = []
         
-        # 🎯 AI-BASED FEATURE 4: INTELLIGENT CLASSROOM SELECTION
-        self.intelligent_classroom = params.get("intelligent_classroom", True)
-        self.classroom_usage = defaultdict(int)  # Sınıf kullanım sayacı
+        # Tabu listesi
+        self.tabu_list: List[TabuEntry] = []
         
-        # 🔍 AI-BASED FEATURE 5: SMART NEIGHBORHOOD
-        self.smart_neighborhood = params.get("smart_neighborhood", True)
-        self.conflict_based_moves = params.get("conflict_based_moves", 0.5)  # %50 conflict-based
-        self.load_balance_moves = params.get("load_balance_moves", 0.25)  # %25 load-balance
-        self.random_moves = params.get("random_moves", 0.25)  # %25 random
+        # En iyi cozum
+        self.best_solution: Optional[Solution] = None
+        self.best_cost: float = float('inf')
         
-        # 🤖 AI-BASED FEATURE 6: ADAPTIVE LEARNING WEIGHTS
-        self.enable_adaptive_weights = params.get("enable_adaptive_weights", True)
-        self.weight_learning_rate = params.get("weight_learning_rate", 0.05)
-        self.objective_weights = {
-            "consecutive": 100.0,
-            "classroom_stability": 80.0,
-            "load_balance": 120.0,
-            "early_slots": 60.0,
-            "gap_free": 150.0
-        }
-        
-        # 🧠 AI-BASED FEATURE 7: PATTERN RECOGNITION & LEARNING
-        self.enable_pattern_learning = params.get("enable_pattern_learning", True)
-        self.successful_patterns = defaultdict(float)  # Pattern -> success score
-        self.pattern_memory_size = params.get("pattern_memory_size", 50)
-        
-        # 🎯 AI-BASED FEATURE 8: DYNAMIC INTENSIFICATION/DIVERSIFICATION
-        self.enable_dynamic_strategy = params.get("enable_dynamic_strategy", True)
-        self.intensification_threshold = params.get("intensification_threshold", 5)
-        self.diversification_threshold = params.get("diversification_threshold", 10)
-        self.current_strategy = "balanced"  # balanced, intensification, diversification
-        
-        # Tabu list (moves to avoid)
-        self.tabu_list = []
-        self.tabu_dict = {}  # Fast lookup: move_key -> iteration_added
-
-        # Gap-free assignment manager (kept for compatibility with repair methods)
-        self.gap_free_manager = None
-
-    def _prioritize_projects_for_gap_free(self) -> List[Dict[str, Any]]:
-        """Prioritize projects for gap-free assignment."""
-        bitirme_normal = [p for p in self.projects if p.get("type") == "bitirme" and not p.get("is_makeup", False)]
-        ara_normal = [p for p in self.projects if p.get("type") == "ara" and not p.get("is_makeup", False)]
-        bitirme_makeup = [p for p in self.projects if p.get("type") == "bitirme" and p.get("is_makeup", False)]
-        ara_makeup = [p for p in self.projects if p.get("type") == "ara" and p.get("is_makeup", False)]
-        return bitirme_normal + ara_normal + bitirme_makeup + ara_makeup
-
-    def _select_instructors_for_project_gap_free(self, project: Dict[str, Any], instructor_timeslot_usage: Dict[int, Set[int]]) -> List[int]:
-        """
-        Select instructors for project (gap-free version).
-
-        Rules:
-        - Bitirme: 1 responsible + at least 1 jury (instructor or assistant)
-        - Ara: 1 responsible
-        - Same person cannot be both responsible and jury
-
-        Args:
-            project: Project
-            instructor_timeslot_usage: Usage information
-
-        Returns:
-            Instructor ID list
-        """
-        instructors = []
-        project_type = project.get("type", "ara")
-        responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-
-        # Responsible always first
-        if responsible_id:
-            instructors.append(responsible_id)
-        else:
-            logger.error(f"{self.__class__.__name__}: Project {project.get('id')} has NO responsible_id!")
-            return []
-
-        # Project type specific instructor selection
-        if project_type == "bitirme":
-            # Bitirme requires AT LEAST 1 jury (besides responsible)
-            available_jury = [i for i in self.instructors
-                            if i.get("id") != responsible_id]
-
-            # Prefer instructors, then assistants
-            faculty = [i for i in available_jury if i.get("type") == "instructor"]
-            assistants = [i for i in available_jury if i.get("type") == "assistant"]
-
-            # Add at least 1 jury (prefer faculty)
-            if faculty:
-                instructors.append(faculty[0].get("id"))
-            elif assistants:
-                instructors.append(assistants[0].get("id"))
-            else:
-                logger.warning(f"{self.__class__.__name__}: No jury available for bitirme project {project.get('id')}")
-                return []  # Jury required for bitirme!
-
-        # Ara project only needs responsible
-        return instructors
-
+        # Yardimci siniflar
+        self.penalty_calculator: Optional[PenaltyCalculator] = None
+        self.neighborhood_generator: Optional[NeighborhoodGenerator] = None
+    
     def initialize(self, data: Dict[str, Any]) -> None:
-        """Initialize the algorithm with problem data."""
-        self.data = data
-        self.projects = data.get("projects", [])
-        self.instructors = data.get("instructors", [])
-        self.classrooms = data.get("classrooms", [])
+        """
+        Algoritmay baslangic verileri ile baslatir.
+        
+        Args:
+            data: Algoritma giris verileri
+        """
+        # Verileri yukle
+        self._load_data(data)
+        
+        # CRITICAL: Ensure class_count matches actual classrooms after _load_data
+        # _load_data may have updated self.config.class_count based on available classrooms
+        if self.classrooms:
+            actual_class_count = len(self.classrooms)
+            if self.config.class_count != actual_class_count:
+                logger.info(f"Tabu Search: class_count {self.config.class_count} -> {actual_class_count} (mevcut sınıf sayısı)")
+                self.config.class_count = actual_class_count
+        
+        # Yardimci siniflari olustur
+        self.penalty_calculator = PenaltyCalculator(
+            self.projects, self.instructors, self.config
+        )
+        self.neighborhood_generator = NeighborhoodGenerator(
+            self.projects, self.instructors, self.config
+        )
+        
+        # Tabu listesini temizle
+        self.tabu_list = []
+        
+        # En iyi cozumu sifirla
+        self.best_solution = None
+        self.best_cost = float('inf')
+        
+        # CRITICAL: Log final class_count to verify
+        logger.info(f"Tabu Search initialize: Final class_count = {self.config.class_count}, classrooms = {len(self.classrooms)}")
+    
+    def _load_data(self, data: Dict[str, Any]) -> None:
+        """Verileri yukle ve donustur"""
+        # Projeleri yukle
+        raw_projects = data.get("projects", [])
+        self.projects = []
+        
+        for p in raw_projects:
+            project = Project(
+                id=p.get("id"),
+                title=p.get("title", ""),
+                type=str(p.get("type", "interim")).lower(),
+                responsible_id=p.get("responsible_id"),
+                is_makeup=p.get("is_makeup", False)
+            )
+            self.projects.append(project)
+        
+        # Ogretim gorevlilerini yukle
+        raw_instructors = data.get("instructors", [])
+        self.instructors = []
+        
+        for i in raw_instructors:
+            instructor = Instructor(
+                id=i.get("id"),
+                name=i.get("name", ""),
+                type=i.get("type", "instructor")
+            )
+            self.instructors.append(instructor)
+        
+        # Siniflari ve zaman dilimlerini yukle
+        all_classrooms = data.get("classrooms", [])
         self.timeslots = data.get("timeslots", [])
-
-        # Initialize gap-free manager (kept for compatibility with repair methods)
-        self.gap_free_manager = GapFreeAssignment()
-
-    # OLD METHODS COMMENTED OUT - Using new AI-BASED execute() method at line 538
-    # def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
-    #     """OLD Execute method - DISABLED"""
-    #     return self.optimize(data)
-    #
-    # def optimize(self, data: Dict[str, Any]) -> Dict[str, Any]:
-    #     """OLD Optimize method - DISABLED - Using new AI-BASED approach"""
-    #     pass
-    
-    def _calculate_grouping_stats(self, assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Ardışık gruplama istatistiklerini hesapla
         
-        Args:
-            assignments: Atama listesi
-            
-        Returns:
-            İstatistik bilgileri
-        """
-        if not assignments:
-            return {"consecutive_count": 0, "avg_classroom_changes": 0}
-        
-        # Her instructor için sınıf kullanımını hesapla
-        instructor_classrooms = defaultdict(set)
-        
-        for assignment in assignments:
-            project_id = assignment.get("project_id")
-            classroom_id = assignment.get("classroom_id")
-            
-            # Projenin sorumlu instructor'ını bul
-            project = next((p for p in self.projects if p.get("id") == project_id), None)
-            if project:
-                responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-                if responsible_id:
-                    instructor_classrooms[responsible_id].add(classroom_id)
-        
-        # Ardışık gruplanan instructor sayısı (tek sınıf kullanan)
-        consecutive_count = sum(1 for classrooms in instructor_classrooms.values() if len(classrooms) == 1)
-        
-        # Ortalama sınıf değişimi
-        total_changes = sum(len(classrooms) - 1 for classrooms in instructor_classrooms.values())
-        avg_changes = total_changes / len(instructor_classrooms) if instructor_classrooms else 0
-        
-        return {
-            "consecutive_count": consecutive_count,
-            "avg_classroom_changes": avg_changes,
-            "total_instructors": len(instructor_classrooms)
-        }
-
-    def evaluate_fitness(self, solution: Dict[str, Any]) -> float:
-        """Evaluate the fitness of a solution."""
-        assignments = solution.get("assignments", [])
-        if not assignments:
-            return float('inf')
-        
-        # Simple fitness: minimize gaps and maximize utilization
-        total_assignments = len(assignments)
-        if total_assignments == 0:
-            return float('inf')
-        
-        # Count gaps (empty timeslots)
-        used_timeslots = set()
-        for assignment in assignments:
-            timeslot_id = assignment.get("timeslot_id")
-            if timeslot_id:
-                used_timeslots.add(timeslot_id)
-        
-        total_timeslots = len(self.timeslots)
-        gaps = total_timeslots - len(used_timeslots)
-        
-        # Fitness: lower is better (minimize gaps)
-        fitness = gaps / total_timeslots if total_timeslots > 0 else 1.0
-        
-        return fitness
-    
-    def _calculate_solution_quality(self, assignments: List[Dict[str, Any]]) -> float:
-        """
-        AI-BASED: Calculate overall solution quality for adaptive learning
-        
-        Lower is better!
-        
-        Quality = conflicts + gaps + classroom_changes + load_imbalance
-        """
-        if not assignments:
-            return float('inf')
-        
-        quality = 0.0
-        
-        # Component 1: Conflicts (heavy penalty)
-        conflicts = self._detect_conflicts(assignments)
-        quality += len(conflicts) * 100.0  # 100 points per conflict
-        
-        # Component 2: Gaps (moderate penalty)
-        used_timeslots = set(a.get("timeslot_id") for a in assignments)
-        gaps = len(self.timeslots) - len(used_timeslots)
-        quality += gaps * 10.0  # 10 points per gap
-        
-        # Component 3: Classroom changes (light penalty)
-        instructor_classrooms = defaultdict(set)
-        for assignment in assignments:
-            project_id = assignment.get("project_id")
-            classroom_id = assignment.get("classroom_id")
-            project = next((p for p in self.projects if p.get("id") == project_id), None)
-            if project:
-                responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-                if responsible_id:
-                    instructor_classrooms[responsible_id].add(classroom_id)
-        
-        total_changes = sum(len(classrooms) - 1 for classrooms in instructor_classrooms.values())
-        quality += total_changes * 5.0  # 5 points per classroom change
-        
-        # Component 4: Load imbalance (moderate penalty)
-        instructor_loads = defaultdict(int)
-        for assignment in assignments:
-            for instructor_id in assignment.get('instructors', []):
-                instructor_loads[instructor_id] += 1
-        
-        if instructor_loads:
-            loads = list(instructor_loads.values())
-            avg_load = sum(loads) / len(loads)
-            variance = sum((load - avg_load) ** 2 for load in loads) / len(loads)
-            quality += variance * 2.0  # 2 points per variance unit
-        
-        return quality
-
-    def repair_solution(self, solution: Dict[str, Any], validation_report: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Tabu Search icin ozel onarim metodlari.
-        Tabu Search tabu listesi yaklaşımı kullanır.
-        """
-        assignments = solution.get("assignments", [])
-        
-        # Tabu Search-specific repair: tabu list approach
-        assignments = self._repair_duplicates_tabu_search(assignments)
-        assignments = self._repair_gaps_tabu_search(assignments)
-        assignments = self._repair_coverage_tabu_search(assignments)
-        # 🤖 AI-BASED: Apply soft penalty instead of hard deletion
-        assignments = self._apply_late_timeslot_penalty_tabu(assignments)
-        
-        solution["assignments"] = assignments
-        return solution
-
-    def _repair_duplicates_tabu_search(self, assignments):
-        """Tabu Search-specific duplicate repair using tabu list"""
-        from collections import defaultdict
-        
-        # Group by project_id and keep the best assignment using tabu list
-        project_assignments = defaultdict(list)
-        for assignment in assignments:
-            project_id = assignment.get("project_id")
-            if project_id:
-                project_assignments[project_id].append(assignment)
-        
-        # For each project, choose the best assignment using tabu list
-        repaired = []
-        for project_id, project_list in project_assignments.items():
-            if len(project_list) == 1:
-                repaired.append(project_list[0])
+        # CRITICAL: Sınıf sayısı kontrolü - Genetic Algorithm ve Simulated Annealing'deki gibi
+        # Eğer classroom_count belirtilmişse, o kadar sınıf kullan
+        classroom_count = data.get("classroom_count")
+        if classroom_count and classroom_count > 0:
+            if classroom_count > len(all_classrooms):
+                logger.warning(
+                    f"İstenen sınıf sayısı ({classroom_count}) mevcut sınıf sayısından "
+                    f"({len(all_classrooms)}) fazla. Tüm sınıflar kullanılacak."
+                )
+                self.classrooms = all_classrooms
+                self.config.class_count = len(all_classrooms)
+                # Kullanıcı belirli bir sayı istedi, auto_class_count'u kapat
+                self.config.auto_class_count = False
             else:
-                # Tabu list selection: choose the assignment with best tabu score
-                best_assignment = self._tabu_select_best_assignment(project_list)
-                repaired.append(best_assignment)
-        
-        return repaired
-
-    def _repair_gaps_tabu_search(self, assignments):
-        """Tabu Search-specific gap repair using tabu list"""
-        # Group by classroom
-        classroom_assignments = defaultdict(list)
-        for assignment in assignments:
-            classroom_id = assignment.get("classroom_id")
-            if classroom_id:
-                classroom_assignments[classroom_id].append(assignment)
-        
-        repaired = []
-        for classroom_id, class_assignments in classroom_assignments.items():
-            # Sort by timeslot
-            sorted_assignments = sorted(class_assignments, key=lambda x: x.get("timeslot_id", ""))
-            
-            # Tabu list gap filling: use tabu search
-            tabu_assignments = self._tabu_fill_gaps(sorted_assignments)
-            repaired.extend(tabu_assignments)
-        
-        return repaired
-
-    def _repair_coverage_tabu_search(self, assignments):
-        """Tabu Search-specific coverage repair ensuring all projects are assigned"""
-        assigned_projects = set(assignment.get("project_id") for assignment in assignments)
-        all_projects = set(project.get("id") for project in self.projects)
-        missing_projects = all_projects - assigned_projects
-        
-        # Add missing projects with tabu list assignment
-        for project_id in missing_projects:
-            project = next((p for p in self.projects if p.get("id") == project_id), None)
-            if project:
-                # Find best available slot using tabu list
-                best_slot = self._tabu_find_best_slot(project, assignments)
-                if best_slot:
-                    instructors = self._get_project_instructors_tabu_search(project)
-                    if instructors:
-                        new_assignment = {
-                            "project_id": project_id,
-                            "classroom_id": best_slot["classroom_id"],
-                            "timeslot_id": best_slot["timeslot_id"],
-                            "instructors": instructors
-                        }
-                        assignments.append(new_assignment)
-        
-        return assignments
-
-    def _apply_late_timeslot_penalty_tabu(self, assignments):
-        """
-        🤖 AI-BASED SOFT CONSTRAINT: Apply penalty to late timeslots (NO HARD BLOCKING!)
-        
-        Instead of DELETING assignments after 16:00 (hard constraint),
-        we KEEP them but apply a soft penalty score.
-        
-        This is 100% AI-based - no assignments are blocked!
-        """
-        # Apply penalty metadata to late assignments (don't delete!)
-        for assignment in assignments:
-            timeslot_id = assignment.get("timeslot_id")
-            timeslot = next((ts for ts in self.timeslots if ts.get("id") == timeslot_id), None)
-            if timeslot:
-                start_time = timeslot.get("start_time", "09:00")
-                try:
-                    hour = int(start_time.split(":")[0])
-                    if hour > 16:  # Late timeslot (after 16:00)
-                        # Apply soft penalty (not deletion!)
-                        assignment['_late_timeslot_penalty'] = -200.0
-                        assignment['_is_late_timeslot'] = True
-                    else:
-                        # Early timeslot - apply bonus!
-                        assignment['_early_timeslot_bonus'] = 50.0
-                        assignment['_is_late_timeslot'] = False
-                except:
-                    assignment['_is_late_timeslot'] = False
-            else:
-                assignment['_is_late_timeslot'] = False
-        
-        # Return ALL assignments (nothing deleted - soft constraint!)
-        return assignments
-
-    def _tabu_select_best_assignment(self, assignments):
-        """Tabu list selection of best assignment"""
-        best_assignment = assignments[0]
-        best_tabu = self._calculate_tabu_score(assignments[0])
-        
-        for assignment in assignments[1:]:
-            tabu = self._calculate_tabu_score(assignment)
-            if tabu > best_tabu:
-                best_tabu = tabu
-                best_assignment = assignment
-        
-        return best_assignment
-
-    def _calculate_tabu_score(self, assignment):
-        """Calculate tabu score for an assignment"""
-        score = 0
-        timeslot_id = assignment.get("timeslot_id", "")
-        classroom_id = assignment.get("classroom_id", "")
-        
-        # Prefer timeslots that are not in tabu list
-        try:
-            hour = int(timeslot_id.split("_")[0]) if "_" in timeslot_id else 9
-            # Tabu list: prefer timeslots that are not in tabu list
-            if 9 <= hour <= 12:  # Morning tabu
-                score += 30
-            elif 13 <= hour <= 16:  # Afternoon tabu
-                score += 25
-            else:
-                score += 10
-        except:
-            score += 20  # Default score
-        
-        # Prefer classrooms that are not in tabu list
-        if "A" in classroom_id:
-            score += 20  # A classrooms are not in tabu list
-        elif "B" in classroom_id:
-            score += 15  # B classrooms are not in tabu list
-        
-        return score
-
-    def _tabu_fill_gaps(self, assignments):
-        """Fill gaps using tabu list"""
-        if len(assignments) <= 1:
-            return assignments
-        
-        # Tabu list gap filling - keep all assignments for now
-        return assignments
-
-    def _tabu_find_best_slot(self, project, assignments):
-        """Find best available slot using tabu list"""
-        used_slots = set((a.get("classroom_id"), a.get("timeslot_id")) for a in assignments)
-        
-        best_slot = None
-        best_tabu = -1
-        
-        for classroom in self.classrooms:
-            for timeslot in self.timeslots:
-                slot_key = (classroom.get("id"), timeslot.get("id"))
-                if slot_key not in used_slots:
-                    tabu = self._calculate_tabu_score({"timeslot_id": timeslot.get("id"), "classroom_id": classroom.get("id")})
-                    if tabu > best_tabu:
-                        best_tabu = tabu
-                        best_slot = {
-                            "classroom_id": classroom.get("id"),
-                            "timeslot_id": timeslot.get("id")
-                        }
-        
-        return best_slot
-
-    def _get_project_instructors_tabu_search(self, project):
-        """Get instructors for a project using tabu list"""
-        instructors = []
-        responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-        if responsible_id:
-            instructors.append(responsible_id)
-        
-        # Add additional instructors based on project type (tabu: not in tabu list)
-        project_type = project.get("type", "ara")
-        if project_type == "bitirme":
-            # Add jury members for tabu list
-            available_instructors = [i for i in self.instructors if i.get("id") != responsible_id]
-            if available_instructors:
-                instructors.append(available_instructors[0].get("id"))
-        
-        return instructors
-
-    def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute method with AI-BASED Project Count Sorting + Paired Jury Assignment.
-        Uses direct approach with Instructor Pairing + Consecutive Grouping.
-        
-        YENİ STRATEJİ (AI-BASED):
-        1. PROJE SAYISINA GÖRE SIRALAMA - Instructor'ları proje sorumluluk sayısına göre sırala (EN FAZLA -> EN AZ)
-        2. İKİYE BÖLME - Sıralamayı bozmadan ikiye böl (çift: n/2, n/2 | tek: n, n+1)
-        3. EŞLEŞTİRME - Üst ve alt gruptan birer kişi alarak eşleştir
-        4. CONSECUTIVE GROUPING + JÜRİ - x sorumlu -> y jüri, sonra y sorumlu -> x jüri
-        """
-        import time as time_module
-        start_time = time_module.time()
-        self.initialize(data)
-        
-        logger.info("Tabu Search Algorithm başlatılıyor (AI-BASED: Project Count Sorting + Paired Jury)...")
-        logger.info(f"  Projeler: {len(self.projects)}")
-        logger.info(f"  Instructors: {len(self.instructors)}")
-        logger.info(f"  Sınıflar: {len(self.classrooms)}")
-        logger.info(f"  Zaman Slotları: {len(self.timeslots)}")
-
-        # AI-BASED Project Count Sorting + Paired Jury Assignment
-        logger.info("AI-BASED Project Count Sorting + Paired Jury ile optimal çözüm oluşturuluyor...")
-        best_solution = self._create_pure_consecutive_grouping_solution()
-        logger.info(f"  AI-BASED Consecutive Grouping: {len(best_solution)} proje atandı")
-        
-        # Conflict detection ve resolution
-        if best_solution and len(best_solution) > 0:
-            logger.info("Conflict detection ve resolution...")
-            conflicts = self._detect_conflicts(best_solution)
-            
-            if conflicts:
-                logger.warning(f"  {len(conflicts)} conflict detected!")
-                best_solution = self._resolve_conflicts(best_solution)
-                
-                remaining_conflicts = self._detect_conflicts(best_solution)
-                if remaining_conflicts:
-                    logger.error(f"  WARNING: {len(remaining_conflicts)} conflicts still remain!")
-                else:
-                    logger.info("  All conflicts successfully resolved!")
-            else:
-                logger.info("  No conflicts detected.")
-        
-        # 🎯 AI-BASED FEATURE 1: ADAPTIVE TABU TENURE - Calculate quality and adapt
-        logger.info("🎯 AI-BASED: Adaptive Tabu Tenure & Learning...")
-        current_quality = self._calculate_solution_quality(best_solution)
-        logger.info(f"  Current solution quality: {current_quality:.4f}")
-        
-        # Update tabu tenure based on quality
-        self._update_tabu_tenure_adaptively(current_quality)
-        
-        # Update best known quality
-        if current_quality < self.best_known_quality:
-            self.best_known_quality = current_quality
-            logger.info(f"  ✨ New best quality: {self.best_known_quality:.4f}")
-        
-        # 📊 AI-BASED FEATURE 2: FREQUENCY MEMORY - Learn from this solution
-        instructor_count = len(set(
-            p.get("responsible_id") or p.get("responsible_instructor_id") 
-            for p in self.projects if p.get("responsible_id") or p.get("responsible_instructor_id")
-        ))
-        move_key = f"solution_{len(best_solution)}_instructors_{instructor_count}"
-        quality_improvement = max(0, self.best_known_quality - current_quality)
-        self._learn_from_move(move_key, quality_improvement)
-        
-        # Print AI learning stats
-        logger.info(f"📊 [TS-AI] Learning Stats:")
-        logger.info(f"  Total moves recorded: {len(self.move_frequency)}")
-        logger.info(f"  Tabu tenure: {self.tabu_tenure}")
-        logger.info(f"  Diversification counter: {self.diversification_counter}")
-        logger.info(f"  Classrooms used: {len(self.classroom_usage)}")
-        
-        # Final stats
-        final_stats = self._calculate_grouping_stats(best_solution)
-        logger.info(f"  Final consecutive grouping stats:")
-        logger.info(f"    Consecutive instructors: {final_stats['consecutive_count']}")
-        logger.info(f"    Avg classroom changes: {final_stats['avg_classroom_changes']:.2f}")
-
-        end_time = time_module.time()
-        execution_time = end_time - start_time
-        logger.info(f"Tabu Search Algorithm completed. Execution time: {execution_time:.2f}s")
-        logger.info(f"🎯 AI-BASED Features (8 Total):")
-        logger.info(f"  1. Adaptive Tabu Tenure: {self.adaptive_tabu}")
-        logger.info(f"  2. Frequency Memory: Active")
-        logger.info(f"  3. Aspiration Criteria: {self.aspiration_enabled}")
-        logger.info(f"  4. Intelligent Classroom: {self.intelligent_classroom}")
-        logger.info(f"  5. Smart Neighborhood: {self.smart_neighborhood}")
-        logger.info(f"  6. Adaptive Learning Weights: {self.enable_adaptive_weights}")
-        logger.info(f"  7. Pattern Recognition: {self.enable_pattern_learning}")
-        logger.info(f"  8. Dynamic Strategy: {self.enable_dynamic_strategy}")
-
-        return {
-            "assignments": best_solution or [],
-            "schedule": best_solution or [],
-            "solution": best_solution or [],
-            "fitness_scores": self._calculate_fitness_scores(best_solution or []),
-            "execution_time": execution_time,
-            "algorithm": "Tabu Search Algorithm (AI-BASED: Full Features)",
-            "status": "completed",
-            "optimizations_applied": [
-                "ai_based_project_count_sorting",  # Instructor pairing
-                "balanced_group_splitting",  # Upper/Lower grouping
-                "upper_lower_group_pairing",  # Pair matching
-                "paired_jury_assignment",  # Consecutive jury
-                "pure_consecutive_grouping",  # Same classroom grouping
-                "adaptive_tabu_tenure",  # 🎯 AI FEATURE 1
-                "frequency_memory",  # 📊 AI FEATURE 2
-                "aspiration_criteria",  # ✨ AI FEATURE 3
-                "intelligent_classroom_selection",  # 🎯 AI FEATURE 4
-                "smart_neighborhood",  # 🔍 AI FEATURE 5
-                "adaptive_learning_weights",  # 🤖 AI FEATURE 6
-                "pattern_recognition_learning",  # 🧠 AI FEATURE 7
-                "dynamic_intensification_diversification",  # 🎯 AI FEATURE 8
-                "conflict_detection_and_resolution",
-                "no_hard_constraints"  # ✅ NO HARD CONSTRAINTS!
-            ],
-            "stats": {
-                **final_stats,
-                "ai_learning": {
-                    "tabu_tenure": self.tabu_tenure,
-                    "initial_tabu_tenure": self.initial_tabu_tenure,
-                    "best_quality": self.best_known_quality,
-                    "total_moves_learned": len(self.move_frequency),
-                    "classrooms_used": len(self.classroom_usage),
-                    "diversification_count": self.diversification_counter
-                }
-            },
-            "parameters": {
-                "algorithm_type": "ai_based_full_features_no_hard_constraints",
-                # Core features
-                "project_count_sorting": True,
-                "balanced_splitting": True,
-                "upper_lower_pairing": True,
-                "paired_jury_consecutive": True,
-                # AI features
-                "adaptive_tabu": self.adaptive_tabu,
-                "intelligent_classroom": self.intelligent_classroom,
-                "smart_neighborhood": self.smart_neighborhood,
-                "aspiration_enabled": self.aspiration_enabled,
-                # NO HARD CONSTRAINTS!
-                "hard_constraints_removed": True,
-                "ai_based_only": True,
-                "soft_constraints_only": True,
-                # Traditional params
-                "max_iterations": self.max_iterations,
-                "tabu_tenure": self.tabu_tenure,
-                "min_tabu_tenure": self.min_tabu_tenure,
-                "max_tabu_tenure": self.max_tabu_tenure
-            }
-        }
-
-    # ========== Pure Consecutive Grouping Methods (Same as Genetic Algorithm) ==========
-
-    def _create_pure_consecutive_grouping_solution(self) -> List[Dict[str, Any]]:
-        """
-        Pure consecutive grouping çözümü oluştur - AI-BASED with Project Count Sorting + Pairing.
-        
-        YENİ STRATEJÎ:
-        1. Instructor'ları proje sorumluluk sayısına göre sırala (EN FAZLA -> EN AZ)
-        2. Sıralamayı bozmadan ikiye böl (çift: n/2, n/2 | tek: n, n+1)
-        3. Üst ve alt gruptan birer kişi alarak eşleştir
-        4. Consecutive Grouping: x sorumlu -> y jüri, sonra y sorumlu -> x jüri
-        5. Tamamen AI-based, hard kısıt yok
-        
-        "Instructor'ları proje sayısına göre sıralayıp eşleştiriyoruz. En fazla projesi olan
-        en az projesi olan ile eşleşir. Consecutive grouping ile x sorumlu olunca y jüri olur,
-        sonra y sorumlu olunca x jüri olur."
-        """
-        assignments = []
-        
-        # Zaman slotlarını sırala
-        sorted_timeslots = sorted(
-            self.timeslots,
-            key=lambda x: self._parse_time(x.get("start_time", "09:00"))
-        )
-        
-        # Instructor bazında projeleri grupla
-        instructor_projects = defaultdict(list)
-        for project in self.projects:
-            responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-            if responsible_id:
-                instructor_projects[responsible_id].append(project)
-        
-        # YENİ MANTIK 1: Instructor'ları proje sayısına göre sırala (EN FAZLA -> EN AZ)
-        instructor_list = sorted(
-            instructor_projects.items(),
-            key=lambda x: len(x[1]),  # Proje sayısına göre
-            reverse=True  # Azalan sırada (en fazla üstte)
-        )
-        
-        logger.info(f"📊 [TS] AI-BASED: Instructorlar proje sayısına göre sıralandı (EN FAZLA -> EN AZ):")
-        for inst_id, proj_list in instructor_list[:5]:  # İlk 5'i göster
-            logger.info(f"  Instructor {inst_id}: {len(proj_list)} proje")
-        
-        # YENİ MANTIK 2: İkiye bölme (çift/tek kontrol)
-        total_instructors = len(instructor_list)
-        
-        if total_instructors % 2 == 0:
-            # Çift sayıda: tam ortadan böl
-            split_index = total_instructors // 2
-            upper_group = instructor_list[:split_index]
-            lower_group = instructor_list[split_index:]
-            logger.info(f"✂️ [TS] Çift sayıda instructor ({total_instructors}): Üst grup {split_index}, Alt grup {split_index}")
+                self.classrooms = all_classrooms[:classroom_count]
+                self.config.class_count = classroom_count
+                # Kullanıcı belirli bir sayı istedi, auto_class_count'u kapat
+                self.config.auto_class_count = False
+                logger.info(f"Tabu Search: {classroom_count} sınıf kullanılıyor")
         else:
-            # Tek sayıda: üst grup n, alt grup n+1
-            split_index = total_instructors // 2
-            upper_group = instructor_list[:split_index]
-            lower_group = instructor_list[split_index:]
-            logger.info(f"✂️ [TS] Tek sayıda instructor ({total_instructors}): Üst grup {split_index}, Alt grup {len(lower_group)}")
-        
-        logger.info(f"  Üst Grup: {[inst_id for inst_id, _ in upper_group]}")
-        logger.info(f"  Alt Grup: {[inst_id for inst_id, _ in lower_group]}")
-        
-        # YENİ MANTIK 3: Eşleştirme - üst ve alt gruptan birer kişi
-        instructor_pairs = []
-        for i in range(min(len(upper_group), len(lower_group))):
-            upper_inst = upper_group[i]
-            lower_inst = lower_group[i]
-            instructor_pairs.append((upper_inst, lower_inst))
-            logger.info(f"👥 Eşleştirme {i+1}: Instructor {upper_inst[0]} ↔ Instructor {lower_inst[0]}")
-        
-        # Eğer alt grup daha fazlaysa (tek sayıda instructor durumunda), son elemanı ekle
-        if len(lower_group) > len(upper_group):
-            extra_inst = lower_group[-1]
-            instructor_pairs.append((extra_inst, None))  # Eşi yok
-            logger.info(f"👤 Tek kalan: Instructor {extra_inst[0]} (eşi yok)")
-        
-        # Sıkı conflict prevention
-        used_slots = set()  # (classroom_id, timeslot_id)
-        instructor_timeslot_usage = defaultdict(set)  # instructor_id -> set of timeslot_ids
-        assigned_projects = set()  # project_ids that have been assigned
-        
-        # NOT 4: CONSECUTIVE GROUPING + ÇIFT BAZLI JÜRİ EŞLEŞTİRMESİ
-        # Her bir eşleştirilmiş çift için: x sorumlu -> y jüri, sonra y sorumlu -> x jüri
-        
-        logger.info(f"🔄 Eşleştirilmiş çiftler için consecutive grouping başlatılıyor...")
-        
-        for pair_idx, pair in enumerate(instructor_pairs):
-            if pair[1] is None:  # Eşi olmayan tek instructor
-                instructor_x_id, instructor_x_projects = pair[0]
-                logger.info(f"📍 Tek instructor {instructor_x_id} işleniyor (eşi yok)...")
-                
-                # Tek instructor için normal consecutive grouping
-                self._assign_instructor_projects_consecutively(
-                    instructor_x_id, instructor_x_projects, sorted_timeslots,
-                    assignments, used_slots, instructor_timeslot_usage, assigned_projects,
-                    jury_instructor_id=None  # Jüri yok
-                )
+            # classroom_count belirtilmemişse, mevcut sınıflara göre ayarla
+            if all_classrooms:
+                available_class_count = len(all_classrooms)
+                # Eğer config'de class_count mevcut sınıf sayısından farklıysa, mevcut sınıf sayısını kullan
+                if self.config.class_count != available_class_count:
+                    # Eğer auto_class_count aktifse veya default değerse, mevcut sınıf sayısını kullan
+                    if self.config.auto_class_count or self.config.class_count == 6:  # Default 6
+                        self.config.class_count = available_class_count
+                        logger.info(f"Tabu Search: Sınıf sayısı otomatik olarak {available_class_count} olarak ayarlandı (mevcut sınıf sayısı)")
+                else:
+                    logger.info(f"Tabu Search: {self.config.class_count} sınıf kullanılacak")
+            
+            # Sınıfları ayarla
+            if self.config.class_count <= len(all_classrooms):
+                self.classrooms = all_classrooms[:self.config.class_count]
             else:
-                # Eşleştirilmiş çift var
-                instructor_x_id, instructor_x_projects = pair[0]
-                instructor_y_id, instructor_y_projects = pair[1]
-                
-                logger.info(f"👥 Çift {pair_idx + 1}: Instructor {instructor_x_id} ↔ {instructor_y_id}")
-                
-                # ÖNCE: X sorumlu -> Y jüri (consecutive grouping)
-                logger.info(f"  ➡️ Instructor {instructor_x_id} sorumlu, {instructor_y_id} jüri")
-                self._assign_instructor_projects_consecutively(
-                    instructor_x_id, instructor_x_projects, sorted_timeslots,
-                    assignments, used_slots, instructor_timeslot_usage, assigned_projects,
-                    jury_instructor_id=instructor_y_id
-                )
-                
-                # SONRA: Y sorumlu -> X jüri (consecutive grouping)
-                logger.info(f"  ⬅️ Instructor {instructor_y_id} sorumlu, {instructor_x_id} jüri")
-                self._assign_instructor_projects_consecutively(
-                    instructor_y_id, instructor_y_projects, sorted_timeslots,
-                    assignments, used_slots, instructor_timeslot_usage, assigned_projects,
-                    jury_instructor_id=instructor_x_id
-                )
-        
-        logger.info(f"Pure Consecutive Grouping tamamlandı: {len(assignments)} atama yapıldı")
-        return assignments
+                self.classrooms = all_classrooms
+                self.config.class_count = len(all_classrooms)
+                logger.info(f"Tabu Search: Tüm {len(all_classrooms)} sınıf kullanılacak")
     
-    # ==================== AI-BASED FEATURES ====================
-    
-    def _update_tabu_tenure_adaptively(self, current_quality: float) -> None:
+    def optimize(self, data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        🎯 AI-BASED FEATURE 1: ADAPTIVE TABU TENURE
-        Tabu tenure'yi çözüm kalitesine göre dinamik olarak ayarla
-        """
-        if not self.adaptive_tabu:
-            return
-        
-        self.solution_quality_history.append(current_quality)
-        
-        # Son 5 iterasyonda iyileşme var mı?
-        if len(self.solution_quality_history) >= 5:
-            recent = self.solution_quality_history[-5:]
-            improvement = max(recent) - min(recent)
-            
-            if improvement < 0.001:  # Takılı kaldık (minimal improvement)
-                # DIVERSIFICATION: Tabu tenure'yi artır
-                old_tenure = self.tabu_tenure
-                self.tabu_tenure = min(self.tabu_tenure + 2, self.max_tabu_tenure)
-                if old_tenure != self.tabu_tenure:
-                    logger.info(f"🔄 [TS-AI] Takılma tespit edildi! Tabu tenure: {old_tenure} → {self.tabu_tenure}")
-                    self.diversification_counter += 1
-            else:  # İyileşiyor
-                # INTENSIFICATION: Tabu tenure'yi azalt
-                old_tenure = self.tabu_tenure
-                self.tabu_tenure = max(self.tabu_tenure - 1, self.min_tabu_tenure)
-                if old_tenure != self.tabu_tenure:
-                    logger.info(f"📈 [TS-AI] İyileşme var! Tabu tenure: {old_tenure} → {self.tabu_tenure}")
-                    self.diversification_counter = 0
-    
-    def _learn_from_move(self, move_key: str, quality_improvement: float) -> None:
-        """
-        📊 AI-BASED FEATURE 2: FREQUENCY MEMORY
-        Hareketten öğren ve hafızaya kaydet
-        """
-        self.move_frequency[move_key] += 1
-        
-        # Başarılı hareket mi?
-        if quality_improvement > 0:
-            logger.info(f"📚 [TS-AI] LEARNING: '{move_key}' başarılı hareket! (İyileşme: {quality_improvement:.4f})")
-            
-            # Başarı oranını güncelle
-            current_success = self.instructor_pair_success.get(move_key, 0.0)
-            self.instructor_pair_success[move_key] = current_success + quality_improvement
-    
-    def _calculate_aspiration_score(self, move_key: str, move_quality: float) -> float:
-        """
-        🤖 AI-BASED FEATURE 3: ASPIRATION CRITERIA SCORING (NO RETURN BOOLEAN!)
-        
-        Instead of return True/False, calculate aspiration bonus score.
-        Higher score = stronger aspiration to override tabu.
-        
-        Aspiration Criteria Scoring:
-        1. Best-so-far improvement → +500 bonus
-        2. Rare move (diversification) → +300 bonus
-        3. Stuck detection → +200 bonus
-        4. No criteria met → 0 (neutral, not blocking!)
-        
-        Returns:
-            Aspiration score (0+ = accept, 0 = neutral)
-        """
-        if not self.aspiration_enabled:
-            # 🤖 AI-BASED: Disabled = no bonus (not blocking!)
-            return 0.0  # Neutral score (not False!)
-        
-        aspiration_score = 0.0
-        
-        # Kriter 1: Best-so-far improvement
-        if move_quality < self.best_known_quality * 0.98:  # %2 iyileşme
-            logger.info(f"✨ [TS-AI] ASPIRATION: En iyi çözüm! Tabu override bonus +500. Quality: {move_quality:.4f}")
-            aspiration_score += 500.0  # Huge bonus!
-        
-        # Kriter 2: Rare move (diversification)
-        move_freq = self.move_frequency.get(move_key, 0)
-        if move_freq < 2:
-            logger.info(f"🌟 [TS-AI] ASPIRATION: Nadir hareket! Tabu override bonus +300. Freq: {move_freq}")
-            aspiration_score += 300.0  # High bonus
-        
-        # Kriter 3: Stuck detection
-        if self.diversification_counter > 8:
-            logger.info(f"🔓 [TS-AI] ASPIRATION: Takıldık! Tabu override bonus +200. Counter: {self.diversification_counter}")
-            self.diversification_counter = 0
-            aspiration_score += 200.0  # Bonus
-        
-        # 🤖 AI-BASED: Return score (not boolean!)
-        # Higher score = more likely to override tabu
-        # 0 score = neutral (not blocking, just no bonus)
-        return aspiration_score
-    
-    def _select_classroom_intelligently(self, available_classrooms: List[Dict], 
-                                        instructor_id: int,
-                                        last_classroom_id: Optional[int] = None) -> Dict:
-        """
-        🎯 AI-BASED FEATURE 4: INTELLIGENT CLASSROOM SELECTION
-        Sınıf seçiminde akıllı karar
-        
-        Kriterler:
-        - Bu instructor daha önce hangi sınıfları kullandı? (consecutive için)
-        - Hangi sınıflar az kullanıldı? (uniform distribution)
-        - Hangi sınıflar en uygun capacity'ye sahip?
-        """
-        if not self.intelligent_classroom or not available_classrooms:
-            return random.choice(available_classrooms) if available_classrooms else None
-        
-        scores = []
-        
-        for classroom in available_classrooms:
-            score = 0
-            classroom_id = classroom.get("id")
-            
-            # Kriter 1: Instructor'ın önceki sınıfıyla aynıysa BÜYÜK bonus (consecutive)
-            if last_classroom_id and last_classroom_id == classroom_id:
-                score += 100  # Consecutive grouping için kritik!
-            
-            # Kriter 2: Az kullanılan sınıflara bonus (uniform distribution)
-            usage_count = self.classroom_usage.get(classroom_id, 0)
-            avg_usage = sum(self.classroom_usage.values()) / max(len(self.classroom_usage), 1)
-            
-            if usage_count < avg_usage:
-                score += 50  # Az kullanılan sınıfları teşvik et
-            elif usage_count > avg_usage * 1.5:
-                score -= 30  # Çok kullanılan sınıfları cezalandır
-            
-            # Kriter 3: Capacity uygunluğu
-            capacity = classroom.get("capacity", 30)
-            if 25 <= capacity <= 35:
-                score += 20  # Optimal capacity
-            
-            # Kriter 4: Sınıf ID'si (bazı sınıflar tercih edilebilir)
-            classroom_name = classroom.get("name", "")
-            if "D106" in classroom_name or "D108" in classroom_name:
-                score += 10  # Popüler sınıflar
-            
-            scores.append((classroom, score))
-        
-        # En yüksek skorlu sınıfı seç
-        scores.sort(key=lambda x: x[1], reverse=True)
-        selected = scores[0][0]
-        
-        logger.info(f"🎯 [TS-AI] Sınıf seçildi: {selected.get('name', selected.get('id'))} (skor: {scores[0][1]:.0f})")
-        
-        # Kullanımı güncelle
-        self.classroom_usage[selected.get("id")] += 1
-        
-        return selected
-    
-    def _detect_conflicts(self, assignments: List[Dict[str, Any]]) -> List[Dict]:
-        """Conflict detection for smart neighborhood"""
-        conflicts = []
-        instructor_timeslot_counts = defaultdict(lambda: defaultdict(int))
-        
-        for assignment in assignments:
-            instructors_list = assignment.get('instructors', [])
-            timeslot_id = assignment.get('timeslot_id')
-            
-            for instructor_id in instructors_list:
-                instructor_timeslot_counts[instructor_id][timeslot_id] += 1
-                
-                if instructor_timeslot_counts[instructor_id][timeslot_id] > 1:
-                    conflicts.append({
-                        'instructor_id': instructor_id,
-                        'timeslot_id': timeslot_id,
-                        'count': instructor_timeslot_counts[instructor_id][timeslot_id],
-                        'assignment': assignment
-                    })
-        
-        return conflicts
-    
-    def _find_imbalanced_instructors(self, assignments: List[Dict[str, Any]]) -> List[int]:
-        """Find instructors with imbalanced loads"""
-        instructor_loads = defaultdict(int)
-        
-        for assignment in assignments:
-            instructors_list = assignment.get('instructors', [])
-            for instructor_id in instructors_list:
-                instructor_loads[instructor_id] += 1
-        
-        if not instructor_loads:
-            return []
-        
-        avg_load = sum(instructor_loads.values()) / len(instructor_loads)
-        
-        # Find instructors with load > 1.5 * avg
-        imbalanced = [
-            inst_id for inst_id, load in instructor_loads.items()
-            if load > avg_load * 1.5
-        ]
-        
-        return imbalanced
-    
-    def _assign_instructor_projects_consecutively(
-        self, 
-        instructor_id: int, 
-        project_list: List[Dict[str, Any]], 
-        sorted_timeslots: List[Dict[str, Any]],
-        assignments: List[Dict[str, Any]], 
-        used_slots: set, 
-        instructor_timeslot_usage: Dict, 
-        assigned_projects: set,
-        jury_instructor_id: Optional[int] = None
-    ) -> None:
-        """
-        Bir instructor'ın projelerini consecutive olarak atar.
+        Tabu Search algoritmasini calistirir.
         
         Args:
-            instructor_id: Sorumlu instructor ID
-            project_list: Atanacak projeler
-            sorted_timeslots: Sıralanmış zaman slotları
-            assignments: Global atama listesi
-            used_slots: Kullanılmış slotlar
-            instructor_timeslot_usage: Instructor'ların slot kullanımı
-            assigned_projects: Atanmış projeler
-            jury_instructor_id: Jüri olarak atanacak instructor (opsiyonel)
+            data: Algoritma giris verileri (optional, initialize zaten execute tarafindan cagrildi)
+            
+        Returns:
+            Dict[str, Any]: Optimizasyon sonucu
         """
-        if not project_list:
-            return
+        # NOT: initialize zaten base.execute() tarafindan cagrildi, burada tekrar cagirmaya gerek yok
+        # if data:
+        #     self.initialize(data)
         
-        # 🆕 ADAPTIVE CONSECUTIVE: Sınıf sayısına göre consecutive grouping ayarla - PROJE EKSİK ATANMA SORUNU DÜZELTİLDİ!
-        classroom_count = len(self.classrooms)
-        # SORUN DÜZELTİLDİ: Sınıf sayısı az olsa bile consecutive grouping'i tamamen kapatma!
-        # Sadece esnek hale getir - projelerin eksik atanmasını önle
-        use_consecutive = True  # HEP consecutive kullan - sadece esnek modda
-        flexible_mode = classroom_count < 6  # Az sınıf varsa esnek mod
-        logger.info(f"🔄 ADAPTIVE: Sınıf sayısı {classroom_count} - consecutive grouping: AÇIK (esnek: {'EVET' if flexible_mode else 'HAYIR'})")
+        start_time = time.time()
         
-        # 🔧 SORUN DÜZELTİLDİ: Flexible mode'da bile tüm projelerin atanmasını garanti et!
-        if flexible_mode:
-            logger.info("🔧 FLEXIBLE MODE: Tüm projelerin atanması garanti ediliyor...")
+        # Eger auto_class_count aktifse, 5, 6, 7 icin en iyi sonucu bul
+        if self.config.auto_class_count:
+            best_result = None
+            best_overall_cost = float('inf')
             
-            # 🆕 PROJE COVERAGE VALIDATION: Flexible mode'da proje eksik atanmasını önle!
-            self._validate_project_coverage = True
-            self._flexible_mode_retry_count = 0
-            self._max_flexible_retries = 3  # Maksimum 3 deneme
-        
-        logger.info(f"  Instructor {instructor_id} için {len(project_list)} proje {'consecutive' if use_consecutive else 'flexible'} atanıyor...")
-        
-        # 🎯 AI-BASED: En uygun sınıf ve başlangıç slotunu bul
-        best_classroom = None
-        best_start_slot_idx = None
-        last_classroom_id = None  # Track for consecutive grouping
-        
-        # Tüm sınıflarda en erken boş slotu ara
-        available_slots_by_classroom = {}
-        
-        for classroom in self.classrooms:
-            classroom_id = classroom.get("id")
+            for class_count in [5, 6, 7]:
+                logger.info(f"Sinif sayisi {class_count} ile calistiriliyor...")
+                self.config.class_count = class_count
+                
+                result = self._run_tabu_search()
+                
+                if result['cost'] < best_overall_cost:
+                    best_overall_cost = result['cost']
+                    best_result = result
             
-            for start_idx in range(len(sorted_timeslots)):
-                timeslot_id = sorted_timeslots[start_idx].get("id")
-                slot_key = (classroom_id, timeslot_id)
-                
-                instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                if not isinstance(instructor_slots, set):
-                    instructor_slots = set()
-                
-                # Jüri instructor'ın da boş olup olmadığını kontrol et (NO HARD CONSTRAINT!)
-                jury_available = True
-                if jury_instructor_id:
-                    jury_slots = instructor_timeslot_usage.get(jury_instructor_id, set())
-                    if not isinstance(jury_slots, set):
-                        jury_slots = set()
-                    if timeslot_id in jury_slots:
-                        jury_available = False  # Soft constraint
-                
-                if (slot_key not in used_slots and 
-                    timeslot_id not in instructor_slots and
-                    jury_available):
-                    if classroom_id not in available_slots_by_classroom:
-                        available_slots_by_classroom[classroom_id] = (start_idx, classroom)
-                    break
-                            
-        # 🎯 AI-BASED FEATURE 4: INTELLIGENT CLASSROOM SELECTION
-        if available_slots_by_classroom:
-            available_classrooms = [cls for idx, cls in available_slots_by_classroom.values()]
+            result = best_result
+        else:
+            result = self._run_tabu_search()
+        
+        end_time = time.time()
+        
+        # Cozumu output formatina donustur
+        schedule = self._convert_solution_to_schedule(result['solution'])
+        
+        return {
+            "schedule": schedule,
+            "assignments": schedule,
+            "solution": schedule,
+            "fitness": -result['cost'],  # Maliyet negatif fitness
+            "cost": result['cost'],
+            "iterations": result['iterations'],
+            "execution_time": end_time - start_time,
+            "class_count": result['solution'].class_count,
+            "penalty_breakdown": result.get('penalty_breakdown', {}),
+            "status": "completed"
+        }
+    
+    def _run_tabu_search(self) -> Dict[str, Any]:
+        """
+        Ana Tabu Search dongusu.
+        
+        Returns:
+            En iyi cozum ve istatistikler
+        """
+        start_time = time.time()
+        
+        # Baslangic cozumu olustur
+        current_solution = self._create_initial_solution()
+        current_cost = self.penalty_calculator.calculate_total_penalty(current_solution)
+        
+        # En iyi cozumu baslat
+        self.best_solution = current_solution.copy()
+        self.best_cost = current_cost
+        
+        # Iterasyon sayaclari
+        iteration = 0
+        no_improve_count = 0
+        
+        logger.info(f"Baslangic maliyeti: {current_cost:.2f}")
+        
+        # Ana dongu
+        while (iteration < self.config.max_iterations and
+               no_improve_count < self.config.no_improve_limit and
+               time.time() - start_time < self.config.time_limit):
             
-            # Akıllı sınıf seçimi
-            selected_classroom = self._select_classroom_intelligently(
-                available_classrooms, 
-                instructor_id,
-                last_classroom_id
+            # Komsu cozumler olustur
+            neighbors = self.neighborhood_generator.generate_neighbors(
+                current_solution, 
+                self.config.neighborhood_size
             )
             
-            if selected_classroom:
-                best_classroom = selected_classroom.get("id")
-                best_start_slot_idx = available_slots_by_classroom[best_classroom][0]
-                logger.info(f"  ✓ AI-BASED sınıf seçildi: {best_classroom} - slot index {best_start_slot_idx}")
+            # En iyi tabu-olmayan komsuyu bul
+            best_neighbor = None
+            best_neighbor_cost = float('inf')
+            best_move_info = None
             
-            # Projeleri ata
-            if best_classroom and best_start_slot_idx is not None:
-                current_slot_idx = best_start_slot_idx
+            for neighbor, move_type, project_id, attribute in neighbors:
+                neighbor_cost = self.penalty_calculator.calculate_total_penalty(neighbor)
                 
-            for project in project_list:
-                    project_id = project.get("id")
-                    
-                    # Bu proje zaten atanmış mı?
-                    if project_id in assigned_projects:
-                        logger.warning(f"  ⚠️ Proje {project_id} zaten atanmış, atlanıyor")
-                        continue
-                    
-                    # 🆕 ADAPTIVE CONSECUTIVE: Sınıf sayısına göre consecutive grouping
-                    assigned = False
-                    
-                    if use_consecutive:
-                        # Consecutive: Önce mevcut sınıfta boş slot ara
-                        # FLEXIBLE MODE: Az sınıf varsa daha esnek ara
-                        search_range = range(current_slot_idx, len(sorted_timeslots))
-                        if flexible_mode:
-                            # Esnek mod: Tüm slotları ara, sadece consecutive tercih et
-                            search_range = range(0, len(sorted_timeslots))
-                        
-                        for slot_idx in search_range:
-                            timeslot_id = sorted_timeslots[slot_idx].get("id")
-                            slot_key = (best_classroom, timeslot_id)
-                            
-                            instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                            if not isinstance(instructor_slots, set):
-                                instructor_slots = set()
-                            
-                            # Jüri instructor'ın da boş olup olmadığını kontrol et
-                            jury_available = True
-                            if jury_instructor_id:
-                                jury_slots = instructor_timeslot_usage.get(jury_instructor_id, set())
-                                if not isinstance(jury_slots, set):
-                                    jury_slots = set()
-                                if timeslot_id in jury_slots:
-                                    jury_available = False
-                            
-                            if (slot_key not in used_slots and 
-                                timeslot_id not in instructor_slots and
-                                jury_available):
-                                
-                                # Jüri listesi oluştur
-                                jury_members = []
-                                if jury_instructor_id:
-                                    jury_members.append(jury_instructor_id)
-                                
-                                assignment = {
-                                    "project_id": project_id,
-                                    "classroom_id": best_classroom,
-                                    "timeslot_id": timeslot_id,
-                                    "is_makeup": project.get("is_makeup", False),
-                                    "instructors": [instructor_id],
-                                    "jury_members": jury_members
-                                }
-                                
-                                assignments.append(assignment)
-                                used_slots.add(slot_key)
-                                instructor_timeslot_usage[instructor_id].add(timeslot_id)
-                                assigned_projects.add(project_id)
-                                assigned = True
-                                
-                                logger.info(f"    ✅ Proje {project_id} → Timeslot {timeslot_id}")
-                                break
-                    else:
-                        # Non-consecutive: Tüm sınıflarda herhangi bir boş slot ara
-                        for slot_idx in range(0, len(sorted_timeslots)):
-                            timeslot_id = sorted_timeslots[slot_idx].get("id")
-                            slot_key = (best_classroom, timeslot_id)
-                            
-                            instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                            if not isinstance(instructor_slots, set):
-                                instructor_slots = set()
-                            
-                            # Jüri instructor'ın da boş olup olmadığını kontrol et
-                            jury_available = True
-                            if jury_instructor_id:
-                                jury_slots = instructor_timeslot_usage.get(jury_instructor_id, set())
-                                if not isinstance(jury_slots, set):
-                                    jury_slots = set()
-                                if timeslot_id in jury_slots:
-                                    jury_available = False
-                            
-                            if (slot_key not in used_slots and 
-                                timeslot_id not in instructor_slots and
-                                jury_available):
-                                
-                                # Jüri listesi oluştur
-                                jury_members = []
-                                if jury_instructor_id:
-                                    jury_members.append(jury_instructor_id)
-                                
-                                assignment = {
-                                    "project_id": project_id,
-                                    "classroom_id": best_classroom,
-                                    "timeslot_id": timeslot_id,
-                                    "is_makeup": project.get("is_makeup", False),
-                                    "instructors": [instructor_id],
-                                    "jury_members": jury_members
-                                }
-                                
-                                assignments.append(assignment)
-                                used_slots.add(slot_key)
-                                instructor_timeslot_usage[instructor_id].add(timeslot_id)
-                                assigned_projects.add(project_id)
-                                assigned = True
-                                
-                                logger.info(f"    ✅ Proje {project_id} → Timeslot {timeslot_id}")
-                                break
-                        
-                    # Jüri instructor'ın da boş olup olmadığını kontrol et
-                    jury_available = True
-                    if jury_instructor_id:
-                        jury_slots = instructor_timeslot_usage.get(jury_instructor_id, set())
-                        if not isinstance(jury_slots, set):
-                            jury_slots = set()
-                        if timeslot_id in jury_slots:
-                            jury_available = False
-                    
-                    if (slot_key not in used_slots and 
-                        timeslot_id not in instructor_slots and
-                        jury_available):
-                        
-                        # Jüri listesi oluştur
-                        instructors_list = [instructor_id]
-                        if jury_instructor_id:
-                            instructors_list.append(jury_instructor_id)
-                        
-                        assignment = {
-                            "project_id": project_id,
-                            "classroom_id": best_classroom,
-                            "timeslot_id": timeslot_id,
-                            "is_makeup": project.get("is_makeup", False),
-                            "instructors": instructors_list
-                        }
-                        
-                        assignments.append(assignment)
-                        used_slots.add(slot_key)
-                        instructor_timeslot_usage[instructor_id].add(timeslot_id)
-                        
-                        # Jüri instructor'ın da slot kullanımını kaydet
-                        if jury_instructor_id:
-                            instructor_timeslot_usage[jury_instructor_id].add(timeslot_id)
-                        
-                        assigned_projects.add(project_id)
-                        assigned = True
-                        
-                        jury_info = f" (Jüri: {jury_instructor_id})" if jury_instructor_id else ""
-                        logger.info(f"  ✓ Proje {project_id} atandı: {best_classroom} - {timeslot_id}{jury_info}")
-                        current_slot_idx = slot_idx + 1  # Bir sonraki slota geç
-                        break
-                    
-                    if not assigned:
-                        logger.warning(f"  ⚠️ Proje {project_id} için aynı sınıfta boş slot bulunamadı, farklı sınıf aranıyor...")
-                        
-                        # Farklı sınıflarda en erken boş slotu ara
-                        earliest_slot_found = None
-                        earliest_classroom = None
-                        earliest_slot_idx = float('inf')
-                        
-                        for classroom in self.classrooms:
-                            classroom_id = classroom.get("id")
-                            
-                            for slot_idx in range(len(sorted_timeslots)):
-                                timeslot_id = sorted_timeslots[slot_idx].get("id")
-                                slot_key = (classroom_id, timeslot_id)
-                                
-                                instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                                if not isinstance(instructor_slots, set):
-                                    instructor_slots = set()
-                                
-                            # Jüri instructor'ın da boş olup olmadığını kontrol et
-                            jury_available = True
-                            if jury_instructor_id:
-                                jury_slots = instructor_timeslot_usage.get(jury_instructor_id, set())
-                                if not isinstance(jury_slots, set):
-                                    jury_slots = set()
-                                if timeslot_id in jury_slots:
-                                    jury_available = False
-                            
-                                if (slot_key not in used_slots and 
-                                timeslot_id not in instructor_slots and
-                                jury_available):
-                                    
-                                    if slot_idx < earliest_slot_idx:
-                                        earliest_slot_idx = slot_idx
-                                        earliest_slot_found = timeslot_id
-                                        earliest_classroom = classroom_id
-                                    break
-                        
-                        # En erken boş slotu kullan
-                        if earliest_slot_found:
-                            # Jüri listesi oluştur
-                            instructors_list = [instructor_id]
-                            if jury_instructor_id:
-                                instructors_list.append(jury_instructor_id)
-                            
-                            assignment = {
-                                "project_id": project_id,
-                                "classroom_id": earliest_classroom,
-                                "timeslot_id": earliest_slot_found,
-                                "is_makeup": project.get("is_makeup", False),
-                                "instructors": instructors_list
-                            }
-                            
-                            assignments.append(assignment)
-                            used_slots.add((earliest_classroom, earliest_slot_found))
-                            instructor_timeslot_usage[instructor_id].add(earliest_slot_found)
-                        
-                        # Jüri instructor'ın da slot kullanımını kaydet
-                        if jury_instructor_id:
-                            instructor_timeslot_usage[jury_instructor_id].add(earliest_slot_found)
-                        
-                        assigned_projects.add(project_id)
-                        
-                        jury_info = f" (Jüri: {jury_instructor_id})" if jury_instructor_id else ""
-                        logger.info(f"  ✓ Proje {project_id} farklı sınıfa atandı: {earliest_classroom} - {earliest_slot_found}{jury_info}")
-                    else:
-                        logger.error(f"  ❌ Proje {project_id} için hiçbir boş slot bulunamadı!")
-        else:
-            logger.error(f"  ❌ Instructor {instructor_id} için başlangıç slotu bulunamadı!")
-
-    def _assign_consecutive_jury_members(self, assignments: List[Dict[str, Any]], 
-                                        classroom_instructor_sequence: Dict) -> None:
-        """
-        NOT 2: Aynı sınıfta ardışık atanan instructor'ları tespit et ve birbirinin jürisi yap.
-        
-        Mantık:
-        - Dr. Öğretim Görevlisi 14: D106'da consecutive (09:00-09:30)
-        - Dr. Öğretim Görevlisi 2: D106'da consecutive (09:30-10:00) 
-        
-        Sonuç:
-        - Öğretim Görevlisi 14 sorumlu → Öğretim Görevlisi 2 jüri
-        - Öğretim Görevlisi 2 sorumlu → Öğretim Görevlisi 14 jüri
-        """
-        jury_assignments_made = 0
-        
-        for classroom_id, instructor_sequence in classroom_instructor_sequence.items():
-            if len(instructor_sequence) < 2:
+                # Tabu kontrolu
+                is_tabu = self._is_tabu(move_type, project_id, attribute, iteration)
+                
+                # Aspiration kriteri: tabu olsa bile en iyi cozumden iyiyse kabul et
+                aspiration = (
+                    self.config.aspiration_enabled and 
+                    neighbor_cost < self.best_cost
+                )
+                
+                if (not is_tabu or aspiration) and neighbor_cost < best_neighbor_cost:
+                    best_neighbor = neighbor
+                    best_neighbor_cost = neighbor_cost
+                    best_move_info = (move_type, project_id, attribute)
+            
+            # Eger komsu bulunamadiysa, yeni baslangic cozumu
+            if best_neighbor is None:
+                current_solution = self._create_initial_solution()
+                current_cost = self.penalty_calculator.calculate_total_penalty(current_solution)
+                no_improve_count += 1
+                iteration += 1
                 continue
             
-            logger.info(f"Sınıf {classroom_id} için ardışık jüri eşleştirmesi yapılıyor...")
+            # Mevcut cozumu guncelle
+            current_solution = best_neighbor
+            current_cost = best_neighbor_cost
             
-            for i in range(len(instructor_sequence) - 1):
-                instructor_a = instructor_sequence[i]
-                instructor_b = instructor_sequence[i + 1]
-                
-                instructor_a_id = instructor_a['instructor_id']
-                instructor_b_id = instructor_b['instructor_id']
-                
-                # Instructor A'nın projelerine Instructor B'yi jüri yap
-                for assignment in assignments:
-                    if assignment['project_id'] in instructor_a['project_ids']:
-                        if instructor_b_id not in assignment['instructors']:
-                            assignment['instructors'].append(instructor_b_id)
-                            jury_assignments_made += 1
-                            logger.info(f"  Proje {assignment['project_id']}: Instructor {instructor_a_id} sorumlu → Instructor {instructor_b_id} jüri")
-                
-                # Instructor B'nin projelerine Instructor A'yı jüri yap
-                for assignment in assignments:
-                    if assignment['project_id'] in instructor_b['project_ids']:
-                        if instructor_a_id not in assignment['instructors']:
-                            assignment['instructors'].append(instructor_a_id)
-                            jury_assignments_made += 1
-                            logger.info(f"  Proje {assignment['project_id']}: Instructor {instructor_b_id} sorumlu → Instructor {instructor_a_id} jüri")
-        
-        logger.info(f"Ardışık jüri eşleştirmesi tamamlandı: {jury_assignments_made} jüri ataması yapıldı")
-
-    # OLD DUPLICATE METHOD - REMOVED (using new one at line 894)
-    # def _detect_conflicts(self, assignments: List[Dict[str, Any]]) -> List[str]:
-    #     """OLD - Detect conflicts in assignments"""
-    #     pass
-
-    def _resolve_conflicts(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        🔧 AI-BASED CONFLICT RESOLUTION
-        Çakışmaları akıllıca çöz - projeleri alternatif slot/sınıflara taşı
-        """
-        conflicts = self._detect_conflicts(assignments)
-        if not conflicts:
-            return assignments
-        
-        logger.warning(f"🔧 Conflict resolution başlatılıyor: {len(conflicts)} çakışma tespit edildi")
-        
-        # Çakışan instructor-timeslot çiftlerini topla
-        conflict_details = {}
-        for conflict in conflicts:
-            inst_id = conflict['instructor_id']
-            ts_id = conflict['timeslot_id']
-            key = f"{inst_id}_{ts_id}"
-            if key not in conflict_details:
-                conflict_details[key] = []
-            conflict_details[key].append(conflict['assignment'])
-        
-        # Her çakışma için çözüm üret
-        resolved_assignments = []
-        used_slots_new = set()
-        instructor_usage_new = defaultdict(set)
-        
-        # Önce çakışmayan atamaları ekle
-        for assignment in assignments:
-            has_conflict = False
-            for conflict in conflicts:
-                if conflict['assignment'] == assignment:
-                    has_conflict = True
-                    break
+            # Tabu listesine ekle
+            if best_move_info:
+                self._add_tabu(best_move_info[0], best_move_info[1], 
+                             best_move_info[2], iteration)
             
-            if not has_conflict:
-                resolved_assignments.append(assignment)
-                slot_key = (assignment.get('classroom_id'), assignment.get('timeslot_id'))
-                used_slots_new.add(slot_key)
-                for inst_id in assignment.get('instructors', []):
-                    instructor_usage_new[inst_id].add(assignment.get('timeslot_id'))
-        
-        # Sonra çakışan atamaları yeniden yerleştir
-        for conflict_key, conflicted_assignments in conflict_details.items():
-            # İlk atamayı tut, diğerlerini yeniden ata
-            if conflicted_assignments:
-                resolved_assignments.append(conflicted_assignments[0])
-                slot_key = (conflicted_assignments[0].get('classroom_id'), 
-                           conflicted_assignments[0].get('timeslot_id'))
-                used_slots_new.add(slot_key)
-                for inst_id in conflicted_assignments[0].get('instructors', []):
-                    instructor_usage_new[inst_id].add(conflicted_assignments[0].get('timeslot_id'))
-                
-                # Diğer çakışan atamaları alternatif slotlara taşı
-                for i, assignment in enumerate(conflicted_assignments[1:], 1):
-                    reassigned = False
-                    
-                    # Alternatif slot ara
-                    for classroom in self.classrooms:
-                        for timeslot in self.timeslots:
-                            slot_key = (classroom.get('id'), timeslot.get('id'))
-                            ts_id = timeslot.get('id')
-                            
-                            # Bu slot kullanılabilir mi?
-                            instructors = assignment.get('instructors', [])
-                            all_available = True
-                            
-                            for inst_id in instructors:
-                                if ts_id in instructor_usage_new[inst_id]:
-                                    all_available = False
-                                    break
-                            
-                            if slot_key not in used_slots_new and all_available:
-                                # Yeni slot'a ata
-                                new_assignment = assignment.copy()
-                                new_assignment['classroom_id'] = classroom.get('id')
-                                new_assignment['timeslot_id'] = ts_id
-                                
-                                resolved_assignments.append(new_assignment)
-                                used_slots_new.add(slot_key)
-                                for inst_id in instructors:
-                                    instructor_usage_new[inst_id].add(ts_id)
-                                
-                                reassigned = True
-                                logger.info(f"  ✅ Proje {assignment.get('project_id')} yeniden atandı: "
-                                          f"{classroom.get('name', classroom.get('id'))} - {ts_id}")
-                                break
-                        
-                        if reassigned:
-                            break
-                    
-                    if not reassigned:
-                        logger.error(f"  ❌ Proje {assignment.get('project_id')} için alternatif slot bulunamadı!")
-                        # En azından eski halini ekle (çakışmalı da olsa)
-                        resolved_assignments.append(assignment)
-        
-        # Final check
-        final_conflicts = self._detect_conflicts(resolved_assignments)
-        if final_conflicts:
-            logger.error(f"  ⚠️ {len(final_conflicts)} çakışma hala mevcut!")
-        else:
-            logger.info(f"  ✅ Tüm çakışmalar başarıyla çözüldü!")
-        
-        return resolved_assignments
-
-    def _parse_time(self, time_str: str) -> dt_time:
-        """Parse time string to datetime.time object"""
-        try:
-            if isinstance(time_str, dt_time):
-                return time_str
-            return dt_time.fromisoformat(time_str)
-        except:
-            return dt_time(9, 0)  # Default to 09:00
-
-    def _calculate_grouping_stats(self, assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Calculate consecutive grouping statistics."""
-        if not assignments:
-            return {
-                "consecutive_count": 0,
-                "total_instructors": 0,
-                "avg_classroom_changes": 0.0,
-                "consecutive_percentage": 0.0
-            }
-        
-        instructor_assignments = defaultdict(list)
-        for assignment in assignments:
-            project_id = assignment.get("project_id")
-            project = next((p for p in self.projects if p.get("id") == project_id), None)
-            if project and project.get("responsible_id"):
-                instructor_id = project["responsible_id"]
-                instructor_assignments[instructor_id].append(assignment)
-        
-        consecutive_count = 0
-        total_classroom_changes = 0
-        
-        for instructor_id, instructor_assignment_list in instructor_assignments.items():
-            classrooms_used = set(a.get("classroom_id") for a in instructor_assignment_list)
-            classroom_changes = len(classrooms_used) - 1
-            total_classroom_changes += classroom_changes
+            # En iyi cozumu guncelle
+            if current_cost < self.best_cost:
+                self.best_solution = current_solution.copy()
+                self.best_cost = current_cost
+                no_improve_count = 0
+                logger.info(f"Iterasyon {iteration}: Yeni en iyi maliyet = {self.best_cost:.2f}")
+            else:
+                no_improve_count += 1
             
-            timeslot_ids = sorted([a.get("timeslot_id") for a in instructor_assignment_list])
-            is_consecutive = all(
-                timeslot_ids[i] + 1 == timeslot_ids[i+1] 
-                for i in range(len(timeslot_ids) - 1)
-            ) if len(timeslot_ids) > 1 else True
+            # Eski tabu girdilerini temizle
+            self._cleanup_tabu(iteration)
             
-            if is_consecutive and len(classrooms_used) == 1:
-                consecutive_count += 1
+            iteration += 1
         
-        total_instructors = len(instructor_assignments)
-        avg_classroom_changes = total_classroom_changes / total_instructors if total_instructors > 0 else 0
+        # Ceza detaylarini hesapla
+        penalty_breakdown = {
+            'h1_time_penalty': self.penalty_calculator.calculate_h1_time_penalty(self.best_solution),
+            'h2_workload_penalty': self.penalty_calculator.calculate_h2_workload_penalty(self.best_solution),
+            'h3_class_change_penalty': self.penalty_calculator.calculate_h3_class_change_penalty(self.best_solution),
+            'h4_class_load_penalty': self.penalty_calculator.calculate_h4_class_load_penalty(self.best_solution)
+        }
+        
+        logger.info(f"Tabu Search tamamlandi: {iteration} iterasyon, "
+                   f"maliyet = {self.best_cost:.2f}")
         
         return {
-            "consecutive_count": consecutive_count,
-            "total_instructors": total_instructors,
-            "avg_classroom_changes": avg_classroom_changes,
-            "consecutive_percentage": (consecutive_count / total_instructors * 100) if total_instructors > 0 else 0
+            'solution': self.best_solution,
+            'cost': self.best_cost,
+            'iterations': iteration,
+            'penalty_breakdown': penalty_breakdown
         }
-
-    def _calculate_fitness_scores(self, solution: List[Dict[str, Any]]) -> Dict[str, float]:
-        """Calculate fitness scores for a solution."""
+    
+    def _create_initial_solution(self) -> Solution:
+        """
+        Baslangic cozumu olusturur.
+        
+        Heuristic yaklasim:
+        1. Projeleri PS'ye gore grupla
+        2. Siniflara dengeli dagit
+        3. J1 atamasini yap
+        """
+        solution = Solution(class_count=self.config.class_count)
+        
+        # Proje turune gore sirala (onceliklendirme)
+        sorted_projects = self._sort_projects_by_priority()
+        
+        # Siniflara dagit
+        class_assignments = [[] for _ in range(self.config.class_count)]
+        
+        # Round-robin dagitim
+        for i, project in enumerate(sorted_projects):
+            class_id = i % self.config.class_count
+            class_assignments[class_id].append(project)
+        
+        # Her sinif icin projeleri ata
+        for class_id, projects_in_class in enumerate(class_assignments):
+            for order, project in enumerate(projects_in_class):
+                # J1 sec (PS haric)
+                j1_id = self._select_j1_for_project(
+                    project, 
+                    solution, 
+                    class_id
+                )
+                
+                assignment = ProjectAssignment(
+                    project_id=project.id,
+                    class_id=class_id,
+                    order_in_class=order,
+                    ps_id=project.responsible_id,
+                    j1_id=j1_id,
+                    j2_id=-1  # Placeholder
+                )
+                solution.assignments.append(assignment)
+        
+        return solution
+    
+    def _sort_projects_by_priority(self) -> List[Project]:
+        """Projeleri onceliklendirme moduna gore sirala"""
+        if self.config.priority_mode == PriorityMode.ARA_ONCE:
+            # Ara projeler once
+            ara = [p for p in self.projects if p.type in ('interim', 'ara')]
+            bitirme = [p for p in self.projects if p.type in ('final', 'bitirme')]
+            return ara + bitirme
+        
+        elif self.config.priority_mode == PriorityMode.BITIRME_ONCE:
+            # Bitirme projeleri once
+            bitirme = [p for p in self.projects if p.type in ('final', 'bitirme')]
+            ara = [p for p in self.projects if p.type in ('interim', 'ara')]
+            return bitirme + ara
+        
+        else:  # ESIT
+            return list(self.projects)
+    
+    def _select_j1_for_project(
+        self, 
+        project: Project, 
+        solution: Solution,
+        target_class_id: int
+    ) -> int:
+        """
+        Proje icin J1 sec.
+        
+        Kurallar:
+        - PS projeye juri olamaz
+        - Is yuku dengesi gozetilmeli
+        - Ayni sinifta olmak tercih edilir
+        """
+        # Mevcut is yuklerini hesapla
+        workloads = defaultdict(int)
+        for a in solution.assignments:
+            workloads[a.ps_id] += 1
+            workloads[a.j1_id] += 1
+        
+        # PS dahil edilmez
+        workloads[project.responsible_id] += 1
+        
+        # Ogretim gorevlilerini sirala (is yukune gore)
+        faculty_ids = [
+            i.id for i in self.instructors 
+            if i.type == "instructor" and i.id != project.responsible_id
+        ]
+        
+        # En az yuke sahip olan tercih edilir
+        faculty_ids.sort(key=lambda x: workloads.get(x, 0))
+        
+        if faculty_ids:
+            return faculty_ids[0]
+        
+        # Fallback: herhangi biri
+        all_ids = [i.id for i in self.instructors if i.id != project.responsible_id]
+        return random.choice(all_ids) if all_ids else project.responsible_id
+    
+    def _is_tabu(
+        self, 
+        move_type: str, 
+        project_id: int, 
+        attribute: Any,
+        current_iteration: int
+    ) -> bool:
+        """Hareketin tabu olup olmadigini kontrol et"""
+        for entry in self.tabu_list:
+            if (entry.move_type == move_type and 
+                entry.project_id == project_id and
+                entry.attribute == attribute and
+                entry.expiry > current_iteration):
+                return True
+        return False
+    
+    def _add_tabu(
+        self, 
+        move_type: str, 
+        project_id: int, 
+        attribute: Any,
+        current_iteration: int
+    ) -> None:
+        """Hareketi tabu listesine ekle"""
+        entry = TabuEntry(
+            move_type=move_type,
+            project_id=project_id,
+            attribute=attribute,
+            expiry=current_iteration + self.config.tabu_tenure
+        )
+        self.tabu_list.append(entry)
+    
+    def _cleanup_tabu(self, current_iteration: int) -> None:
+        """Suresi dolan tabu girdilerini temizle"""
+        self.tabu_list = [
+            entry for entry in self.tabu_list 
+            if entry.expiry > current_iteration
+        ]
+    
+    def _convert_solution_to_schedule(
+        self, 
+        solution: Solution
+    ) -> List[Dict[str, Any]]:
+        """
+        Solution'i schedule formatina donustur.
+        
+        Her atama icin:
+        - project_id
+        - classroom_id
+        - timeslot_id
+        - instructors (PS, J1, J2)
+        """
+        schedule = []
+        
+        if not solution or not solution.assignments:
+            return schedule
+        
+        # Sinif ve timeslot eslestirmesi olustur
+        classroom_mapping = self._create_classroom_mapping(solution.class_count)
+        timeslot_mapping = self._create_timeslot_mapping()
+        
+        for assignment in solution.assignments:
+            # Sinif ID'sini gercek classroom ID'sine donustur
+            classroom_id = classroom_mapping.get(
+                assignment.class_id, 
+                self.classrooms[0].get("id") if self.classrooms else 1
+            )
+            
+            # Timeslot ID'sini hesapla (sinif icindeki siraya gore)
+            timeslot_idx = assignment.order_in_class
+            timeslot_id = timeslot_mapping.get(
+                timeslot_idx, 
+                self.timeslots[0].get("id") if self.timeslots else 1
+            )
+            
+            # Instructors listesi: [PS, J1, J2]
+            # J2 her zaman "[Araştırma Görevlisi]" placeholder olarak eklenir
+            # Bu sadece frontend'de görünecek, algoritma içinde parametrize edilmez
+            instructors = [assignment.ps_id, assignment.j1_id, "[Araştırma Görevlisi]"]
+            
+            schedule_entry = {
+                "project_id": assignment.project_id,
+                "classroom_id": classroom_id,
+                "timeslot_id": timeslot_id,
+                "instructors": instructors,
+                "class_order": assignment.order_in_class,
+                "class_id": assignment.class_id
+            }
+            schedule.append(schedule_entry)
+        
+        return schedule
+    
+    def _create_classroom_mapping(self, class_count: int) -> Dict[int, int]:
+        """Mantiksal sinif ID'lerini gercek classroom ID'lerine esle"""
+        mapping = {}
+        for i in range(class_count):
+            if i < len(self.classrooms):
+                mapping[i] = self.classrooms[i].get("id", i + 1)
+            else:
+                mapping[i] = i + 1
+        return mapping
+    
+    def _create_timeslot_mapping(self) -> Dict[int, int]:
+        """Siralama indeksini timeslot ID'lerine esle"""
+        mapping = {}
+        for i, ts in enumerate(self.timeslots):
+            mapping[i] = ts.get("id", i + 1)
+        return mapping
+    
+    def evaluate_fitness(self, solution: Dict[str, Any]) -> float:
+        """
+        Cozumun fitness degerini hesapla.
+        
+        Args:
+            solution: Degerlendirilecek cozum
+            
+        Returns:
+            Fitness degeri (yuksek = iyi)
+        """
         if not solution:
-            return {
-                "load_balance": 0.0,
-                "classroom_changes": 0.0,
-                "time_efficiency": 0.0,
-                "total": 0.0
-            }
+            return float('-inf')
         
-        load_balance = self._calculate_load_balance_score(solution)
-        classroom_changes = self._calculate_classroom_changes_score(solution)
-        time_efficiency = self._calculate_time_efficiency_score(solution)
+        assignments = solution.get("solution", solution.get("schedule", solution))
         
-        total = load_balance + classroom_changes + time_efficiency
+        if isinstance(assignments, Solution):
+            cost = self.penalty_calculator.calculate_total_penalty(assignments)
+            return -cost  # Daha dusuk maliyet = daha yuksek fitness
         
-        return {
-            "load_balance": load_balance,
-            "classroom_changes": classroom_changes,
-            "time_efficiency": time_efficiency,
-            "total": total
-        }
+        # Dict listesi ise Solution'a donustur
+        if isinstance(assignments, list):
+            sol = self._convert_schedule_to_solution(assignments)
+            if sol:
+                cost = self.penalty_calculator.calculate_total_penalty(sol)
+                return -cost
+        
+        return float('-inf')
     
-    def _calculate_load_balance_score(self, solution: List[Dict[str, Any]]) -> float:
-        """Calculate load balance score."""
-        instructor_loads = {}
+    def _convert_schedule_to_solution(
+        self, 
+        schedule: List[Dict[str, Any]]
+    ) -> Optional[Solution]:
+        """Schedule formatindan Solution'a donustur"""
+        if not schedule:
+            return None
         
-        for assignment in solution:
-            for instructor_id in assignment.get("instructors", []):
-                instructor_loads[instructor_id] = instructor_loads.get(instructor_id, 0) + 1
+        solution = Solution(class_count=self.config.class_count)
         
-        if not instructor_loads:
-            return 0.0
+        for entry in schedule:
+            project_id = entry.get("project_id")
+            instructors = entry.get("instructors", [])
+            
+            if not project_id or len(instructors) < 2:
+                continue
+            
+            assignment = ProjectAssignment(
+                project_id=project_id,
+                class_id=entry.get("class_id", 0),
+                order_in_class=entry.get("class_order", 0),
+                ps_id=instructors[0],
+                j1_id=instructors[1],
+                j2_id=instructors[2] if len(instructors) > 2 else -1
+            )
+            solution.assignments.append(assignment)
         
-        loads = list(instructor_loads.values())
-        avg_load = sum(loads) / len(loads)
-        variance = sum((load - avg_load) ** 2 for load in loads) / len(loads)
-        
-        return variance
+        return solution
     
-    def _calculate_classroom_changes_score(self, solution: List[Dict[str, Any]]) -> float:
-        """Calculate classroom changes score."""
-        instructor_classrooms = {}
-        changes = 0
-        
-        for assignment in solution:
-            classroom_id = assignment.get("classroom_id")
-            for instructor_id in assignment.get("instructors", []):
-                if instructor_id in instructor_classrooms:
-                    if instructor_classrooms[instructor_id] != classroom_id:
-                        changes += 1
-                instructor_classrooms[instructor_id] = classroom_id
-        
-        return float(changes)
+    def get_name(self) -> str:
+        """Algoritma adini dondur"""
+        return "TabuSearch"
     
-    def _calculate_time_efficiency_score(self, solution: List[Dict[str, Any]]) -> float:
-        """Calculate time efficiency score."""
-        instructor_timeslots = {}
-        gaps = 0
+    def repair_solution(
+        self, 
+        solution: Dict[str, Any], 
+        validation_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Cozumu onar.
         
-        for assignment in solution:
-            timeslot_id = assignment.get("timeslot_id")
-            for instructor_id in assignment.get("instructors", []):
-                if instructor_id not in instructor_timeslots:
-                    instructor_timeslots[instructor_id] = []
-                instructor_timeslots[instructor_id].append(timeslot_id)
+        Args:
+            solution: Onarilacak cozum
+            validation_result: Validation sonuclari
+            
+        Returns:
+            Onarilmis cozum
+        """
+        assignments = solution.get("assignments", solution.get("schedule", []))
         
-        for timeslots in instructor_timeslots.values():
-            sorted_slots = sorted(timeslots)
-            for i in range(1, len(sorted_slots)):
-                if sorted_slots[i] - sorted_slots[i-1] > 1:
-                    gaps += 1
+        if not assignments:
+            return solution
         
-        return float(gaps)
+        # Duplicate kontrol ve temizlik
+        seen_projects = set()
+        cleaned_assignments = []
+        
+        for a in assignments:
+            project_id = a.get("project_id")
+            if project_id not in seen_projects:
+                seen_projects.add(project_id)
+                cleaned_assignments.append(a)
+        
+        # Classroom/timeslot cakisma kontrolu
+        used_slots = set()
+        final_assignments = []
+        
+        for a in cleaned_assignments:
+            slot_key = (a.get("classroom_id"), a.get("timeslot_id"))
+            if slot_key not in used_slots:
+                used_slots.add(slot_key)
+                final_assignments.append(a)
+        
+        return {"assignments": final_assignments}
+
+
+# ============================================================================
+# FACTORY FUNCTION
+# ============================================================================
+
+def create_tabu_search(params: Dict[str, Any] = None) -> TabuSearch:
+    """
+    Tabu Search algoritmasi olustur.
+    
+    Args:
+        params: Algoritma parametreleri
+        
+    Returns:
+        TabuSearch instance
+    """
+    return TabuSearch(params)
+

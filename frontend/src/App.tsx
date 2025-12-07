@@ -13,6 +13,8 @@ import Instructors from './pages/Instructors';
 import Algorithms from './pages/Algorithms';
 import Planner from './pages/Planner';
 import Results from './pages/Results';
+import Notifications from './pages/Notifications';
+import Import from './pages/Import';
 
 // Context
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -75,6 +77,8 @@ function App() {
                 <Route path="algorithms" element={<Algorithms />} />
                 <Route path="planner" element={<Planner />} />
                 <Route path="results" element={<Results />} />
+                <Route path="notifications" element={<Notifications />} />
+                <Route path="import" element={<Import />} />
               </Route>
             </Routes>
           </Box>

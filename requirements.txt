@@ -1,576 +1,76 @@
-# Core FastAPI dependencies
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
+# FastAPI ve bağımlılıkları (Python 3.14 uyumlu versiyonlar)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+email-validator>=2.1.0
 
-# Database
-sqlalchemy==2.0.23
-alembic==1.13.1
-asyncpg==0.29.0  # PostgreSQL async driver
-psycopg2-binary==2.9.9  # PostgreSQL sync driver
+# Veritabanı - PostgreSQL async ve sync desteği
+sqlalchemy>=2.0.23
+psycopg[binary,pool]>=3.1.0  # psycopg3 - Python 3.14 uyumlu async PostgreSQL driver (asyncpg yerine)
+psycopg2-binary>=2.9.9  # Sync operations için
+alembic>=1.12.1
 
-# Authentication & Security
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.6
-bcrypt==4.0.1
+# Cache ve görev kuyruğu
+redis>=5.0.0
+celery>=5.3.0
+flower>=2.0.0
 
-# Redis & Caching
-redis==5.0.1
+# Optimizasyon
+numpy>=1.26.0
+scipy>=1.14.0
+# ortools - Python 3.14 desteği henüz yok, opsiyonel bırakıldı
+# Not: OR-Tools yüklü değilse algoritma otomatik olarak heuristic çözücüye düşer
+# Yüklemek için: pip install ortools
+# ortools>=9.8.0
 
-# Background Tasks
-celery==5.3.4
-kombu==5.3.4
-
-# HTTP Client
-httpx==0.25.2
-requests==2.31.0
-
-# Data Processing
-pandas==2.1.4
-numpy==1.25.2
-openpyxl==3.1.2
-
-# PDF Generation
+# Raporlama
 reportlab==4.0.7
+openpyxl==3.1.2
+xlsxwriter==3.1.9
+matplotlib>=3.8.0
+pandas>=2.2.0  # Python 3.14 uyumlu versiyon
+
+# Test
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.21.0
+httpx>=0.25.0
+
+# Kod kalitesi
+black>=23.11.0
+flake8>=6.1.0
+isort>=5.12.0
+
+# Dökümantasyon
+mkdocs>=1.5.0
+mkdocs-material>=9.4.0
+
+# Güvenlik ve yardımcı
+python-dotenv>=1.0.0
+cryptography>=41.0.0
+
+# WebSocket ve async desteği
+websockets>=12.0
+
+# YAML desteği (i18n için)
+pyyaml>=6.0.0
+
+# Email desteği
+emails>=0.6
+
+# Celery bağımlılıkları
+kombu>=5.5.0
+billiard>=4.2.0
+click-didyoumean>=0.3.0
+click-plugins>=1.1.0
+click-repl>=0.2.0
+
+# Flower bağımlılıkları
+humanize>=4.0.0
+prometheus-client>=0.8.0
+tornado>=5.0.0,<7.0.0
 
-# Optimization Algorithms
-ortools==9.8.3296  # Google OR-Tools for CP-SAT
-scipy==1.11.4
-scikit-learn==1.3.2
-
-# Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
-httpx==0.25.2
-
-# Security Testing
-bandit==1.7.5
-safety==2.3.5
-
-# Development Tools
-black==23.11.0
-isort==5.12.0
-flake8==6.1.0
-mypy==1.7.1
-
-# Monitoring & Logging
-structlog==23.2.0
-prometheus-client==0.19.0
-
-# Internationalization
-babel==2.13.1
-
-# Environment Management
-python-dotenv==1.0.0
-
-# File Processing
-python-magic==0.4.27
-Pillow==10.1.0
-
-# Web Scraping (if needed)
-beautifulsoup4==4.12.2
-lxml==4.9.3
-
-# Date/Time Utilities
-python-dateutil==2.8.2
-
-# Configuration Management
-pyyaml==6.0.1
-toml==0.10.2
-
-# API Documentation
-fastapi-swagger-ui==0.1.0
-
-# CORS Support
-fastapi-cors==0.0.6
-
-# Rate Limiting
-slowapi==0.1.9
-
-# Database Connection Pooling
-asyncpg-pool==0.6.0
-
-# Validation
-email-validator==2.1.0
-phone-numbers==8.13.26
-
-# Compression
-gzip-stream==0.1.0
-
-# Cryptography
-cryptography==41.0.8
-
-# JSON Web Tokens
-PyJWT==2.8.0
-
-# OAuth2
-authlib==1.2.1
-
-# File Upload
-aiofiles==23.2.1
-
-# Timezone Support
-pytz==2023.3
-
-# Memory Profiling (optional)
-memory-profiler==0.61.0
-
-# Performance Monitoring
-psutil==5.9.6
-
-# WebSocket Support (if needed)
-websockets==12.0
-
-# Template Engine (if needed)
-jinja2==3.1.2
-
-# CSV Processing
-csvkit==1.1.1
-
-# XML Processing
-xmltodict==0.13.0
-
-# Data Validation
-cerberus==1.3.5
-
-# API Versioning
-fastapi-versioning==0.10.0
-
-# Health Checks
-healthcheck==1.3.3
-
-# Metrics Collection
-prometheus-fastapi-instrumentator==6.1.0
-
-# Distributed Tracing (optional)
-opentelemetry-api==1.21.0
-opentelemetry-sdk==1.21.0
-opentelemetry-instrumentation-fastapi==0.42b0
-
-# Database Migration Tools
-migrate==0.1.0
-
-# Backup & Restore
-backup-tool==0.1.0
-
-# Email Support
-fastapi-mail==1.4.1
-
-# SMS Support (optional)
-twilio==8.10.0
-
-# Push Notifications (optional)
-pyfcm==1.5.4
-
-# File Storage
-boto3==1.34.0  # AWS S3
-google-cloud-storage==2.10.0  # Google Cloud Storage
-
-# Search Engine (optional)
-elasticsearch==8.11.0
-
-# Message Queue
-kombu==5.3.4
-amqp==5.2.0
-
-# Task Scheduling
-apscheduler==3.10.4
-
-# Configuration Management
-dynaconf==3.2.4
-
-# API Rate Limiting
-limits==3.6.0
-
-# Caching
-diskcache==5.6.3
-
-# Serialization
-marshmallow==3.20.1
-
-# Database Query Optimization
-sqlalchemy-utils==0.41.1
-
-# API Documentation
-sphinx==7.2.6
-sphinx-rtd-theme==1.3.0
-
-# Code Quality
-pre-commit==3.6.0
-coverage==7.3.2
-
-# Performance Testing
-locust==2.17.0
-
-# Load Testing
-wrk==4.2.0
-
-# Database Seeding
-faker==20.1.0
-
-# Data Export/Import
-tablib==3.5.0
-
-# Chart Generation
-matplotlib==3.8.2
-plotly==5.17.0
-
-# Statistical Analysis
-statsmodels==0.14.0
-
-# Machine Learning (for optimization)
-xgboost==2.0.2
-lightgbm==4.1.0
-
-# Natural Language Processing (for project analysis)
-spacy==3.7.2
-nltk==3.8.1
-
-# Image Processing (for reports)
-opencv-python==4.8.1.78
-
-# Audio Processing (for accessibility)
-pydub==0.25.1
-
-# Video Processing (for accessibility)
-moviepy==1.0.3
-
-# Accessibility Testing
-axe-selenium-python==2.1.6
-
-# Performance Monitoring
-newrelic==9.2.0
-
-# Error Tracking
-sentry-sdk[fastapi]==1.38.0
-
-# Analytics
-mixpanel==4.10.0
-
-# User Analytics
-posthog==3.0.2
-
-# A/B Testing
-ab-testing==0.1.0
-
-# Feature Flags
-unleash-client-python==5.11.0
-
-# API Gateway
-kong-admin==0.3.0
-
-# Service Mesh
-istio-client==0.1.0
-
-# Container Orchestration
-kubernetes==28.1.0
-
-# Infrastructure as Code
-terraform==0.1.0
-
-# Configuration Management
-ansible==8.7.1
-
-# Monitoring
-grafana-api==1.0.3
-prometheus-api-client==0.5.3
-
-# Log Aggregation
-fluent-logger==0.10.0
-
-# Distributed Systems
-consul==1.1.0
-etcd3==0.12.0
-
-# Message Brokers
-pika==1.3.2  # RabbitMQ
-kafka-python==2.0.2  # Apache Kafka
-
-# Workflow Management
-prefect==2.14.11
-
-# Data Pipeline
-apache-airflow==2.7.3
-
-# Real-time Processing
-streamlit==1.28.2
-
-# API Testing
-tavern==2.0.0
-
-# Contract Testing
-pact-python==2.0.0
-
-# Load Testing
-k6==0.1.0
-
-# Security Scanning
-semgrep==1.45.0
-
-# Dependency Scanning
-safety==2.3.5
-
-# License Compliance
-license-checker==33.0.0
-
-# Code Coverage
-codecov==2.1.13
-
-# Documentation
-mkdocs==1.5.3
-mkdocs-material==9.4.8
-
-# API Mocking
-wiremock==0.1.0
-
-# Database Testing
-testcontainers==3.7.1
-
-# Integration Testing
-responses==0.24.1
-
-# End-to-End Testing
-playwright==1.40.0
-
-# Visual Testing
-percy==0.1.0
-
-# Accessibility Testing
-axe-core==4.7.2
-
-# Performance Testing
-lighthouse==0.1.0
-
-# SEO Testing
-screaming-frog==0.1.0
-
-# Security Testing
-owasp-zap==0.1.0
-
-# Penetration Testing
-sqlmap==0.1.0
-
-# Vulnerability Scanning
-trivy==0.1.0
-
-# Compliance Testing
-cis-benchmark==0.1.0
-
-# GDPR Compliance
-gdpr-checker==0.1.0
-
-# Data Privacy
-privacy-engine==0.1.0
-
-# Encryption
-pycryptodome==3.19.0
-
-# Hashing
-hashlib2==0.1.0
-
-# Digital Signatures
-cryptography==41.0.8
-
-# Certificate Management
-certbot==2.8.0
-
-# SSL/TLS
-ssl-checker==0.1.0
-
-# Network Security
-firewall-rules==0.1.0
-
-# Intrusion Detection
-snort==0.1.0
-
-# Threat Intelligence
-misp==0.1.0
-
-# Incident Response
-thehive==0.1.0
-
-# Forensics
-volatility==0.1.0
-
-# Malware Analysis
-yara==0.1.0
-
-# Vulnerability Management
-nessus==0.1.0
-
-# Security Orchestration
-phantom==0.1.0
-
-# Compliance Management
-compliance-checker==0.1.0
-
-# Risk Assessment
-risk-calculator==0.1.0
-
-# Security Awareness
-security-training==0.1.0
-
-# Incident Management
-incident-response==0.1.0
-
-# Business Continuity
-disaster-recovery==0.1.0
-
-# Backup Management
-backup-monitor==0.1.0
-
-# Data Recovery
-data-recovery==0.1.0
-
-# System Monitoring
-system-monitor==0.1.0
-
-# Network Monitoring
-network-monitor==0.1.0
-
-# Application Monitoring
-app-monitor==0.1.0
-
-# Database Monitoring
-db-monitor==0.1.0
-
-# Performance Monitoring
-perf-monitor==0.1.0
-
-# User Monitoring
-user-monitor==0.1.0
-
-# API Monitoring
-api-monitor==0.1.0
-
-# Error Monitoring
-error-monitor==0.1.0
-
-# Log Monitoring
-log-monitor==0.1.0
-
-# Security Monitoring
-security-monitor==0.1.0
-
-# Compliance Monitoring
-compliance-monitor==0.1.0
-
-# Audit Monitoring
-audit-monitor==0.1.0
-
-# Change Monitoring
-change-monitor==0.1.0
-
-# Configuration Monitoring
-config-monitor==0.1.0
-
-# Dependency Monitoring
-dependency-monitor==0.1.0
-
-# License Monitoring
-license-monitor==0.1.0
-
-# Cost Monitoring
-cost-monitor==0.1.0
-
-# Resource Monitoring
-resource-monitor==0.1.0
-
-# Capacity Monitoring
-capacity-monitor==0.1.0
-
-# Availability Monitoring
-availability-monitor==0.1.0
-
-# Reliability Monitoring
-reliability-monitor==0.1.0
-
-# Scalability Monitoring
-scalability-monitor==0.1.0
-
-# Maintainability Monitoring
-maintainability-monitor==0.1.0
-
-# Testability Monitoring
-testability-monitor==0.1.0
-
-# Usability Monitoring
-usability-monitor==0.1.0
-
-# Accessibility Monitoring
-accessibility-monitor==0.1.0
-
-# Performance Optimization
-perf-optimizer==0.1.0
-
-# Memory Optimization
-memory-optimizer==0.1.0
-
-# CPU Optimization
-cpu-optimizer==0.1.0
-
-# Network Optimization
-network-optimizer==0.1.0
-
-# Database Optimization
-db-optimizer==0.1.0
-
-# Cache Optimization
-cache-optimizer==0.1.0
-
-# Query Optimization
-query-optimizer==0.1.0
-
-# Index Optimization
-index-optimizer==0.1.0
-
-# Schema Optimization
-schema-optimizer==0.1.0
-
-# Partition Optimization
-partition-optimizer==0.1.0
-
-# Backup Optimization
-backup-optimizer==0.1.0
-
-# Recovery Optimization
-recovery-optimizer==0.1.0
-
-# Security Optimization
-security-optimizer==0.1.0
-
-# Compliance Optimization
-compliance-optimizer==0.1.0
-
-# Cost Optimization
-cost-optimizer==0.1.0
-
-# Resource Optimization
-resource-optimizer==0.1.0
-
-# Capacity Optimization
-capacity-optimizer==0.1.0
-
-# Availability Optimization
-availability-optimizer==0.1.0
-
-# Reliability Optimization
-reliability-optimizer==0.1.0
-
-# Scalability Optimization
-scalability-optimizer==0.1.0
-
-# Maintainability Optimization
-maintainability-optimizer==0.1.0
-
-# Testability Optimization
-testability-optimizer==0.1.0
-
-# Usability Optimization
-usability-optimizer==0.1.0
-
-# Accessibility Optimization
-accessibility-optimizer==0.1.0

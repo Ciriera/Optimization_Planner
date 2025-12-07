@@ -564,8 +564,24 @@ def _create_gap_free_blocks_for_instructor(assignments: List[Dict[str, Any]],
 
 
 def write_json(path: str, data: Any) -> None:
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Write JSON data to file with safe path handling for Windows."""
+    try:
+        # Ensure directory exists
+        dir_path = os.path.dirname(path)
+        if dir_path:  # Only create if dir_path is not empty
+            os.makedirs(dir_path, exist_ok=True)
+        
+        # Normalize path for Windows
+        path = os.path.normpath(path)
+        
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        # Log the error but don't crash the algorithm
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to write JSON file {path}: {e}")
+        raise
 
 
 def build_slot_rewards_map_from_algorithm(algo) -> Dict[str, float]:
@@ -975,7 +991,20 @@ def generate_reports(assignments: List[Dict[str, Any]],
 
 def write_validator_summary(path: str, reports: Dict[str, Any]) -> None:
     """Write a compact validator_summary.txt describing acceptance criteria results."""
-    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    try:
+        # Normalize path for Windows
+        path = os.path.normpath(path)
+        
+        # Ensure directory exists
+        dir_path = os.path.dirname(path)
+        if dir_path:  # Only create if dir_path is not empty
+            os.makedirs(dir_path, exist_ok=True)
+    except OSError as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to create directory for validator summary {path}: {e}")
+        raise
+    
     lines = []
     dup = reports.get('duplicate_report', {})
     cov = reports.get('coverage_report', {})

@@ -1,0 +1,180 @@
+﻿        self,
+        target_assignment: Dict[str, Any],
+        assignments: List[Dict[str, Any]],
+        sorted_timeslots: List[Dict[str, Any]],
+        timeslot_to_index: Dict[int, int],
+        x_max: int,
+        locked_jurors_by_project: Optional[Dict[int, Set[int]]] = None
+    ) -> Tuple[bool, Optional[int]]:
+        """
+        Zaman Ã§akÄ±ÅŸmasÄ± nedeniyle ikinci jÃ¼ri atanamayan bir proje iÃ§in zincirli swap denemesi yap.
+
+        Strateji:
+        - Hedef slot ile aynÄ± timeslot'ta gÃ¶revli bir hocayÄ± (sadece jÃ¼ri olan) hedef projeye taÅŸÄ±yabilmek iÃ§in,
+          o hocanÄ±n gÃ¶revli olduÄŸu diÄŸer projede yerine geÃ§ebilecek uygun bir yedek hoca bul.
+        - BÃ¶ylece iki seviyeli bir deÄŸiÅŸ-tokuÅŸ ile hedef projeye jÃ¼ri eklenir, diÄŸer projede jÃ¼ri sayÄ±sÄ± korunur.
+
+        Kurallar:
+        - Sorumlu hoca swap edilemez.
+        - Yedek hoca atanabilir olmalÄ± ve iÅŸ yÃ¼kÃ¼ x_max'i aÅŸmamalÄ±.
+        - Hedefe taÅŸÄ±nacak hoca hedef projede sorumlu/jÃ¼ri olmamalÄ± (duplicate olmamalÄ±).
+
+        Returns:
+            (baÅŸarÄ±lÄ±_mÄ±, eklenen_hoca_id)
+        """
+        project_id = target_assignment.get('project_id')
+        classroom_id = target_assignment.get('classroom_id')
+        timeslot_id = target_assignment.get('timeslot_id')
+        target_instructors = target_assignment.get('instructors', [])
+        responsible_id = target_assignment.get('responsible_instructor_id')
+        if not responsible_id and target_instructors:
+            first_instr = target_instructors[0]
+            responsible_id = first_instr.get('id') if isinstance(first_instr, dict) else first_instr
+
+        # Mevcut iÅŸ yÃ¼klerini hesapla (x_max kontrolÃ¼ iÃ§in)
+        workloads = self._calculate_current_workloads(assignments)
+
+        # 1) AynÄ± timeslot'ta gÃ¶revli hocalarÄ± tara (sadece jÃ¼ri olanlar) ve continuity/cost skorla en iyiyi seÃ§
+        best_choice = None  # (score, cand_id, conflicting_assignment, replacement_id)
+        for candidate in self.instructors:
+            cand_id = candidate['id']
+            if cand_id == responsible_id:
+                continue
+            # Hedef projede zaten jÃ¼ri ise atla
+            if any(((i.get('id') if isinstance(i, dict) else i) == cand_id) for i in target_instructors):
+                continue
+
+            # Bu adayÄ±n aynÄ± timeslot'ta jÃ¼ri olduÄŸu assignment'Ä± bul
+            candidate_confs = []
+            for ass in assignments:
+                if ass.get('timeslot_id') != timeslot_id:
+                    continue
+                ass_instructors = ass.get('instructors', [])
+                ass_responsible = ass.get('responsible_instructor_id')
+                if not ass_responsible and ass_instructors:
+                    fi = ass_instructors[0]
+                    ass_responsible = fi.get('id') if isinstance(fi, dict) else fi
+                if isinstance(ass_responsible, dict):
+                    ass_responsible = ass_responsible.get('id')
+
+                # Aday bu assignment'ta jÃ¼ri mi?
+                found_here = False
+                for j in ass_instructors:
+                    jid = j.get('id') if isinstance(j, dict) else j
+                    if jid == cand_id and cand_id != ass_responsible:
+                        # Kilitli ise atla
+                        conf_proj_id = ass.get('project_id')
+                        if locked_jurors_by_project and conf_proj_id in locked_jurors_by_project and cand_id in locked_jurors_by_project[conf_proj_id]:
+                            found_here = False
+                            break
+                        # KÄ±rÄ±lma maliyeti (bu assignment'ta continuity)
+                        break_cost = self._calculate_continuity_score(
+                            cand_id,
+                            ass.get('classroom_id'),
+                            ass.get('timeslot_id'),
+                            assignments,
+                            sorted_timeslots,
+                            timeslot_to_index
+                        )
+                        candidate_confs.append((ass, break_cost))
+                        found_here = True
+                        break
+                # devam
+            if not candidate_confs:
+                continue
+
+            # Hedef slot iÃ§in continuity ve zincir uzatma kazancÄ±
+            gain_cont = self._calculate_continuity_score(
+                cand_id,
+                classroom_id,
+                timeslot_id,
+                assignments,
+                sorted_timeslots,
+                timeslot_to_index
+            )
+            gain_chain = self._calculate_chain_extension_score(
+                cand_id,
+                classroom_id,
+                timeslot_id,
+                assignments,
+                sorted_timeslots,
+                timeslot_to_index
+            )
+
+            # AdayÄ±n en az continuity kÄ±racaÄŸÄ± assignment'Ä± seÃ§
+            candidate_confs.sort(key=lambda x: x[1])  # dÃ¼ÅŸÃ¼k kÄ±rÄ±lma Ã¶nce
+            conflicting_assignment, break_cost = candidate_confs[0]
+
+            # 2) Conflicting assignment iÃ§in uygun yedek hocalarÄ± topla ve continuity/zincir kazancÄ± yÃ¼ksek olanÄ± seÃ§
+            conf_instructors = conflicting_assignment.get('instructors', [])
+            conf_responsible = conflicting_assignment.get('responsible_instructor_id')
+            if not conf_responsible and conf_instructors:
+                fi = conf_instructors[0]
+                conf_responsible = fi.get('id') if isinstance(fi, dict) else fi
+            if isinstance(conf_responsible, dict):
+                conf_responsible = conf_responsible.get('id')
+
+            best_repl = None  # (score, repl_id)
+            for repl in self.instructors:
+                repl_id = repl['id']
+                if repl_id == cand_id or repl_id == conf_responsible:
+                    continue
+                # Zaten bu assignment'ta jÃ¼ri ise atla
+                if any(((i.get('id') if isinstance(i, dict) else i) == repl_id) for i in conf_instructors):
+                    continue
+                # Atanabilirlik ve yÃ¼k Ã¼st sÄ±nÄ±rÄ±
+                if not self._check_instructor_assignability(repl_id, conflicting_assignment, assignments):
+                    continue
+                repl_wl = workloads.get(repl_id, 0)
+                if repl_wl >= x_max:
+                    continue
+                # Replacement continuity ve zincir kazancÄ±
+                repl_gain = self._calculate_continuity_score(
+                    repl_id,
+                    conflicting_assignment.get('classroom_id'),
+                    conflicting_assignment.get('timeslot_id'),
+                    assignments,
+                    sorted_timeslots,
+                    timeslot_to_index
+                )
+                repl_chain = self._calculate_chain_extension_score(
+                    repl_id,
+                    conflicting_assignment.get('classroom_id'),
+                    conflicting_assignment.get('timeslot_id'),
+                    assignments,
+                    sorted_timeslots,
+                    timeslot_to_index
+                )
+                # Continuity + zincir gÃ¼Ã§lÃ¼ Ã¶ncelik; ardÄ±ndan daha dÃ¼ÅŸÃ¼k yÃ¼k
+                repl_score = (repl_gain * 4000000) + (repl_chain * 2000000) + (100 - repl_wl)
+                if not best_repl or repl_score > best_repl[0]:
+                    best_repl = (repl_score, repl_id)
+
+            if not best_repl:
+                continue
+
+            # Toplam skor: continuity + zincir kazanÄ±mÄ± Ã§ok gÃ¼Ã§lÃ¼, continuity kÄ±rÄ±lma maliyeti yÃ¼ksek cezalÄ±
+            total_score = (gain_cont * 5000000) + (gain_chain * 3000000) - (break_cost * 4000000) + (200 - workloads.get(cand_id, 0))
+            if not best_choice or total_score > best_choice[0]:
+                best_choice = (total_score, cand_id, conflicting_assignment, best_repl[1])
+
+        if best_choice:
+            _, cand_id, conflicting_assignment, repl_id = best_choice
+            conf_instructors = conflicting_assignment.get('instructors', [])
+            # 2.1) AdayÄ± conflicting assignment'tan Ã§Ä±kar
+            for idx, jj in enumerate(conf_instructors):
+                jjid = jj.get('id') if isinstance(jj, dict) else jj
+                if jjid == cand_id:
+                    conf_instructors.pop(idx)
+                    break
+            # 2.2) YedeÄŸi conflicting assignment'a ekle
+            conflicting_assignment['instructors'].append(repl_id)
+            # 2.3) AdayÄ± hedef projeye ekle
+            target_assignment.setdefault('instructors', []).append(cand_id)
+            return True, cand_id
+
+        # HiÃ§bir zincirli swap bulunamadÄ±
+        return False, None
+
+    def _relieve_overload_via_swap(
+        self,

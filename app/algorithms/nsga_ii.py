@@ -1,1084 +1,1823 @@
 """
-🤖 NSGA-II (Non-dominated Sorting Genetic Algorithm II) - ULTRA AI-POWERED VERSION
-═══════════════════════════════════════════════════════════════════════════════
+NSGA-II Algorithm - Multi-Objective Academic Project Exam/Jury Scheduling System
 
-✨ AI FEATURES:
-1. Strategic Pairing: Instructor'ları proje sayısına göre sırala ve eşleştir
-2. Consecutive Grouping: X sorumlu → Y jüri, sonra Y sorumlu → X jüri  
-3. Multi-objective optimization: Pareto front with non-dominated sorting
-4. AI-based genetic operators: Smart mutation, crossover, selection
-5. Crowding distance: Diversity maintenance in Pareto front
-6. NO HARD CONSTRAINTS: 100% soft constraint-based AI approach
-7. Adaptive parameters: Population size, mutation/crossover rates
-8. Elite preservation with diversity
-9. Smart initialization: Strategic pairing-based population
-10. AI-powered conflict resolution
+This module implements a complete NSGA-II (Non-dominated Sorting Genetic Algorithm II)
+for academic project jury scheduling with the following objectives:
 
-═══════════════════════════════════════════════════════════════════════════════
+OBJECTIVES (3 Main Objectives):
+1. H2 - Workload Uniformity: Keep instructor workloads within AvgLoad ±2 band
+2. H1 - Continuity: Maximize back-to-back task blocks for instructors
+3. H3 - Class Change: Minimize unnecessary class switches for instructors
+
+SINGLE-PHASE SOLUTION:
+- All decisions optimized simultaneously in one chromosome
+- No intermediate phases, no post-processing
+- Final plan includes: Class, Order, PS, J1, J2 (placeholder)
+
+HARD CONSTRAINTS:
+- PS is fixed per project
+- J1 ≠ PS
+- J1 must be an instructor (not assistant)
+- At most 1 duty per instructor per timeslot
+- No gaps within class schedule (back-to-back)
+- All projects must be assigned
+- Priority mode constraints (ARA_ONCE, BITIRME_ONCE, ESIT)
+
+Author: Optimization Planner System
 """
 
-from typing import Dict, Any, List, Tuple, Optional, Set
-import random
-import numpy as np
-import logging
-import time
-from copy import deepcopy
+from typing import Dict, Any, List, Tuple, Set, Optional
+from dataclasses import dataclass, field
+from enum import Enum
 from collections import defaultdict
-from datetime import datetime
-from app.algorithms.base import OptimizationAlgorithm
+import copy
+import random
+import math
+import time
+import logging
 
+from app.algorithms.base import OptimizationAlgorithm
 
 logger = logging.getLogger(__name__)
 
 
-class NSGAII(OptimizationAlgorithm):
-    """
-    🤖 NSGA-II (Non-dominated Sorting Genetic Algorithm II) - ULTRA AI-POWERED
+# ============================================================================
+# CONFIGURATION ENUMS
+# ============================================================================
+
+class PriorityMode(str, Enum):
+    """Project type priority mode."""
+    ARA_ONCE = "ARA_ONCE"           # All ARA (interim) projects before BITIRME (final)
+    BITIRME_ONCE = "BITIRME_ONCE"   # All BITIRME projects before ARA
+    ESIT = "ESIT"                   # No priority constraint
+
+
+class TimePenaltyMode(str, Enum):
+    """Time/gap penalty calculation mode."""
+    BINARY = "BINARY"                       # Non-consecutive = 1 penalty
+    GAP_PROPORTIONAL = "GAP_PROPORTIONAL"   # Penalty = gap slot count
+
+
+class WorkloadConstraintMode(str, Enum):
+    """Workload constraint mode."""
+    SOFT_ONLY = "SOFT_ONLY"           # Only penalty (H2)
+    SOFT_AND_HARD = "SOFT_AND_HARD"   # Penalty + hard constraint (B_max)
+
+
+# ============================================================================
+# DATA CLASSES
+# ============================================================================
+
+@dataclass
+class NSGA2Config:
+    """NSGA-II Algorithm configuration parameters."""
     
-    Multi-objective optimization with strategic instructor pairing,
-    consecutive grouping, and Pareto-optimal solution selection.
+    # Population and generations
+    population_size: int = 100
+    max_generations: int = 200
+    stagnation_limit: int = 30  # Stop if no improvement for this many generations
     
-    NO HARD CONSTRAINTS - Pure AI-driven soft constraint optimization!
-    """
-
-    def __init__(self, params: Dict[str, Any] = None):
-        """
-        Initialize NSGA-II algorithm with AI features.
-        
-        Args:
-            params: Algorithm parameters
-        """
-        super().__init__(params)
-        self.name = "🤖 NSGA-II (AI-Powered Multi-Objective Optimizer)"
-        self.description = "Strategic pairing + consecutive grouping + Pareto optimization"
-
-        # ========== NSGA-II Core Parameters ==========
-        self.population_size = params.get("population_size", 100) if params else 100
-        self.generations = params.get("generations", 200) if params else 200
-        self.mutation_rate = params.get("mutation_rate", 0.15) if params else 0.15
-        self.crossover_rate = params.get("crossover_rate", 0.85) if params else 0.85
-        self.elite_size = params.get("elite_size", 20) if params else 20
-        
-        # ========== AI Features Enablers ==========
-        self.enable_strategic_pairing = params.get("enable_strategic_pairing", True) if params else True
-        self.enable_consecutive_grouping = params.get("enable_consecutive_grouping", True) if params else True
-        self.enable_diversity_maintenance = params.get("enable_diversity_maintenance", True) if params else True
-        self.enable_adaptive_params = params.get("enable_adaptive_params", True) if params else True
-        self.enable_conflict_resolution = params.get("enable_conflict_resolution", True) if params else True
-        
-        # ========== Soft Constraint Weights (Auto-adjustable) ==========
-        self.w_instructor_conflict = params.get("w_instructor_conflict", 100.0) if params else 100.0
-        self.w_classroom_conflict = params.get("w_classroom_conflict", 80.0) if params else 80.0
-        self.w_workload_balance = params.get("w_workload_balance", 50.0) if params else 50.0
-        self.w_consecutive_bonus = params.get("w_consecutive_bonus", 70.0) if params else 70.0
-        self.w_pairing_quality = params.get("w_pairing_quality", 60.0) if params else 60.0
-        self.w_early_timeslot = params.get("w_early_timeslot", 40.0) if params else 40.0
-        
-        # ========== Data Storage ==========
-        self.projects = []
-        self.instructors = []
-        self.classrooms = []
-        self.timeslots = []
-        self.data = {}
-        
-        # ========== Runtime Tracking ==========
-        self.current_generation = 0
-        self.best_solution = None
-        self.best_fitness = float('-inf')
-        self.population = []
-        self.pareto_front = []
-        
-        logger.info(f"🤖 [NSGA-II] Initialized with {self.population_size} population, {self.generations} generations")
-        logger.info(f"✨ [NSGA-II] AI Features: Strategic Pairing={self.enable_strategic_pairing}, Consecutive Grouping={self.enable_consecutive_grouping}")
-
-    def initialize(self, data: Dict[str, Any]):
-        """Initialize the algorithm with problem data."""
-        self.data = data
-        self.projects = data.get("projects", [])
-        self.instructors = data.get("instructors", [])
-        self.classrooms = data.get("classrooms", [])
-        self.timeslots = data.get("timeslots", [])
-
-        # Validate data
-        if not self.projects or not self.instructors or not self.classrooms or not self.timeslots:
-            raise ValueError("❌ Insufficient data for NSGA-II Algorithm")
-        
-        logger.info(f"📊 [NSGA-II] Data loaded: {len(self.projects)} projects, {len(self.instructors)} instructors, "
-                   f"{len(self.classrooms)} classrooms, {len(self.timeslots)} timeslots")
+    # Class count settings
+    class_count: int = 7
+    auto_class_count: bool = True  # Try 5, 6, 7 and pick best
     
-    def evaluate_fitness(self, solution: Dict[str, Any]) -> float:
-        """
-        Evaluate fitness of a solution (required by base class).
-        
-        Args:
-            solution: Solution dictionary with assignments
-        
-        Returns:
-            float: Fitness score
-        """
-        if 'fitness' in solution and solution['fitness'] != 0:
-            return solution['fitness']
-        
-        assignments = solution.get('assignments', [])
-        if not assignments:
-            return 0.0
-        
-        objectives = self._calculate_objectives(assignments)
-        fitness = self._aggregate_fitness(objectives)
-        
-        return fitness
-
-    def optimize(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        🚀 Main NSGA-II optimization loop.
-        
-        Returns:
-            Dict with optimized schedule and metrics
-        """
-        start_time = time.time()
-
-        try:
-            self.initialize(data)
-            
-            # ========== STEP 1: Initialize Population with Strategic Pairing ==========
-            logger.info("🧬 [NSGA-II] STEP 1: Initializing population with strategic pairing...")
-            self.population = self._initialize_population_strategic()
-            
-            # ========== STEP 2: NSGA-II Main Loop ==========
-            logger.info(f"🔁 [NSGA-II] STEP 2: Starting {self.generations} generations of evolution...")
-            
-            for gen in range(self.generations):
-                self.current_generation = gen
-                
-                # Evaluate population
-                self._evaluate_population()
-                
-                # Non-dominated sorting
-                fronts = self._fast_non_dominated_sort()
-                
-                # Calculate crowding distance
-                for front in fronts:
-                    self._calculate_crowding_distance(front)
-                
-                # Create offspring
-                offspring = self._create_offspring()
-                
-                # Combine parent and offspring
-                combined_population = self.population + offspring
-                
-                # Select next generation
-                self.population = self._environmental_selection(combined_population)
-                
-                # Track best solution
-                if fronts and len(fronts[0]) > 0:
-                    best_in_gen = self._select_best_from_front(fronts[0])
-                    if best_in_gen['fitness'] > self.best_fitness:
-                        self.best_fitness = best_in_gen['fitness']
-                        self.best_solution = best_in_gen
-                
-                # Adaptive parameters
-                if self.enable_adaptive_params and gen % 20 == 0:
-                    self._adapt_parameters()
-                
-                # Log progress
-                if gen % 25 == 0 or gen == self.generations - 1:
-                    logger.info(f"📈 [NSGA-II] Generation {gen}/{self.generations}: "
-                               f"Best Fitness={self.best_fitness:.2f}, "
-                               f"Pareto Front Size={len(fronts[0]) if fronts else 0}")
-            
-            # ========== STEP 3: Extract Best Solution ==========
-            execution_time = time.time() - start_time
-            
-            if not self.best_solution:
-                logger.warning("⚠️ [NSGA-II] No valid solution found, returning empty schedule")
-                return {
-                    "algorithm": "NSGA-II",
-                    "status": "no_solution",
-                    "schedule": [],
-                    "solution": [],
-                    "metrics": {
-                        "execution_time": execution_time,
-                        "generations_completed": self.generations,
-                        "message": "No valid solution found"
-                    },
-                    "execution_time": execution_time
-                }
-            
-            # Format result
-            schedule = self.best_solution.get('assignments', [])
-            metrics = self._calculate_final_metrics(schedule)
-            
-            logger.info(f"✅ [NSGA-II] Optimization completed in {execution_time:.2f}s")
-            logger.info(f"🎯 [NSGA-II] Best Fitness: {self.best_fitness:.2f}")
-            logger.info(f"📊 [NSGA-II] Final Metrics: {metrics}")
-            
-            return {
-                "algorithm": "NSGA-II (AI-Powered Multi-Objective)",
-                "status": "success",
-                "schedule": schedule,
-                "solution": schedule,
-                "metrics": {
-                    **metrics,
-                    "execution_time": execution_time,
-                    "generations_completed": self.generations,
-                    "population_size": self.population_size,
-                    "best_fitness": self.best_fitness,
-                    "pareto_front_size": len(self.pareto_front),
-                    "ai_features_enabled": {
-                        "strategic_pairing": self.enable_strategic_pairing,
-                        "consecutive_grouping": self.enable_consecutive_grouping,
-                        "diversity_maintenance": self.enable_diversity_maintenance,
-                        "adaptive_parameters": self.enable_adaptive_params,
-                        "conflict_resolution": self.enable_conflict_resolution
-                    }
-                },
-                "execution_time": execution_time,
-                "message": f"🤖 NSGA-II AI optimization completed with {len(schedule)} assignments"
-            }
-
-        except Exception as e:
-            logger.error(f"❌ [NSGA-II] Error: {str(e)}", exc_info=True)
-            return {
-                "algorithm": "NSGA-II",
-                "status": "error",
-                "schedule": [],
-                "solution": [],
-                "metrics": {},
-                "execution_time": time.time() - start_time,
-                "message": f"NSGA-II failed: {str(e)}"
-            }
-
-    # ═══════════════════════════════════════════════════════════════════════════════
-    # 🎯 STRATEGIC PAIRING & CONSECUTIVE GROUPING (AI FEATURE 1 & 2)
-    # ═══════════════════════════════════════════════════════════════════════════════
+    # Genetic operators
+    crossover_rate: float = 0.9
+    mutation_rate: float = 0.3
+    tournament_size: int = 3
     
-    def _initialize_population_strategic(self) -> List[Dict[str, Any]]:
-        """
-        🤖 AI FEATURE 1 & 2: Strategic Pairing + Consecutive Grouping
-        
-        Initialize population with strategic instructor pairing:
-        1. Sort instructors by project count (HIGH → LOW)
-        2. Split into upper/lower groups
-        3. Pair upper[i] with lower[i]
-        4. Consecutive scheduling: X responsible → Y jury, then Y responsible → X jury
-        """
-        population = []
-        
-        for i in range(self.population_size):
-            if i == 0:
-                # First solution uses deterministic strategic pairing
-                individual = self._create_strategic_paired_solution(randomize=False)
-            elif i < self.elite_size:
-                # Elite solutions with slight randomization
-                individual = self._create_strategic_paired_solution(randomize=True, temperature=0.3)
-            else:
-                # More diverse solutions
-                individual = self._create_strategic_paired_solution(randomize=True, temperature=0.7)
-            
-            if individual and individual.get('assignments'):
-                population.append(individual)
-                if i < 3:
-                    logger.info(f"✅ [NSGA-II] Individual {i+1}: {len(individual['assignments'])} assignments created")
-        
-        logger.info(f"🧬 [NSGA-II] Population initialized: {len(population)}/{self.population_size} individuals")
-        return population
+    # Priority mode
+    priority_mode: PriorityMode = PriorityMode.ESIT
     
-    def _create_strategic_paired_solution(self, randomize: bool = False, temperature: float = 0.5) -> Dict[str, Any]:
-        """
-        Create solution with strategic instructor pairing and consecutive grouping.
-        
-        Args:
-            randomize: Whether to add randomization
-            temperature: Randomization intensity (0-1)
-        
-        Returns:
-            Individual solution dictionary
-        """
-        assignments = []
-        
-        # ========== Sort timeslots (earliest first) ==========
-        sorted_timeslots = sorted(
-            self.timeslots,
-            key=lambda x: self._parse_time(x.get("start_time", "09:00"))
+    # Time penalty mode
+    time_penalty_mode: TimePenaltyMode = TimePenaltyMode.GAP_PROPORTIONAL
+    
+    # Workload constraint mode
+    workload_constraint_mode: WorkloadConstraintMode = WorkloadConstraintMode.SOFT_ONLY
+    workload_hard_limit: int = 4  # B_max for SOFT_AND_HARD mode
+    workload_soft_band: int = 2   # ±2 tolerance
+    
+    # Objective weights for final solution selection
+    # Higher weight = more important
+    weight_h1: float = 2.5   # Continuity weight (INCREASED)
+    weight_h2: float = 3.0   # Workload weight (MOST IMPORTANT)
+    weight_h3: float = 1.5   # Class change weight
+    weight_h4: float = 2.0   # Class load balance weight
+    
+    # Slot duration in hours
+    slot_duration: float = 0.5  # 30 minutes
+    
+    # Tolerance for time comparisons
+    time_tolerance: float = 0.001
+
+
+@dataclass
+class Project:
+    """Project data structure."""
+    id: int
+    title: str
+    type: str  # "interim" (ARA) or "final" (BITIRME)
+    responsible_id: int  # Project Supervisor (PS) - fixed, cannot be changed
+    is_makeup: bool = False
+    
+    def __hash__(self):
+        return hash(self.id)
+    
+    def __eq__(self, other):
+        if isinstance(other, Project):
+            return self.id == other.id
+        return False
+
+
+@dataclass
+class Instructor:
+    """Instructor data structure."""
+    id: int
+    name: str
+    type: str  # "instructor" or "assistant"
+    
+    def __hash__(self):
+        return hash(self.id)
+    
+    def __eq__(self, other):
+        if isinstance(other, Instructor):
+            return self.id == other.id
+        return False
+
+
+@dataclass
+class ProjectAssignment:
+    """Single project assignment in chromosome."""
+    project_id: int
+    class_id: int
+    order_in_class: int
+    ps_id: int      # Project Supervisor (fixed)
+    j1_id: int      # Jury 1 (decision variable)
+    j2_id: int = -1  # Jury 2 (always placeholder: [Araştırma Görevlisi])
+    
+    def __hash__(self):
+        return hash(self.project_id)
+    
+    def copy(self) -> 'ProjectAssignment':
+        return ProjectAssignment(
+            project_id=self.project_id,
+            class_id=self.class_id,
+            order_in_class=self.order_in_class,
+            ps_id=self.ps_id,
+            j1_id=self.j1_id,
+            j2_id=self.j2_id
         )
-        
-        # ========== Group projects by instructor ==========
-        instructor_projects = defaultdict(list)
-        for project in self.projects:
-            responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-            if responsible_id:
-                instructor_projects[responsible_id].append(project)
-        
-        # ========== STRATEGIC PAIRING: Sort instructors by project count (HIGH → LOW) ==========
-        instructor_list = sorted(
-            instructor_projects.items(),
-            key=lambda x: len(x[1]),
-            reverse=True  # Descending order
+
+
+@dataclass
+class Individual:
+    """
+    NSGA-II Individual (Chromosome).
+    
+    Contains complete solution:
+    - Project → Class assignment
+    - Order within class
+    - J1 assignments
+    """
+    assignments: List[ProjectAssignment] = field(default_factory=list)
+    class_count: int = 7
+    
+    # Objective values (to be computed)
+    objectives: List[float] = field(default_factory=list)  # [H1, H2, H3]
+    
+    # NSGA-II specific
+    rank: int = 0
+    crowding_distance: float = 0.0
+    
+    # Feasibility
+    is_feasible: bool = True
+    constraint_violations: int = 0
+    
+    def copy(self) -> 'Individual':
+        """Deep copy of individual."""
+        new_ind = Individual(
+            assignments=[a.copy() for a in self.assignments],
+            class_count=self.class_count,
+            objectives=self.objectives.copy() if self.objectives else [],
+            rank=self.rank,
+            crowding_distance=self.crowding_distance,
+            is_feasible=self.is_feasible,
+            constraint_violations=self.constraint_violations
         )
+        return new_ind
+    
+    def get_class_projects(self, class_id: int) -> List[ProjectAssignment]:
+        """Get all projects assigned to a specific class, sorted by order."""
+        projects = [a for a in self.assignments if a.class_id == class_id]
+        return sorted(projects, key=lambda x: x.order_in_class)
+    
+    def get_class_order(self, class_id: int) -> List[int]:
+        """Get project IDs in order for a class."""
+        return [a.project_id for a in self.get_class_projects(class_id)]
+
+
+@dataclass
+class ObjectiveValues:
+    """Objective function values."""
+    h1_continuity: float = 0.0      # Continuity penalty (minimize)
+    h2_workload: float = 0.0        # Workload uniformity penalty (minimize)
+    h3_class_change: float = 0.0    # Class change penalty (minimize)
+    h4_class_load: float = 0.0      # Class load balance penalty (minimize)
+    
+    def to_list(self) -> List[float]:
+        """Convert to list for NSGA-II processing."""
+        return [self.h1_continuity, self.h2_workload, self.h3_class_change, self.h4_class_load]
+    
+    def weighted_sum(self, config: NSGA2Config) -> float:
+        """Calculate weighted sum for final solution selection."""
+        return (
+            config.weight_h1 * self.h1_continuity +
+            config.weight_h2 * self.h2_workload +
+            config.weight_h3 * self.h3_class_change +
+            config.weight_h4 * self.h4_class_load
+        )
+
+
+# ============================================================================
+# OBJECTIVE CALCULATOR
+# ============================================================================
+
+class NSGA2ObjectiveCalculator:
+    """
+    Calculates all objective functions for NSGA-II.
+    
+    Objectives:
+    - H1: Continuity penalty (blocks - 1 per instructor per class)
+    - H2: Workload uniformity penalty (deviation from AvgLoad ±2)
+    - H3: Class change penalty (classes visited > 2)
+    - H4: Class load balance penalty (deviation from target)
+    """
+    
+    def __init__(
+        self,
+        projects: List[Project],
+        instructors: List[Instructor],
+        config: NSGA2Config
+    ):
+        self.projects = {p.id: p for p in projects}
+        self.instructors = {i.id: i for i in instructors}
+        self.config = config
         
-        if not instructor_list:
-            logger.warning("⚠️ [NSGA-II] No instructors with projects found")
-            return {"assignments": [], "fitness": 0, "objectives": []}
-        
-        total_instructors = len(instructor_list)
-        
-        # ========== Split into upper and lower groups ==========
-        if total_instructors % 2 == 0:
-            # Even: split equally
-            split_index = total_instructors // 2
-        else:
-            # Odd: upper has n, lower has n+1
-            split_index = total_instructors // 2
-        
-        upper_group = instructor_list[:split_index]
-        lower_group = instructor_list[split_index:]
-        
-        # ========== Create instructor pairs ==========
-        instructor_pairs = []
-        for i in range(min(len(upper_group), len(lower_group))):
-            instructor_pairs.append((upper_group[i], lower_group[i]))
-        
-        # Add remaining instructors (if lower group is larger)
-        if len(lower_group) > len(upper_group):
-            for i in range(len(upper_group), len(lower_group)):
-                instructor_pairs.append((lower_group[i], None))
-        
-        # ========== Conflict tracking ==========
-        used_slots = set()  # (classroom_id, timeslot_id)
-        instructor_timeslot_usage = defaultdict(set)
-        assigned_projects = set()
-        
-        # ========== CONSECUTIVE GROUPING: Process each pair ==========
-        classroom_idx = 0
-        timeslot_idx = 0
-        
-        for pair_idx, pair in enumerate(instructor_pairs):
-            if pair[1] is None:
-                # Single instructor (no pair)
-                instructor_id, instructor_project_list = pair[0]
-                
-                # Assign projects consecutively
-                for project in instructor_project_list:
-                    if project['id'] in assigned_projects:
-                        continue
-                    
-                    assigned = False
-                    attempts = 0
-                    max_attempts = len(sorted_timeslots) * len(self.classrooms)
-                    
-                    while not assigned and attempts < max_attempts:
-                        classroom = self.classrooms[classroom_idx % len(self.classrooms)]
-                        timeslot = sorted_timeslots[timeslot_idx % len(sorted_timeslots)]
-                        
-                        slot_key = (classroom['id'], timeslot['id'])
-                        
-                        # Soft constraint check (not hard!)
-                        if randomize:
-                            # AI-based: accept even conflicting slots with probability
-                            accept_prob = temperature if slot_key in used_slots else 1.0
-                            if random.random() > accept_prob:
-                                timeslot_idx += 1
-                                attempts += 1
-                                continue
-                        else:
-                            # Deterministic: avoid conflicts if possible
-                            if slot_key in used_slots or timeslot['id'] in instructor_timeslot_usage[instructor_id]:
-                                timeslot_idx += 1
-                                if timeslot_idx % len(sorted_timeslots) == 0:
-                                    classroom_idx += 1
-                                attempts += 1
-                                continue
-                        
-                        # Create assignment
-                        assignments.append({
-                            "project_id": project['id'],
-                            "timeslot_id": timeslot['id'],
-                            "classroom_id": classroom['id'],
-                            "responsible_instructor_id": instructor_id,
-                            "is_makeup": project.get('is_makeup', False),
-                            "instructors": [instructor_id]
-                        })
-                        
-                        used_slots.add(slot_key)
-                        instructor_timeslot_usage[instructor_id].add(timeslot['id'])
-                        assigned_projects.add(project['id'])
-                        assigned = True
-                        timeslot_idx += 1
-                        attempts += 1
-                
-                classroom_idx += 1
-                timeslot_idx = 0
-            
-            else:
-                # Paired instructors
-                instructor_x_id, instructor_x_projects = pair[0]
-                instructor_y_id, instructor_y_projects = pair[1]
-                
-                # ========== PHASE 1: X responsible → Y jury (consecutive) ==========
-                for project in instructor_x_projects:
-                    if project['id'] in assigned_projects:
-                        continue
-                    
-                    assigned = False
-                    attempts = 0
-                    max_attempts = len(sorted_timeslots) * len(self.classrooms)
-                    
-                    while not assigned and attempts < max_attempts:
-                        classroom = self.classrooms[classroom_idx % len(self.classrooms)]
-                        timeslot = sorted_timeslots[timeslot_idx % len(sorted_timeslots)]
-                        
-                        slot_key = (classroom['id'], timeslot['id'])
-                        
-                        # Check conflicts (soft)
-                        if randomize:
-                            accept_prob = temperature
-                            if slot_key in used_slots or timeslot['id'] in instructor_timeslot_usage[instructor_x_id]:
-                                if random.random() > accept_prob:
-                                    timeslot_idx += 1
-                                    attempts += 1
-                                    continue
-                        else:
-                            if (slot_key in used_slots or 
-                                timeslot['id'] in instructor_timeslot_usage[instructor_x_id] or 
-                                timeslot['id'] in instructor_timeslot_usage[instructor_y_id]):
-                                timeslot_idx += 1
-                                if timeslot_idx % len(sorted_timeslots) == 0:
-                                    classroom_idx += 1
-                                attempts += 1
-                                continue
-                        
-                        # Create assignment with X as responsible, Y as jury
-                        project_type = project.get('type', 'ara')
-                        instructors_list = [instructor_x_id]
-                        
-                        if project_type == 'bitirme':
-                            instructors_list.append(instructor_y_id)
-                        
-                        assignments.append({
-                            "project_id": project['id'],
-                            "timeslot_id": timeslot['id'],
-                            "classroom_id": classroom['id'],
-                            "responsible_instructor_id": instructor_x_id,
-                            "is_makeup": project.get('is_makeup', False),
-                            "instructors": instructors_list
-                        })
-                        
-                        used_slots.add(slot_key)
-                        instructor_timeslot_usage[instructor_x_id].add(timeslot['id'])
-                        if len(instructors_list) > 1:
-                            instructor_timeslot_usage[instructor_y_id].add(timeslot['id'])
-                        assigned_projects.add(project['id'])
-                        assigned = True
-                        timeslot_idx += 1
-                        attempts += 1
-                
-                # ========== PHASE 2: Y responsible → X jury (consecutive, immediately after) ==========
-                for project in instructor_y_projects:
-                    if project['id'] in assigned_projects:
-                        continue
-                    
-                    assigned = False
-                    attempts = 0
-                    max_attempts = len(sorted_timeslots) * len(self.classrooms)
-                    
-                    while not assigned and attempts < max_attempts:
-                        classroom = self.classrooms[classroom_idx % len(self.classrooms)]
-                        timeslot = sorted_timeslots[timeslot_idx % len(sorted_timeslots)]
-                        
-                        slot_key = (classroom['id'], timeslot['id'])
-                        
-                        # Check conflicts (soft)
-                        if randomize:
-                            accept_prob = temperature
-                            if slot_key in used_slots or timeslot['id'] in instructor_timeslot_usage[instructor_y_id]:
-                                if random.random() > accept_prob:
-                                    timeslot_idx += 1
-                                    attempts += 1
-                                    continue
-                        else:
-                            if (slot_key in used_slots or 
-                                timeslot['id'] in instructor_timeslot_usage[instructor_y_id] or 
-                                timeslot['id'] in instructor_timeslot_usage[instructor_x_id]):
-                                timeslot_idx += 1
-                                if timeslot_idx % len(sorted_timeslots) == 0:
-                                    classroom_idx += 1
-                                attempts += 1
-                                continue
-                        
-                        # Create assignment with Y as responsible, X as jury
-                        project_type = project.get('type', 'ara')
-                        instructors_list = [instructor_y_id]
-                        
-                        if project_type == 'bitirme':
-                            instructors_list.append(instructor_x_id)
-                        
-                        assignments.append({
-                            "project_id": project['id'],
-                            "timeslot_id": timeslot['id'],
-                            "classroom_id": classroom['id'],
-                            "responsible_instructor_id": instructor_y_id,
-                            "is_makeup": project.get('is_makeup', False),
-                            "instructors": instructors_list
-                        })
-                        
-                        used_slots.add(slot_key)
-                        instructor_timeslot_usage[instructor_y_id].add(timeslot['id'])
-                        if len(instructors_list) > 1:
-                            instructor_timeslot_usage[instructor_x_id].add(timeslot['id'])
-                        assigned_projects.add(project['id'])
-                        assigned = True
-                        timeslot_idx += 1
-                        attempts += 1
-                
-                # Move to next classroom for next pair
-                classroom_idx += 1
-                timeslot_idx = 0
-        
-        return {
-            "assignments": assignments,
-            "fitness": 0,  # Will be evaluated later
-            "objectives": []
+        # Only real instructors (not assistants)
+        self.faculty = {
+            i.id: i for i in instructors
+            if i.type == "instructor"
         }
-
-    # ═══════════════════════════════════════════════════════════════════════════════
-    # 🎯 MULTI-OBJECTIVE FITNESS EVALUATION (AI FEATURE 3)
-    # ═══════════════════════════════════════════════════════════════════════════════
+        
+        # Calculate average workload
+        num_projects = len(projects)
+        num_faculty = len(self.faculty)
+        self.total_workload = 2 * num_projects  # PS + J1 per project
+        self.avg_workload = self.total_workload / num_faculty if num_faculty > 0 else 0
+        
+        logger.debug(f"ObjectiveCalculator: {num_projects} projects, {num_faculty} faculty")
+        logger.debug(f"Average workload: {self.avg_workload:.2f}")
     
-    def _evaluate_population(self):
-        """Evaluate fitness for all individuals in population."""
-        for individual in self.population:
-            if 'fitness' not in individual or individual['fitness'] == 0:
-                objectives = self._calculate_objectives(individual['assignments'])
-                individual['objectives'] = objectives
-                individual['fitness'] = self._aggregate_fitness(objectives)
-    
-    def _calculate_objectives(self, assignments: List[Dict[str, Any]]) -> List[float]:
+    def evaluate(self, individual: Individual) -> ObjectiveValues:
         """
-        Calculate multiple objectives for NSGA-II.
+        Evaluate all objectives for an individual.
         
-        Objectives (to be minimized/maximized):
-        1. Minimize instructor conflicts
-        2. Minimize classroom conflicts
-        3. Maximize workload balance
-        4. Maximize consecutive grouping quality
-        5. Maximize pairing quality
-        6. Maximize early timeslot usage
-        
-        Returns:
-            List of objective values
+        Returns ObjectiveValues with all penalties calculated.
         """
-        # Objective 1: Instructor conflicts (minimize)
-        instructor_conflicts = self._count_instructor_conflicts(assignments)
+        h1 = self._calculate_h1_continuity(individual)
+        h2 = self._calculate_h2_workload(individual)
+        h3 = self._calculate_h3_class_change(individual)
+        h4 = self._calculate_h4_class_load(individual)
         
-        # Objective 2: Classroom conflicts (minimize)
-        classroom_conflicts = self._count_classroom_conflicts(assignments)
-        
-        # Objective 3: Workload balance (maximize)
-        workload_balance = self._calculate_workload_balance(assignments)
-        
-        # Objective 4: Consecutive grouping quality (maximize)
-        consecutive_quality = self._calculate_consecutive_quality(assignments)
-        
-        # Objective 5: Pairing quality (maximize)
-        pairing_quality = self._calculate_pairing_quality(assignments)
-        
-        # Objective 6: Early timeslot usage (maximize)
-        early_timeslot_score = self._calculate_early_timeslot_score(assignments)
-        
-        return [
-            -instructor_conflicts,  # Minimize → maximize negative
-            -classroom_conflicts,
-            workload_balance,
-            consecutive_quality,
-            pairing_quality,
-            early_timeslot_score
-        ]
+        return ObjectiveValues(
+            h1_continuity=h1,
+            h2_workload=h2,
+            h3_class_change=h3,
+            h4_class_load=h4
+        )
     
-    def _aggregate_fitness(self, objectives: List[float]) -> float:
+    def _calculate_h1_continuity(self, individual: Individual) -> float:
         """
-        Aggregate multiple objectives into single fitness value.
+        H1: Continuity penalty.
         
-        Uses weighted sum for simplicity.
+        For each instructor in each class, count activity blocks.
+        Penalty = max(0, blocks - 1)
+        
+        Also penalizes gaps between consecutive tasks.
         """
-        weights = [
-            self.w_instructor_conflict,
-            self.w_classroom_conflict,
-            self.w_workload_balance,
-            self.w_consecutive_bonus,
-            self.w_pairing_quality,
-            self.w_early_timeslot
-        ]
+        total_penalty = 0.0
         
-        return sum(w * obj for w, obj in zip(weights, objectives))
-    
-    def _count_instructor_conflicts(self, assignments: List[Dict[str, Any]]) -> int:
-        """Count number of instructor conflicts (same instructor, same timeslot)."""
-        instructor_timeslots = defaultdict(set)
-        conflicts = 0
+        for instructor_id in self.faculty.keys():
+            for class_id in range(individual.class_count):
+                blocks = self._count_blocks(individual, instructor_id, class_id)
+                if blocks > 1:
+                    # Linear penalty for extra blocks
+                    penalty = blocks - 1
+                    # Quadratic penalty for multiple blocks (more aggressive)
+                    penalty += (blocks - 1) ** 2 * 10
+                    total_penalty += penalty
         
-        for assignment in assignments:
-            instructors = assignment.get('instructors', [])
-            timeslot_id = assignment.get('timeslot_id')
-            
-            for instructor_id in instructors:
-                if timeslot_id in instructor_timeslots[instructor_id]:
-                    conflicts += 1
-                instructor_timeslots[instructor_id].add(timeslot_id)
+        # Also add gap penalty within classes
+        instructor_tasks = self._build_instructor_task_matrix(individual)
         
-        return conflicts
-    
-    def _count_classroom_conflicts(self, assignments: List[Dict[str, Any]]) -> int:
-        """Count number of classroom conflicts (same classroom, same timeslot)."""
-        classroom_timeslots = set()
-        conflicts = 0
-        
-        for assignment in assignments:
-            classroom_id = assignment.get('classroom_id')
-            timeslot_id = assignment.get('timeslot_id')
-            key = (classroom_id, timeslot_id)
-            
-            if key in classroom_timeslots:
-                conflicts += 1
-            classroom_timeslots.add(key)
-        
-        return conflicts
-    
-    def _calculate_workload_balance(self, assignments: List[Dict[str, Any]]) -> float:
-        """Calculate workload balance score (higher is better)."""
-        instructor_loads = defaultdict(int)
-        
-        for assignment in assignments:
-            instructors = assignment.get('instructors', [])
-            responsible_id = assignment.get('responsible_instructor_id')
-            
-            # Responsible counts as 2x
-            if responsible_id:
-                instructor_loads[responsible_id] += 2
-            
-            # Jury counts as 1x
-            for instructor_id in instructors:
-                if instructor_id != responsible_id:
-                    instructor_loads[instructor_id] += 1
-        
-        if not instructor_loads:
-            return 0.0
-        
-        loads = list(instructor_loads.values())
-        avg_load = np.mean(loads)
-        std_load = np.std(loads)
-        
-        # Lower std = better balance
-        return 100.0 / (1.0 + std_load)
-    
-    def _calculate_consecutive_quality(self, assignments: List[Dict[str, Any]]) -> float:
-        """Calculate consecutive grouping quality (higher is better)."""
-        # Group by instructor and classroom
-        instructor_classroom_timeslots = defaultdict(lambda: defaultdict(list))
-        
-        for assignment in assignments:
-            responsible_id = assignment.get('responsible_instructor_id')
-            classroom_id = assignment.get('classroom_id')
-            timeslot_id = assignment.get('timeslot_id')
-            
-            if responsible_id:
-                instructor_classroom_timeslots[responsible_id][classroom_id].append(timeslot_id)
-        
-        consecutive_bonus = 0.0
-        
-        for instructor_id, classrooms in instructor_classroom_timeslots.items():
-            for classroom_id, timeslot_ids in classrooms.items():
-                # Sort timeslots
-                sorted_slots = sorted(timeslot_ids)
-                
-                # Count consecutive sequences
-                if len(sorted_slots) > 1:
-                    consecutive_bonus += len(sorted_slots) * 10  # Bonus for grouping
-                    
-                    # Extra bonus for perfect consecutiveness
-                    for i in range(len(sorted_slots) - 1):
-                        if sorted_slots[i+1] == sorted_slots[i] + 1:
-                            consecutive_bonus += 5
-        
-        return consecutive_bonus
-    
-    def _calculate_pairing_quality(self, assignments: List[Dict[str, Any]]) -> float:
-        """Calculate quality of instructor pairing (higher is better)."""
-        # Track which instructors work together as responsible/jury
-        pairing_count = defaultdict(int)
-        
-        for assignment in assignments:
-            instructors = assignment.get('instructors', [])
-            if len(instructors) >= 2:
-                responsible_id = instructors[0]
-                jury_id = instructors[1]
-                
-                # Create symmetric pair key
-                pair_key = tuple(sorted([responsible_id, jury_id]))
-                pairing_count[pair_key] += 1
-        
-        # More consistent pairing = better
-        if not pairing_count:
-            return 0.0
-        
-        return sum(count ** 1.5 for count in pairing_count.values())
-    
-    def _calculate_early_timeslot_score(self, assignments: List[Dict[str, Any]]) -> float:
-        """Calculate early timeslot usage score (higher is better)."""
-        early_bonus = 0.0
-        
-        for assignment in assignments:
-            timeslot_id = assignment.get('timeslot_id')
-            
-            # Find timeslot
-            timeslot = next((t for t in self.timeslots if t['id'] == timeslot_id), None)
-            if not timeslot:
+        for instructor_id, tasks in instructor_tasks.items():
+            if len(tasks) <= 1:
                 continue
             
-            start_time = timeslot.get('start_time', '09:00')
-            hour = int(start_time.split(':')[0])
+            # Sort by order (time)
+            tasks.sort(key=lambda x: (x['order'], x['class_id']))
             
-            # Bonus for earlier times (09:00 gets max bonus, 17:00 gets min)
-            if hour < 12:
-                early_bonus += (12 - hour) * 2
-            elif hour < 15:
-                early_bonus += (15 - hour) * 1
+            for i in range(len(tasks) - 1):
+                curr = tasks[i]
+                next_task = tasks[i + 1]
+                
+                # Same timeslot = same time (no gap)
+                if curr['order'] == next_task['order']:
+                    gap = 0
+                elif curr['class_id'] == next_task['class_id']:
+                    # Same class, different slots
+                    gap = next_task['order'] - curr['order'] - 1
+                else:
+                    # Different classes - check slot difference
+                    gap = abs(next_task['order'] - curr['order']) - 1
+                    if gap < 0:
+                        gap = 0
+                
+                if gap > 0:
+                    if self.config.time_penalty_mode == TimePenaltyMode.BINARY:
+                        total_penalty += gap * 2
+                    else:  # GAP_PROPORTIONAL
+                        total_penalty += gap * gap * 2
         
-        return early_bonus
-
-    # ═══════════════════════════════════════════════════════════════════════════════
-    # 🎯 NSGA-II CORE OPERATIONS (AI FEATURE 4)
-    # ═══════════════════════════════════════════════════════════════════════════════
+        return total_penalty
     
-    def _fast_non_dominated_sort(self) -> List[List[Dict[str, Any]]]:
+    def _calculate_h2_workload(self, individual: Individual) -> float:
         """
-        Perform fast non-dominated sorting.
+        H2: Workload uniformity penalty.
+        
+        Load(h) = PS duties + J1 duties
+        Penalty(h) = max(0, |Load(h) - AvgLoad| - 2)
+        H2 = Σ Penalty(h)
+        """
+        total_penalty = 0.0
+        workload = self._calculate_instructor_workloads(individual)
+        
+        for instructor_id in self.faculty.keys():
+            load = workload.get(instructor_id, 0)
+            deviation = abs(load - self.avg_workload)
+            
+            # Soft penalty: beyond ±2 band
+            penalty = max(0, deviation - self.config.workload_soft_band)
+            total_penalty += penalty
+            
+            # Additional penalty for hard constraint violation
+            if self.config.workload_constraint_mode == WorkloadConstraintMode.SOFT_AND_HARD:
+                if deviation > self.config.workload_hard_limit:
+                    total_penalty += 1000  # Large penalty
+        
+        return total_penalty
+    
+    def _calculate_h3_class_change(self, individual: Individual) -> float:
+        """
+        H3: Class change penalty.
+        
+        ClassCount(h) = number of different classes instructor h appears in
+        Penalty = max(0, ClassCount(h) - 2)
+        H3 = Σ Penalty(h)
+        """
+        total_penalty = 0.0
+        instructor_classes = defaultdict(set)
+        
+        for assignment in individual.assignments:
+            instructor_classes[assignment.ps_id].add(assignment.class_id)
+            instructor_classes[assignment.j1_id].add(assignment.class_id)
+        
+        for instructor_id in self.faculty.keys():
+            class_count = len(instructor_classes.get(instructor_id, set()))
+            if class_count > 2:
+                # Quadratic penalty for too many classes
+                penalty = (class_count - 2) ** 2 * 5
+                total_penalty += penalty
+        
+        return total_penalty
+    
+    def _calculate_h4_class_load(self, individual: Individual) -> float:
+        """
+        H4: Class load balance penalty.
+        
+        Target = num_projects / class_count
+        Penalty = |ClassLoad(s) - Target|
+        H4 = Σ Penalty(s)
+        """
+        total_penalty = 0.0
+        class_loads = defaultdict(int)
+        
+        for assignment in individual.assignments:
+            class_loads[assignment.class_id] += 1
+        
+        num_projects = len(individual.assignments)
+        target = num_projects / individual.class_count
+        
+        for class_id in range(individual.class_count):
+            load = class_loads.get(class_id, 0)
+            if load == 0:
+                # Empty class is very bad
+                total_penalty += 1000
+            else:
+                total_penalty += abs(load - target)
+        
+        return total_penalty
+    
+    def _count_blocks(
+        self,
+        individual: Individual,
+        instructor_id: int,
+        class_id: int
+    ) -> int:
+        """
+        Count activity blocks for instructor in class.
+        
+        A block is a consecutive sequence of duties.
+        Count 0→1 transitions in presence array.
+        """
+        class_projects = individual.get_class_projects(class_id)
+        
+        if not class_projects:
+            return 0
+        
+        # Build binary presence array
+        presence = []
+        for assignment in class_projects:
+            is_present = (assignment.ps_id == instructor_id or 
+                         assignment.j1_id == instructor_id)
+            presence.append(1 if is_present else 0)
+        
+        if sum(presence) == 0:
+            return 0
+        
+        # Count 0→1 transitions (block starts)
+        blocks = 0
+        for i in range(len(presence)):
+            if presence[i] == 1:
+                if i == 0 or presence[i - 1] == 0:
+                    blocks += 1
+        
+        return blocks
+    
+    def _build_instructor_task_matrix(
+        self,
+        individual: Individual
+    ) -> Dict[int, List[Dict[str, Any]]]:
+        """Build task matrix for each instructor."""
+        instructor_tasks = defaultdict(list)
+        
+        for assignment in individual.assignments:
+            task_info = {
+                'project_id': assignment.project_id,
+                'class_id': assignment.class_id,
+                'order': assignment.order_in_class
+            }
+            
+            instructor_tasks[assignment.ps_id].append(task_info.copy())
+            instructor_tasks[assignment.j1_id].append(task_info.copy())
+        
+        return instructor_tasks
+    
+    def _calculate_instructor_workloads(
+        self,
+        individual: Individual
+    ) -> Dict[int, int]:
+        """Calculate workload for each instructor."""
+        workload = defaultdict(int)
+        
+        for assignment in individual.assignments:
+            workload[assignment.ps_id] += 1
+            workload[assignment.j1_id] += 1
+        
+        return workload
+
+
+# ============================================================================
+# CONSTRAINT CHECKER
+# ============================================================================
+
+class NSGA2ConstraintChecker:
+    """
+    Checks and validates hard constraints for NSGA-II individuals.
+    
+    Hard Constraints:
+    - PS cannot be changed (fixed)
+    - J1 ≠ PS
+    - J1 must be an instructor
+    - At most 1 duty per instructor per timeslot
+    - No gaps within class schedule
+    - All projects assigned
+    - Priority mode constraints
+    """
+    
+    def __init__(
+        self,
+        projects: List[Project],
+        instructors: List[Instructor],
+        config: NSGA2Config
+    ):
+        self.projects = {p.id: p for p in projects}
+        self.instructors = {i.id: i for i in instructors}
+        self.config = config
+        
+        # Only real instructors
+        self.faculty_ids = {
+            i.id for i in instructors
+            if i.type == "instructor"
+        }
+        
+        # Separate by type
+        self.ara_project_ids = {
+            p.id for p in projects
+            if str(p.type).lower() in ["interim", "ara", "ara proje"]
+        }
+        self.bitirme_project_ids = {
+            p.id for p in projects
+            if str(p.type).lower() in ["final", "bitirme", "bitirme proje"]
+        }
+    
+    def check_feasibility(self, individual: Individual) -> Tuple[bool, int]:
+        """
+        Check if individual is feasible.
         
         Returns:
-            List of fronts (each front is a list of individuals)
+            (is_feasible, violation_count)
         """
-        if not self.population:
-            return [[]]
+        violations = 0
         
-        # Domination count and dominated solutions
-        domination_count = {}
-        dominated_solutions = defaultdict(list)
-        fronts = [[]]
+        # Check J1 ≠ PS
+        for assignment in individual.assignments:
+            if assignment.j1_id == assignment.ps_id:
+                violations += 1
         
-        for i, p in enumerate(self.population):
-            domination_count[i] = 0
-            dominated_solutions[i] = []
+        # Check J1 is instructor
+        for assignment in individual.assignments:
+            if assignment.j1_id not in self.faculty_ids:
+                violations += 1
+        
+        # Check timeslot conflicts
+        violations += self._check_timeslot_conflicts(individual)
+        
+        # Check all projects assigned
+        assigned_projects = {a.project_id for a in individual.assignments}
+        missing = set(self.projects.keys()) - assigned_projects
+        violations += len(missing)
+        
+        # Check priority mode
+        violations += self._check_priority_mode(individual)
+        
+        # Check no gaps within classes
+        violations += self._check_class_gaps(individual)
+        
+        return violations == 0, violations
+    
+    def _check_timeslot_conflicts(self, individual: Individual) -> int:
+        """Check for timeslot conflicts (instructor at multiple places same time)."""
+        conflicts = 0
+        
+        # Build instructor schedule
+        instructor_schedule = defaultdict(set)  # instructor_id -> set of (order)
+        
+        for assignment in individual.assignments:
+            slot = assignment.order_in_class
             
-            for j, q in enumerate(self.population):
-                if i == j:
-                    continue
+            # Check PS
+            if slot in instructor_schedule[assignment.ps_id]:
+                conflicts += 1
+            else:
+                instructor_schedule[assignment.ps_id].add(slot)
+            
+            # Check J1
+            if slot in instructor_schedule[assignment.j1_id]:
+                conflicts += 1
+            else:
+                instructor_schedule[assignment.j1_id].add(slot)
+        
+        return conflicts
+    
+    def _check_priority_mode(self, individual: Individual) -> int:
+        """Check priority mode constraints."""
+        if self.config.priority_mode == PriorityMode.ESIT:
+            return 0
+        
+        violations = 0
+        
+        # Get max slot for ARA and min slot for BITIRME
+        ara_max_slot = -1
+        bitirme_min_slot = float('inf')
+        
+        for assignment in individual.assignments:
+            slot = assignment.class_id * 1000 + assignment.order_in_class
+            
+            if assignment.project_id in self.ara_project_ids:
+                ara_max_slot = max(ara_max_slot, slot)
+            elif assignment.project_id in self.bitirme_project_ids:
+                bitirme_min_slot = min(bitirme_min_slot, slot)
+        
+        if self.config.priority_mode == PriorityMode.ARA_ONCE:
+            # All ARA before all BITIRME
+            if ara_max_slot > bitirme_min_slot and bitirme_min_slot != float('inf'):
+                violations += 1
+        elif self.config.priority_mode == PriorityMode.BITIRME_ONCE:
+            # All BITIRME before all ARA
+            if bitirme_min_slot != float('inf') and ara_max_slot != -1:
+                if bitirme_min_slot > ara_max_slot:
+                    violations += 1
+        
+        return violations
+    
+    def _check_class_gaps(self, individual: Individual) -> int:
+        """Check for gaps within class schedules."""
+        violations = 0
+        
+        for class_id in range(individual.class_count):
+            projects = individual.get_class_projects(class_id)
+            if not projects:
+                continue
+            
+            # Check for gaps
+            orders = sorted([p.order_in_class for p in projects])
+            if orders:
+                # Should start from 0 and be consecutive
+                expected_orders = list(range(len(orders)))
+                if orders != expected_orders:
+                    violations += 1
+        
+        return violations
+
+
+# ============================================================================
+# GENETIC OPERATORS
+# ============================================================================
+
+class NSGA2GeneticOperators:
+    """
+    NSGA-II genetic operators: Selection, Crossover, Mutation.
+    
+    All operators maintain constraint feasibility.
+    """
+    
+    def __init__(
+        self,
+        projects: List[Project],
+        instructors: List[Instructor],
+        config: NSGA2Config
+    ):
+        self.projects = {p.id: p for p in projects}
+        self.project_list = list(projects)
+        self.instructors = {i.id: i for i in instructors}
+        self.config = config
+        
+        # Only real instructors for J1 assignment
+        self.faculty_ids = [
+            i.id for i in instructors
+            if i.type == "instructor"
+        ]
+        
+        # Project types
+        self.ara_projects = [
+            p for p in projects
+            if str(p.type).lower() in ["interim", "ara", "ara proje"]
+        ]
+        self.bitirme_projects = [
+            p for p in projects
+            if str(p.type).lower() in ["final", "bitirme", "bitirme proje"]
+        ]
+    
+    def tournament_selection(
+        self,
+        population: List[Individual],
+        tournament_size: int = 3
+    ) -> Individual:
+        """
+        Tournament selection based on rank and crowding distance.
+        
+        Returns the best individual from tournament.
+        """
+        tournament = random.sample(population, min(tournament_size, len(population)))
+        
+        # Sort by rank (ascending), then crowding distance (descending)
+        tournament.sort(key=lambda x: (x.rank, -x.crowding_distance))
+        
+        return tournament[0].copy()
+    
+    def crossover(
+        self,
+        parent1: Individual,
+        parent2: Individual
+    ) -> Tuple[Individual, Individual]:
+        """
+        Crossover operator.
+        
+        Performs multi-point crossover on:
+        1. Class assignments
+        2. J1 assignments
+        
+        Returns two children.
+        """
+        if random.random() > self.config.crossover_rate:
+            return parent1.copy(), parent2.copy()
+        
+        child1 = parent1.copy()
+        child2 = parent2.copy()
+        
+        # Create mapping for quick lookup
+        p1_map = {a.project_id: a for a in parent1.assignments}
+        p2_map = {a.project_id: a for a in parent2.assignments}
+        
+        # Crossover points
+        n = len(child1.assignments)
+        if n < 2:
+            return child1, child2
+        
+        cx_point1 = random.randint(0, n - 1)
+        cx_point2 = random.randint(cx_point1, n - 1)
+        
+        # Swap class and J1 assignments between crossover points
+        for i in range(cx_point1, cx_point2 + 1):
+            pid1 = child1.assignments[i].project_id
+            pid2 = child2.assignments[i].project_id
+            
+            if pid1 in p2_map and pid2 in p1_map:
+                # Swap class assignments
+                child1.assignments[i].class_id = p2_map[pid1].class_id
+                child2.assignments[i].class_id = p1_map[pid2].class_id
                 
-                if self._dominates(p.get('objectives', []), q.get('objectives', [])):
-                    dominated_solutions[i].append(j)
-                elif self._dominates(q.get('objectives', []), p.get('objectives', [])):
-                    domination_count[i] += 1
-            
-            if domination_count[i] == 0:
-                p['rank'] = 0
-                fronts[0].append(p)
+                # Swap J1 assignments
+                child1.assignments[i].j1_id = p2_map[pid1].j1_id
+                child2.assignments[i].j1_id = p1_map[pid2].j1_id
         
-        # Generate subsequent fronts
-        i = 0
-        while i < len(fronts) and len(fronts[i]) > 0:
-            next_front = []
-            for p_idx in range(len(self.population)):
-                p = self.population[p_idx]
-                if p in fronts[i]:
-                    for q_idx in dominated_solutions[p_idx]:
-                        domination_count[q_idx] -= 1
-                        if domination_count[q_idx] == 0:
-                            q = self.population[q_idx]
-                            q['rank'] = i + 1
-                            next_front.append(q)
-            i += 1
-            if next_front:
-                fronts.append(next_front)
+        # Repair children
+        self._repair_individual(child1)
+        self._repair_individual(child2)
         
-        # Store Pareto front
-        self.pareto_front = fronts[0] if fronts and len(fronts[0]) > 0 else []
-        
-        return fronts
+        return child1, child2
     
-    def _dominates(self, obj1: List[float], obj2: List[float]) -> bool:
+    def mutate(self, individual: Individual) -> Individual:
         """
-        Check if obj1 dominates obj2.
+        Mutation operator.
         
-        obj1 dominates obj2 if:
-        - obj1 is no worse than obj2 in all objectives
-        - obj1 is strictly better than obj2 in at least one objective
+        Applies one or more mutations:
+        1. Move project to different class
+        2. Swap order within class
+        3. Change J1 assignment
+        4. Block merge mutation (for continuity)
         """
-        if not obj1 or not obj2 or len(obj1) != len(obj2):
-            return False
+        if random.random() > self.config.mutation_rate:
+            return individual
         
-        better_in_any = False
-        for o1, o2 in zip(obj1, obj2):
-            if o1 < o2:  # Worse in this objective
-                return False
-            if o1 > o2:  # Better in this objective
-                better_in_any = True
+        mutated = individual.copy()
         
-        return better_in_any
+        # Choose mutation type
+        mutation_type = random.choice([
+            'move_class',
+            'swap_order',
+            'change_j1',
+            'block_merge',
+            'j1_rebalance'
+        ])
+        
+        if mutation_type == 'move_class':
+            self._mutate_move_class(mutated)
+        elif mutation_type == 'swap_order':
+            self._mutate_swap_order(mutated)
+        elif mutation_type == 'change_j1':
+            self._mutate_change_j1(mutated)
+        elif mutation_type == 'block_merge':
+            self._mutate_block_merge(mutated)
+        elif mutation_type == 'j1_rebalance':
+            self._mutate_j1_rebalance(mutated)
+        
+        # Repair after mutation
+        self._repair_individual(mutated)
+        
+        return mutated
     
-    def _calculate_crowding_distance(self, front: List[Dict[str, Any]]):
-        """
-        Calculate crowding distance for individuals in a front.
-        
-        Crowding distance measures how close an individual is to its neighbors.
-        Higher distance = more diversity.
-        """
-        if not front:
+    def _mutate_move_class(self, individual: Individual) -> None:
+        """Move a random project to a different class."""
+        if not individual.assignments:
             return
         
-        n_objectives = len(front[0]['objectives'])
+        assignment = random.choice(individual.assignments)
+        old_class = assignment.class_id
+        new_class = random.randint(0, individual.class_count - 1)
         
-        # Initialize distances
-        for individual in front:
-            individual['crowding_distance'] = 0.0
+        if new_class != old_class:
+            assignment.class_id = new_class
+    
+    def _mutate_swap_order(self, individual: Individual) -> None:
+        """Swap order of two projects in the same class."""
+        if len(individual.assignments) < 2:
+            return
         
-        # Calculate distance for each objective
-        for obj_idx in range(n_objectives):
-            # Sort by objective
-            front.sort(key=lambda x: x['objectives'][obj_idx])
+        # Pick a class with at least 2 projects
+        class_projects = defaultdict(list)
+        for a in individual.assignments:
+            class_projects[a.class_id].append(a)
+        
+        valid_classes = [c for c, projects in class_projects.items() if len(projects) >= 2]
+        if not valid_classes:
+            return
+        
+        class_id = random.choice(valid_classes)
+        projects = class_projects[class_id]
+        
+        # Swap two random projects
+        p1, p2 = random.sample(projects, 2)
+        p1.order_in_class, p2.order_in_class = p2.order_in_class, p1.order_in_class
+    
+    def _mutate_change_j1(self, individual: Individual) -> None:
+        """Change J1 for a random project."""
+        if not individual.assignments:
+            return
+        
+        assignment = random.choice(individual.assignments)
+        
+        # Choose new J1 (not PS)
+        valid_j1s = [f for f in self.faculty_ids if f != assignment.ps_id]
+        if valid_j1s:
+            assignment.j1_id = random.choice(valid_j1s)
+    
+    def _mutate_block_merge(self, individual: Individual) -> None:
+        """
+        Block merge mutation for continuity improvement.
+        
+        Tries to move instructor's tasks closer together.
+        """
+        if not individual.assignments:
+            return
+        
+        # Pick a random instructor
+        instructor_id = random.choice(self.faculty_ids)
+        
+        # Find all assignments where this instructor is involved
+        instructor_assignments = [
+            a for a in individual.assignments
+            if a.ps_id == instructor_id or a.j1_id == instructor_id
+        ]
+        
+        if len(instructor_assignments) < 2:
+            return
+        
+        # Try to move one assignment closer to another
+        a1, a2 = random.sample(instructor_assignments, 2)
+        if a1.class_id != a2.class_id:
+            # Move to same class
+            a1.class_id = a2.class_id
+    
+    def _mutate_j1_rebalance(self, individual: Individual) -> None:
+        """
+        Rebalance J1 assignments based on workload.
+        
+        Assigns J1 to least-loaded instructor.
+        """
+        if not individual.assignments:
+            return
+        
+        # Calculate current workloads
+        workload = defaultdict(int)
+        for a in individual.assignments:
+            workload[a.ps_id] += 1
+            workload[a.j1_id] += 1
+        
+        # Find overloaded and underloaded instructors
+        avg = sum(workload.values()) / len(self.faculty_ids) if self.faculty_ids else 0
+        
+        overloaded = [f for f in self.faculty_ids if workload.get(f, 0) > avg + 2]
+        underloaded = [f for f in self.faculty_ids if workload.get(f, 0) < avg - 2]
+        
+        if not overloaded or not underloaded:
+            return
+        
+        # Find a project where overloaded is J1 and can be replaced
+        for assignment in individual.assignments:
+            if assignment.j1_id in overloaded:
+                # Find valid replacement from underloaded
+                valid = [u for u in underloaded if u != assignment.ps_id]
+                if valid:
+                    assignment.j1_id = random.choice(valid)
+                    return
+    
+    def _repair_individual(self, individual: Individual) -> None:
+        """
+        Repair individual to satisfy constraints.
+        
+        Fixes:
+        1. J1 = PS violations
+        2. J1 not instructor violations
+        3. Timeslot conflicts
+        4. Class gaps
+        5. Priority mode violations
+        """
+        # Fix J1 = PS
+        for assignment in individual.assignments:
+            if assignment.j1_id == assignment.ps_id:
+                valid_j1s = [f for f in self.faculty_ids if f != assignment.ps_id]
+                if valid_j1s:
+                    assignment.j1_id = random.choice(valid_j1s)
+        
+        # Fix J1 not instructor
+        for assignment in individual.assignments:
+            if assignment.j1_id not in self.faculty_ids:
+                valid_j1s = [f for f in self.faculty_ids if f != assignment.ps_id]
+                if valid_j1s:
+                    assignment.j1_id = random.choice(valid_j1s)
+        
+        # Reorder classes (no gaps)
+        self._reorder_all_classes(individual)
+        
+        # Fix timeslot conflicts
+        self._fix_timeslot_conflicts(individual)
+    
+    def _reorder_all_classes(self, individual: Individual) -> None:
+        """Reorder all classes to remove gaps."""
+        for class_id in range(individual.class_count):
+            projects = [a for a in individual.assignments if a.class_id == class_id]
+            projects.sort(key=lambda x: x.order_in_class)
+            
+            for i, project in enumerate(projects):
+                project.order_in_class = i
+    
+    def _fix_timeslot_conflicts(self, individual: Individual) -> None:
+        """Fix timeslot conflicts by shifting assignments."""
+        max_iterations = 100
+        iteration = 0
+        
+        while iteration < max_iterations:
+            conflicts = self._find_conflicts(individual)
+            if not conflicts:
+                break
+            
+            # Fix first conflict
+            assignment, conflict_type = conflicts[0]
+            
+            if conflict_type == 'timeslot':
+                # Move to different timeslot
+                assignment.order_in_class += 1
+            
+            iteration += 1
+        
+        # Final reorder
+        self._reorder_all_classes(individual)
+    
+    def _find_conflicts(self, individual: Individual) -> List[Tuple[ProjectAssignment, str]]:
+        """Find conflicting assignments."""
+        conflicts = []
+        instructor_schedule = defaultdict(list)
+        
+        for assignment in individual.assignments:
+            slot = assignment.order_in_class
+            
+            # Check PS
+            for existing in instructor_schedule[assignment.ps_id]:
+                if existing[0] == slot:
+                    conflicts.append((assignment, 'timeslot'))
+            instructor_schedule[assignment.ps_id].append((slot, assignment))
+            
+            # Check J1
+            for existing in instructor_schedule[assignment.j1_id]:
+                if existing[0] == slot:
+                    conflicts.append((assignment, 'timeslot'))
+            instructor_schedule[assignment.j1_id].append((slot, assignment))
+        
+        return conflicts
+
+
+# ============================================================================
+# POPULATION INITIALIZER
+# ============================================================================
+
+class NSGA2PopulationInitializer:
+    """
+    Initializes NSGA-II population.
+    
+    Creates individuals with:
+    - Balanced class distribution
+    - Same-PS projects grouped
+    - Continuity-friendly ordering
+    - Workload-balanced J1 assignments
+    """
+    
+    def __init__(
+        self,
+        projects: List[Project],
+        instructors: List[Instructor],
+        config: NSGA2Config
+    ):
+        self.projects = list(projects)
+        self.project_map = {p.id: p for p in projects}
+        self.instructors = list(instructors)
+        self.config = config
+        
+        # Only real instructors
+        self.faculty = [
+            i for i in instructors
+            if i.type == "instructor"
+        ]
+        self.faculty_ids = [i.id for i in self.faculty]
+        
+        # Separate by type
+        self.ara_projects = [
+            p for p in projects
+            if str(p.type).lower() in ["interim", "ara", "ara proje"]
+        ]
+        self.bitirme_projects = [
+            p for p in projects
+            if str(p.type).lower() in ["final", "bitirme", "bitirme proje"]
+        ]
+        
+        logger.info(f"PopulationInitializer: {len(projects)} projects, {len(self.faculty)} faculty")
+    
+    def create_population(
+        self,
+        size: int,
+        class_count: int
+    ) -> List[Individual]:
+        """Create initial population."""
+        population = []
+        
+        for i in range(size):
+            if i == 0:
+                # First individual: greedy balanced
+                individual = self._create_greedy_individual(class_count)
+            elif i < size // 3:
+                # First third: continuity-focused
+                individual = self._create_continuity_focused(class_count)
+            elif i < 2 * size // 3:
+                # Second third: workload-focused
+                individual = self._create_workload_focused(class_count)
+            else:
+                # Last third: random
+                individual = self._create_random_individual(class_count)
+            
+            population.append(individual)
+        
+        return population
+    
+    def _create_greedy_individual(self, class_count: int) -> Individual:
+        """Create greedy balanced individual."""
+        individual = Individual(class_count=class_count)
+        
+        # Order projects by priority mode
+        ordered_projects = self._order_projects_by_priority()
+        
+        # Distribute to classes
+        class_loads = [0] * class_count
+        workloads = defaultdict(int)
+        
+        for project in ordered_projects:
+            # Find class with minimum load
+            min_class = min(range(class_count), key=lambda c: class_loads[c])
+            
+            # Find J1 with minimum workload (not PS)
+            valid_j1s = [f for f in self.faculty_ids if f != project.responsible_id]
+            if not valid_j1s:
+                valid_j1s = self.faculty_ids
+            
+            j1_id = min(valid_j1s, key=lambda f: workloads[f])
+            
+            assignment = ProjectAssignment(
+                project_id=project.id,
+                class_id=min_class,
+                order_in_class=class_loads[min_class],
+                ps_id=project.responsible_id,
+                j1_id=j1_id,
+                j2_id=-1
+            )
+            
+            individual.assignments.append(assignment)
+            class_loads[min_class] += 1
+            workloads[project.responsible_id] += 1
+            workloads[j1_id] += 1
+        
+        return individual
+    
+    def _create_continuity_focused(self, class_count: int) -> Individual:
+        """Create individual focused on continuity (same PS grouped)."""
+        individual = Individual(class_count=class_count)
+        
+        # Group projects by PS
+        ps_projects = defaultdict(list)
+        for project in self.projects:
+            ps_projects[project.responsible_id].append(project)
+        
+        # Assign each PS's projects to same class
+        class_loads = [0] * class_count
+        workloads = defaultdict(int)
+        current_class = 0
+        
+        for ps_id, projects in ps_projects.items():
+            # Order by priority
+            projects = self._order_projects_by_priority(projects)
+            
+            for project in projects:
+                # Find J1
+                valid_j1s = [f for f in self.faculty_ids if f != ps_id]
+                if not valid_j1s:
+                    valid_j1s = self.faculty_ids
+                j1_id = min(valid_j1s, key=lambda f: workloads[f])
+                
+                assignment = ProjectAssignment(
+                    project_id=project.id,
+                    class_id=current_class,
+                    order_in_class=class_loads[current_class],
+                    ps_id=ps_id,
+                    j1_id=j1_id,
+                    j2_id=-1
+                )
+                
+                individual.assignments.append(assignment)
+                class_loads[current_class] += 1
+                workloads[ps_id] += 1
+                workloads[j1_id] += 1
+            
+            # Move to next class (round-robin)
+            current_class = (current_class + 1) % class_count
+        
+        return individual
+    
+    def _create_workload_focused(self, class_count: int) -> Individual:
+        """Create individual focused on workload balance."""
+        individual = Individual(class_count=class_count)
+        
+        ordered_projects = self._order_projects_by_priority()
+        
+        # Track workloads
+        workloads = defaultdict(int)
+        class_loads = [0] * class_count
+        
+        for project in ordered_projects:
+            # Find class with minimum load
+            min_class = min(range(class_count), key=lambda c: class_loads[c])
+            
+            # Find J1 that balances workload best
+            ps_id = project.responsible_id
+            valid_j1s = [f for f in self.faculty_ids if f != ps_id]
+            if not valid_j1s:
+                valid_j1s = self.faculty_ids
+            
+            # Target: average workload
+            avg = sum(workloads.values()) / len(self.faculty_ids) if self.faculty_ids else 0
+            
+            # Pick J1 that brings total closest to average
+            j1_id = min(valid_j1s, key=lambda f: abs(workloads[f] + 1 - avg))
+            
+            assignment = ProjectAssignment(
+                project_id=project.id,
+                class_id=min_class,
+                order_in_class=class_loads[min_class],
+                ps_id=ps_id,
+                j1_id=j1_id,
+                j2_id=-1
+            )
+            
+            individual.assignments.append(assignment)
+            class_loads[min_class] += 1
+            workloads[ps_id] += 1
+            workloads[j1_id] += 1
+        
+        return individual
+    
+    def _create_random_individual(self, class_count: int) -> Individual:
+        """Create random individual."""
+        individual = Individual(class_count=class_count)
+        
+        projects = self._order_projects_by_priority()
+        random.shuffle(projects)
+        
+        class_loads = [0] * class_count
+        
+        for project in projects:
+            class_id = random.randint(0, class_count - 1)
+            
+            valid_j1s = [f for f in self.faculty_ids if f != project.responsible_id]
+            if not valid_j1s:
+                valid_j1s = self.faculty_ids
+            j1_id = random.choice(valid_j1s)
+            
+            assignment = ProjectAssignment(
+                project_id=project.id,
+                class_id=class_id,
+                order_in_class=class_loads[class_id],
+                ps_id=project.responsible_id,
+                j1_id=j1_id,
+                j2_id=-1
+            )
+            
+            individual.assignments.append(assignment)
+            class_loads[class_id] += 1
+        
+        return individual
+    
+    def _order_projects_by_priority(
+        self,
+        projects: Optional[List[Project]] = None
+    ) -> List[Project]:
+        """Order projects according to priority mode."""
+        if projects is None:
+            projects = self.projects
+        
+        if self.config.priority_mode == PriorityMode.ARA_ONCE:
+            # ARA first, then BITIRME
+            ara = [p for p in projects if p in self.ara_projects]
+            bitirme = [p for p in projects if p in self.bitirme_projects]
+            other = [p for p in projects if p not in self.ara_projects and p not in self.bitirme_projects]
+            return ara + bitirme + other
+        
+        elif self.config.priority_mode == PriorityMode.BITIRME_ONCE:
+            # BITIRME first, then ARA
+            ara = [p for p in projects if p in self.ara_projects]
+            bitirme = [p for p in projects if p in self.bitirme_projects]
+            other = [p for p in projects if p not in self.ara_projects and p not in self.bitirme_projects]
+            return bitirme + ara + other
+        
+        else:  # ESIT
+            # Random order
+            result = list(projects)
+            random.shuffle(result)
+            return result
+
+
+# ============================================================================
+# NSGA-II CORE ALGORITHM
+# ============================================================================
+
+class NSGA2Core:
+    """
+    Core NSGA-II algorithm implementation.
+    
+    Features:
+    - Non-dominated sorting
+    - Crowding distance calculation
+    - Elitism
+    """
+    
+    def __init__(self, config: NSGA2Config):
+        self.config = config
+    
+    def fast_non_dominated_sort(
+        self,
+        population: List[Individual]
+    ) -> List[List[Individual]]:
+        """
+        Fast non-dominated sorting algorithm.
+        
+        Returns list of fronts (front 0 is Pareto front).
+        """
+        fronts = [[]]
+        
+        for p in population:
+            p.dominated_solutions = []
+            p.domination_count = 0
+            
+            for q in population:
+                if self._dominates(p, q):
+                    p.dominated_solutions.append(q)
+                elif self._dominates(q, p):
+                    p.domination_count += 1
+            
+            if p.domination_count == 0:
+                p.rank = 0
+                fronts[0].append(p)
+        
+        i = 0
+        while fronts[i]:
+            next_front = []
+            for p in fronts[i]:
+                for q in p.dominated_solutions:
+                    q.domination_count -= 1
+                    if q.domination_count == 0:
+                        q.rank = i + 1
+                        next_front.append(q)
+            i += 1
+            fronts.append(next_front)
+        
+        return fronts[:-1]  # Remove empty last front
+    
+    def calculate_crowding_distance(self, front: List[Individual]) -> None:
+        """
+        Calculate crowding distance for individuals in a front.
+        """
+        if len(front) == 0:
+            return
+        
+        n = len(front)
+        num_objectives = len(front[0].objectives)
+        
+        for ind in front:
+            ind.crowding_distance = 0.0
+        
+        for m in range(num_objectives):
+            # Sort by objective m
+            front.sort(key=lambda x: x.objectives[m])
             
             # Boundary points get infinite distance
-            front[0]['crowding_distance'] = float('inf')
-            front[-1]['crowding_distance'] = float('inf')
+            front[0].crowding_distance = float('inf')
+            front[-1].crowding_distance = float('inf')
             
-            # Calculate distances
-            obj_min = front[0]['objectives'][obj_idx]
-            obj_max = front[-1]['objectives'][obj_idx]
-            obj_range = obj_max - obj_min
-            
+            # Calculate distance for others
+            obj_range = front[-1].objectives[m] - front[0].objectives[m]
             if obj_range == 0:
                 continue
             
-            for i in range(1, len(front) - 1):
-                distance = (front[i+1]['objectives'][obj_idx] - front[i-1]['objectives'][obj_idx]) / obj_range
-                front[i]['crowding_distance'] += distance
+            for i in range(1, n - 1):
+                front[i].crowding_distance += (
+                    (front[i + 1].objectives[m] - front[i - 1].objectives[m]) / obj_range
+                )
     
-    def _create_offspring(self) -> List[Dict[str, Any]]:
-        """
-        Create offspring through selection, crossover, and mutation.
+    def _dominates(self, p: Individual, q: Individual) -> bool:
+        """Check if p dominates q (all objectives <= and at least one <)."""
+        if not p.objectives or not q.objectives:
+            return False
         
-        Returns:
-            List of offspring individuals
-        """
-        offspring = []
+        at_least_one_better = False
         
-        for _ in range(self.population_size // 2):
-            # Tournament selection
-            parent1 = self._tournament_selection()
-            parent2 = self._tournament_selection()
+        for i in range(len(p.objectives)):
+            if p.objectives[i] > q.objectives[i]:
+                return False
+            if p.objectives[i] < q.objectives[i]:
+                at_least_one_better = True
+        
+        return at_least_one_better
+    
+    def select_next_generation(
+        self,
+        population: List[Individual],
+        offspring: List[Individual],
+        pop_size: int
+    ) -> List[Individual]:
+        """
+        Select next generation using elitism.
+        
+        Combines population and offspring, then selects best.
+        """
+        combined = population + offspring
+        
+        # Non-dominated sorting
+        fronts = self.fast_non_dominated_sort(combined)
+        
+        new_population = []
+        front_idx = 0
+        
+        while len(new_population) + len(fronts[front_idx]) <= pop_size:
+            # Calculate crowding distance
+            self.calculate_crowding_distance(fronts[front_idx])
             
-            # Crossover
-            if random.random() < self.crossover_rate:
-                child1, child2 = self._crossover(parent1, parent2)
-            else:
-                child1, child2 = parent1.copy(), parent2.copy()
+            # Add entire front
+            new_population.extend(fronts[front_idx])
+            front_idx += 1
             
-            # Mutation
-            if random.random() < self.mutation_rate:
-                child1 = self._mutate(child1)
-            if random.random() < self.mutation_rate:
-                child2 = self._mutate(child2)
-            
-            offspring.extend([child1, child2])
-        
-        return offspring[:self.population_size]
-    
-    def _tournament_selection(self, tournament_size: int = 3) -> Dict[str, Any]:
-        """
-        Select individual using tournament selection.
-        
-        Considers both rank and crowding distance.
-        """
-        tournament = random.sample(self.population, min(tournament_size, len(self.population)))
-        
-        # Sort by rank (lower is better) and crowding distance (higher is better)
-        tournament.sort(key=lambda x: (x.get('rank', float('inf')), -x.get('crowding_distance', 0)))
-        
-        return tournament[0]
-    
-    def _crossover(self, parent1: Dict[str, Any], parent2: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        """
-        🤖 AI FEATURE 5: Smart crossover operation.
-        
-        Combines assignments from two parents intelligently.
-        """
-        assignments1 = parent1['assignments']
-        assignments2 = parent2['assignments']
-        
-        if not assignments1 or not assignments2:
-            return parent1.copy(), parent2.copy()
-        
-        # Single-point crossover
-        crossover_point = random.randint(1, min(len(assignments1), len(assignments2)) - 1)
-        
-        child1_assignments = assignments1[:crossover_point] + assignments2[crossover_point:]
-        child2_assignments = assignments2[:crossover_point] + assignments1[crossover_point:]
-        
-        # Remove duplicates (keep first occurrence)
-        child1_assignments = self._remove_duplicate_projects(child1_assignments)
-        child2_assignments = self._remove_duplicate_projects(child2_assignments)
-        
-        return (
-            {"assignments": child1_assignments, "fitness": 0, "objectives": []},
-            {"assignments": child2_assignments, "fitness": 0, "objectives": []}
-        )
-    
-    def _mutate(self, individual: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        🤖 AI FEATURE 6: Smart mutation operation.
-        
-        Randomly modifies assignments.
-        """
-        assignments = individual['assignments'].copy()
-        
-        if not assignments:
-            return individual
-        
-        # Mutation type (random)
-        mutation_type = random.choice(['swap_timeslot', 'swap_classroom', 'swap_assignments'])
-        
-        if mutation_type == 'swap_timeslot':
-            # Change timeslot of a random assignment
-            idx = random.randint(0, len(assignments) - 1)
-            new_timeslot = random.choice(self.timeslots)
-            assignments[idx]['timeslot_id'] = new_timeslot['id']
-        
-        elif mutation_type == 'swap_classroom':
-            # Change classroom of a random assignment
-            idx = random.randint(0, len(assignments) - 1)
-            new_classroom = random.choice(self.classrooms)
-            assignments[idx]['classroom_id'] = new_classroom['id']
-        
-        elif mutation_type == 'swap_assignments':
-            # Swap two random assignments
-            if len(assignments) >= 2:
-                idx1, idx2 = random.sample(range(len(assignments)), 2)
-                assignments[idx1], assignments[idx2] = assignments[idx2], assignments[idx1]
-        
-        return {"assignments": assignments, "fitness": 0, "objectives": []}
-    
-    def _environmental_selection(self, combined_population: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Select next generation from combined population.
-        
-        Uses non-dominated sorting and crowding distance.
-        """
-        # Evaluate new individuals
-        for individual in combined_population:
-            if 'fitness' not in individual or individual['fitness'] == 0:
-                objectives = self._calculate_objectives(individual['assignments'])
-                individual['objectives'] = objectives
-                individual['fitness'] = self._aggregate_fitness(objectives)
-        
-        # Temporarily set population for sorting
-        original_population = self.population
-        self.population = combined_population
-        
-        # Non-dominated sort
-        fronts = self._fast_non_dominated_sort()
-        
-        # Calculate crowding distance
-        for front in fronts:
-            self._calculate_crowding_distance(front)
-        
-        # Select individuals
-        next_population = []
-        for front in fronts:
-            if len(next_population) + len(front) <= self.population_size:
-                next_population.extend(front)
-            else:
-                # Sort by crowding distance and fill remaining spots
-                front.sort(key=lambda x: x.get('crowding_distance', 0), reverse=True)
-                remaining = self.population_size - len(next_population)
-                next_population.extend(front[:remaining])
+            if front_idx >= len(fronts):
                 break
         
-        # Restore original population
-        self.population = original_population
+        # Add remaining from last front
+        if len(new_population) < pop_size and front_idx < len(fronts):
+            self.calculate_crowding_distance(fronts[front_idx])
+            
+            # Sort by crowding distance (descending)
+            fronts[front_idx].sort(key=lambda x: -x.crowding_distance)
+            
+            remaining = pop_size - len(new_population)
+            new_population.extend(fronts[front_idx][:remaining])
         
-        return next_population
-    
-    def _select_best_from_front(self, front: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Select best individual from Pareto front based on aggregate fitness."""
-        if not front:
-            return {"assignments": [], "fitness": 0, "objectives": []}
-        
-        return max(front, key=lambda x: x.get('fitness', 0))
+        return new_population
 
-    # ═══════════════════════════════════════════════════════════════════════════════
-    # 🎯 ADAPTIVE PARAMETERS (AI FEATURE 7)
-    # ═══════════════════════════════════════════════════════════════════════════════
-    
-    def _adapt_parameters(self):
-        """
-        🤖 AI FEATURE 7: Adapt mutation/crossover rates based on progress.
-        """
-        progress = self.current_generation / self.generations
-        
-        # Increase mutation rate as we progress (more exploration)
-        self.mutation_rate = 0.15 + (progress * 0.15)
-        
-        # Decrease crossover rate slightly (less exploitation)
-        self.crossover_rate = 0.85 - (progress * 0.10)
-        
-        logger.info(f"🔧 [NSGA-II] Adaptive parameters: mutation_rate={self.mutation_rate:.3f}, crossover_rate={self.crossover_rate:.3f}")
 
-    # ═══════════════════════════════════════════════════════════════════════════════
-    # 🛠️ UTILITY FUNCTIONS
-    # ═══════════════════════════════════════════════════════════════════════════════
+# ============================================================================
+# MAIN NSGA-II SCHEDULER
+# ============================================================================
+
+class NSGA2Scheduler(OptimizationAlgorithm):
+    """
+    NSGA-II Scheduler for Academic Project Jury Assignment.
     
-    def _parse_time(self, time_str: str) -> int:
-        """Parse time string to minutes since midnight."""
-        try:
-            parts = time_str.split(':')
-            hours = int(parts[0])
-            minutes = int(parts[1]) if len(parts) > 1 else 0
-            return hours * 60 + minutes
-        except:
-            return 540  # Default 09:00
+    Single-phase multi-objective optimization that produces:
+    - Project → Class assignment
+    - Order within class
+    - J1 assignment
+    - PS (fixed)
+    - J2 (placeholder: [Araştırma Görevlisi])
+    """
     
-    def _remove_duplicate_projects(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Remove duplicate project assignments (keep first occurrence)."""
-        seen_projects = set()
-        unique_assignments = []
-        
-        for assignment in assignments:
-            project_id = assignment.get('project_id')
-            if project_id not in seen_projects:
-                seen_projects.add(project_id)
-                unique_assignments.append(assignment)
-        
-        return unique_assignments
+    # J2 Placeholder constant
+    J2_PLACEHOLDER = "[Araştırma Görevlisi]"
     
-    def _calculate_final_metrics(self, schedule: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Calculate final metrics for the schedule."""
-        if not schedule:
-            return {
-                "total_assignments": 0,
-                "instructor_conflicts": 0,
-                "classroom_conflicts": 0,
-                "workload_balance": 0,
-                "consecutive_quality": 0,
-                "pairing_quality": 0,
-                "early_timeslot_score": 0
-            }
+    def __init__(self, params: Optional[Dict[str, Any]] = None):
+        super().__init__(params)
+        self.name = "NSGA-II Multi-Objective Scheduler"
+        self.description = (
+            "Multi-objective genetic algorithm for academic project scheduling "
+            "with workload balance, continuity, and class change optimization."
+        )
         
-        objectives = self._calculate_objectives(schedule)
+        self.config = NSGA2Config()
+        self.projects: List[Project] = []
+        self.instructors: List[Instructor] = []
+        self.classrooms: List[Dict] = []
+        
+        # Components
+        self.objective_calculator: Optional[NSGA2ObjectiveCalculator] = None
+        self.constraint_checker: Optional[NSGA2ConstraintChecker] = None
+        self.genetic_operators: Optional[NSGA2GeneticOperators] = None
+        self.population_initializer: Optional[NSGA2PopulationInitializer] = None
+        self.nsga2_core: Optional[NSGA2Core] = None
+        
+        logger.info("NSGA2Scheduler initialized")
+    
+    def initialize(self, data: Dict[str, Any]) -> None:
+        """Initialize algorithm with input data."""
+        logger.info("=" * 60)
+        logger.info("NSGA-II INITIALIZATION")
+        logger.info("=" * 60)
+        
+        # Parse configuration
+        self._parse_config(data)
+        
+        # Parse input data
+        self._parse_input_data(data)
+        
+        # Initialize components
+        self._initialize_components()
+        
+        logger.info(f"Projects: {len(self.projects)}")
+        logger.info(f"Instructors: {len(self.instructors)} (Faculty: {len([i for i in self.instructors if i.type == 'instructor'])})")
+        logger.info(f"Classrooms: {len(self.classrooms)}")
+        logger.info(f"Class count: {self.config.class_count}")
+        logger.info(f"Priority mode: {self.config.priority_mode.value}")
+        logger.info(f"Population size: {self.config.population_size}")
+        logger.info(f"Max generations: {self.config.max_generations}")
+    
+    def optimize(self, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Run NSGA-II optimization.
+        
+        Returns final schedule with all assignments.
+        """
+        logger.info("=" * 60)
+        logger.info("NSGA-II OPTIMIZATION START")
+        logger.info("=" * 60)
+        
+        start_time = time.time()
+        
+        # Run optimization for configured class count
+        if self.config.auto_class_count:
+            # Try different class counts
+            best_solution = None
+            best_score = float('inf')
+            
+            for class_count in [5, 6, 7]:
+                if class_count > len(self.classrooms):
+                    continue
+                
+                logger.info(f"\n--- Trying class_count = {class_count} ---")
+                solution, score = self._run_nsga2(class_count)
+                
+                if score < best_score:
+                    best_score = score
+                    best_solution = solution
+                    logger.info(f"New best score: {best_score:.2f} with {class_count} classes")
+        else:
+            # Use configured class count
+            best_solution, best_score = self._run_nsga2(self.config.class_count)
+        
+        elapsed = time.time() - start_time
+        
+        # Convert to output format
+        result = self._convert_to_output(best_solution)
+        result['execution_time'] = elapsed
+        result['best_score'] = best_score
+        
+        logger.info("=" * 60)
+        logger.info(f"NSGA-II COMPLETE - Time: {elapsed:.2f}s, Score: {best_score:.2f}")
+        logger.info("=" * 60)
+        
+        return result
+    
+    def _run_nsga2(self, class_count: int) -> Tuple[Individual, float]:
+        """
+        Run NSGA-II for given class count.
+        
+        Returns (best_individual, weighted_score).
+        """
+        logger.info(f"Running NSGA-II with {class_count} classes")
+        
+        # Update config
+        self.config.class_count = class_count
+        
+        # Initialize population
+        population = self.population_initializer.create_population(
+            self.config.population_size,
+            class_count
+        )
+        
+        # Evaluate initial population
+        for individual in population:
+            self._evaluate_individual(individual)
+        
+        # Non-dominated sorting
+        fronts = self.nsga2_core.fast_non_dominated_sort(population)
+        for front in fronts:
+            self.nsga2_core.calculate_crowding_distance(front)
+        
+        # Track best
+        best_individual = None
+        best_score = float('inf')
+        stagnation_counter = 0
+        
+        # Main loop
+        for generation in range(self.config.max_generations):
+            # Create offspring
+            offspring = []
+            
+            while len(offspring) < self.config.population_size:
+                # Selection
+                parent1 = self.genetic_operators.tournament_selection(
+                    population,
+                    self.config.tournament_size
+                )
+                parent2 = self.genetic_operators.tournament_selection(
+                    population,
+                    self.config.tournament_size
+                )
+                
+                # Crossover
+                child1, child2 = self.genetic_operators.crossover(parent1, parent2)
+                
+                # Mutation
+                child1 = self.genetic_operators.mutate(child1)
+                child2 = self.genetic_operators.mutate(child2)
+                
+                offspring.extend([child1, child2])
+            
+            # Trim to population size
+            offspring = offspring[:self.config.population_size]
+            
+            # Evaluate offspring
+            for individual in offspring:
+                self._evaluate_individual(individual)
+            
+            # Select next generation
+            population = self.nsga2_core.select_next_generation(
+                population,
+                offspring,
+                self.config.population_size
+            )
+            
+            # Find best in current population
+            current_best = min(population, key=lambda x: self._weighted_score(x))
+            current_score = self._weighted_score(current_best)
+            
+            if current_score < best_score:
+                best_score = current_score
+                best_individual = current_best.copy()
+                stagnation_counter = 0
+                
+                if generation % 10 == 0:
+                    logger.info(f"Gen {generation}: New best score = {best_score:.2f}")
+                else:
+                    stagnation_counter += 1
+            
+            # Check stagnation
+            if stagnation_counter >= self.config.stagnation_limit:
+                logger.info(f"Stopping at generation {generation} due to stagnation")
+                break
+                
+        return best_individual, best_score
+    
+    def _evaluate_individual(self, individual: Individual) -> None:
+        """Evaluate objectives and feasibility for individual."""
+        # Check feasibility
+        is_feasible, violations = self.constraint_checker.check_feasibility(individual)
+        individual.is_feasible = is_feasible
+        individual.constraint_violations = violations
+        
+        # Calculate objectives
+        objectives = self.objective_calculator.evaluate(individual)
+        
+        # Add penalty for constraint violations
+        if not is_feasible:
+            penalty = violations * 10000
+            objectives.h1_continuity += penalty
+            objectives.h2_workload += penalty
+            objectives.h3_class_change += penalty
+        
+        individual.objectives = objectives.to_list()
+    
+    def _weighted_score(self, individual: Individual) -> float:
+        """Calculate weighted score for final selection."""
+        if not individual.objectives:
+            return float('inf')
+        
+        return (
+            self.config.weight_h1 * individual.objectives[0] +
+            self.config.weight_h2 * individual.objectives[1] +
+            self.config.weight_h3 * individual.objectives[2] +
+            self.config.weight_h4 * individual.objectives[3]
+        )
+    
+    def _convert_to_output(self, individual: Individual) -> Dict[str, Any]:
+        """Convert individual to output format."""
+        if individual is None:
+            return self._create_empty_output()
+        
+        # Build instructor lookup
+        instructor_map = {i.id: i for i in self.instructors}
+        
+        # Build classroom lookup
+        classroom_map = {i: self.classrooms[i] if i < len(self.classrooms) else {'id': i + 1, 'name': f'Class{i + 1}'} 
+                        for i in range(individual.class_count)}
+        
+        assignments = []
+        
+        for assignment in individual.assignments:
+            # Get classroom
+            classroom = classroom_map.get(assignment.class_id, {'id': assignment.class_id + 1, 'name': f'D{105 + assignment.class_id}'})
+            
+            # Build instructor list
+            instructors = [
+                assignment.ps_id,
+                assignment.j1_id,
+                {
+                    'id': -1,
+                    'name': self.J2_PLACEHOLDER,
+                    'is_placeholder': True
+                }
+            ]
+            
+            # Timeslot = order + 1 (1-indexed)
+            timeslot_id = assignment.order_in_class + 1
+            
+            assignments.append({
+                'project_id': assignment.project_id,
+                'classroom_id': classroom.get('id', assignment.class_id + 1),
+                'timeslot_id': timeslot_id,
+                'instructors': instructors,
+                'is_makeup': False
+            })
+        
+        # Calculate final scores
+        objectives = self.objective_calculator.evaluate(individual)
         
         return {
-            "total_assignments": len(schedule),
-            "instructor_conflicts": -objectives[0],  # Convert back to positive
-            "classroom_conflicts": -objectives[1],
-            "workload_balance": objectives[2],
-            "consecutive_quality": objectives[3],
-            "pairing_quality": objectives[4],
-            "early_timeslot_score": objectives[5],
-            "aggregate_fitness": self._aggregate_fitness(objectives)
+            'assignments': assignments,
+            'stats': {
+                'total_projects': len(assignments),
+                'class_count': individual.class_count,
+                'h1_continuity': objectives.h1_continuity,
+                'h2_workload': objectives.h2_workload,
+                'h3_class_change': objectives.h3_class_change,
+                'h4_class_load': objectives.h4_class_load,
+                'weighted_score': objectives.weighted_sum(self.config)
+            }
         }
+    
+    def _create_empty_output(self) -> Dict[str, Any]:
+        """Create empty output for error cases."""
+        return {
+            'assignments': [],
+            'stats': {
+                'total_projects': 0,
+                'class_count': 0,
+                'error': 'No valid solution found'
+            }
+        }
+    
+    def _parse_config(self, data: Dict[str, Any]) -> None:
+        """Parse configuration from data."""
+        config = data.get('config', {})
+        
+        # Population and generations
+        if 'population_size' in config:
+            self.config.population_size = config['population_size']
+        if 'max_generations' in config:
+            self.config.max_generations = config['max_generations']
+        
+        # Class count
+        if 'classroom_count' in data:
+            self.config.class_count = data['classroom_count']
+            self.config.auto_class_count = False
+        elif 'class_count' in config:
+            self.config.class_count = config['class_count']
+            self.config.auto_class_count = False
+        
+        # Priority mode
+        if 'priority_mode' in config:
+            try:
+                self.config.priority_mode = PriorityMode(config['priority_mode'])
+            except ValueError:
+                pass
+        
+        # Time penalty mode
+        if 'time_penalty_mode' in config:
+            try:
+                self.config.time_penalty_mode = TimePenaltyMode(config['time_penalty_mode'])
+            except ValueError:
+                pass
+        
+        # Workload mode
+        if 'workload_constraint_mode' in config:
+            try:
+                self.config.workload_constraint_mode = WorkloadConstraintMode(config['workload_constraint_mode'])
+            except ValueError:
+                pass
+        
+        # Weights
+        if 'weight_h1' in config:
+            self.config.weight_h1 = config['weight_h1']
+        if 'weight_h2' in config:
+            self.config.weight_h2 = config['weight_h2']
+        if 'weight_h3' in config:
+            self.config.weight_h3 = config['weight_h3']
+        if 'weight_h4' in config:
+            self.config.weight_h4 = config['weight_h4']
+    
+    def _parse_input_data(self, data: Dict[str, Any]) -> None:
+        """Parse projects, instructors, classrooms from data."""
+        # Parse projects
+        self.projects = []
+        for p in data.get('projects', []):
+            proj_type = str(p.get('type', p.get('project_type', 'interim'))).lower()
+            if proj_type in ['ara', 'ara proje']:
+                proj_type = 'interim'
+            elif proj_type in ['bitirme', 'bitirme proje']:
+                proj_type = 'final'
+            
+            project = Project(
+                id=p.get('id', 0),
+                title=p.get('title', f"Project {p.get('id', 0)}"),
+                type=proj_type,
+                responsible_id=p.get('instructor_id', p.get('responsible_instructor_id', p.get('responsible_id', 0))),
+                is_makeup=p.get('is_makeup', False)
+            )
+            self.projects.append(project)
+        
+        # Parse instructors
+        self.instructors = []
+        for i in data.get('instructors', []):
+            instructor = Instructor(
+                id=i.get('id', 0),
+                name=i.get('name', f"Instructor {i.get('id', 0)}"),
+                type=i.get('type', 'instructor')
+            )
+            self.instructors.append(instructor)
+        
+        # Parse classrooms
+        self.classrooms = data.get('classrooms', [])
+        
+        # Update class count based on available classrooms
+        if self.classrooms and self.config.auto_class_count:
+            self.config.class_count = min(len(self.classrooms), 7)
+    
+    def _initialize_components(self) -> None:
+        """Initialize algorithm components."""
+        self.objective_calculator = NSGA2ObjectiveCalculator(
+            self.projects,
+            self.instructors,
+            self.config
+        )
+        
+        self.constraint_checker = NSGA2ConstraintChecker(
+            self.projects,
+            self.instructors,
+            self.config
+        )
+        
+        self.genetic_operators = NSGA2GeneticOperators(
+            self.projects,
+            self.instructors,
+            self.config
+        )
+        
+        self.population_initializer = NSGA2PopulationInitializer(
+            self.projects,
+            self.instructors,
+            self.config
+        )
+        
+        self.nsga2_core = NSGA2Core(self.config)
+
+
+# ============================================================================
+# ALGORITHM FACTORY REGISTRATION
+# ============================================================================
+
+def create_nsga2_scheduler(params: Optional[Dict[str, Any]] = None) -> NSGA2Scheduler:
+    """Factory function to create NSGA2Scheduler."""
+    return NSGA2Scheduler(params)
+
+
+# Export main class
+__all__ = [
+    'NSGA2Scheduler',
+    'NSGA2Config',
+    'PriorityMode',
+    'TimePenaltyMode',
+    'WorkloadConstraintMode',
+    'create_nsga2_scheduler'
+]
+

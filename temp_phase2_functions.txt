@@ -1,0 +1,2300 @@
+    def _calculate_current_workloads(
+        self, 
+        assignments: List[Dict[str, Any]]
+    ) -> Dict[int, int]:
+        """
+        Mevcut iÅŸ yÃ¼klerini hesapla (her Ã¶ÄŸretim Ã¼yesi iÃ§in toplam gÃ¶rev sayÄ±sÄ±)
+        
+        Args:
+            assignments: Atama listesi
+        
+        Returns:
+            Dict[int, int]: instructor_id -> toplam gÃ¶rev sayÄ±sÄ±
+        """
+        workloads = defaultdict(int)
+        
+        for assignment in assignments:
+            # Sorumlu instructor
+            responsible_id = assignment.get("responsible_instructor_id")
+            if not responsible_id and assignment.get("instructors"):
+                first_instructor = assignment["instructors"][0]
+                # EÄŸer dict ise id'sini al
+                responsible_id = first_instructor.get("id") if isinstance(first_instructor, dict) else first_instructor
+            
+            # Responsible ID'yi normalize et
+            if isinstance(responsible_id, dict):
+                responsible_id = responsible_id.get("id")
+            
+            if responsible_id:
+                workloads[responsible_id] += 1
+            
+            # JÃ¼ri Ã¼yeleri
+            instructors = assignment.get("instructors", [])
+            for instr in instructors:
+                # Placeholder RA ise sayma
+                if isinstance(instr, dict) and instr.get("is_placeholder"):
+                    continue
+                # ID'yi normalize et (int veya dict olabilir)
+                instr_id = instr.get("id") if isinstance(instr, dict) else instr
+                
+                if instr_id != responsible_id:
+                    workloads[instr_id] += 1
+        
+        return dict(workloads)
+
+    def _identify_projects_needing_jury(
+        self, 
+        assignments: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Eksik jÃ¼ri olan projeleri belirle (1 Sorumlu + 1 JÃ¼ri = eksik)
+        
+        Args:
+            assignments: Atama listesi
+        
+        Returns:
+            List[Dict]: Eksik jÃ¼ri olan proje assignment'larÄ±
+        """
+        projects_needing = []
+        
+        for assignment in assignments:
+            instructors = assignment.get("instructors", [])
+            responsible_id = assignment.get("responsible_instructor_id")
+            
+            # Responsible ID'yi normalize et
+            if not responsible_id and instructors:
+                first_instructor = instructors[0]
+                responsible_id = first_instructor.get("id") if isinstance(first_instructor, dict) else first_instructor
+            
+            if isinstance(responsible_id, dict):
+                responsible_id = responsible_id.get("id")
+            
+            # Sorumlu dÄ±ÅŸÄ±ndaki jÃ¼ri sayÄ±sÄ±
+            jury_count = 0
+            for instr in instructors:
+                instr_id = instr.get("id") if isinstance(instr, dict) else instr
+                if instr_id != responsible_id:
+                    jury_count += 1
+            
+            # 2 jÃ¼ri gerekiyor, 2'den az varsa eksik
+            # (1. Faz'da 1 jÃ¼ri var, 2. Faz'da 2. jÃ¼ri ekleniyor)
+            if jury_count < 2:
+                projects_needing.append(assignment)
+        
+        return projects_needing
+
+    def _xy_model_quota_calculation(
+        self,
+        current_workloads: Dict[int, int],
+        y: int,  # Eksik jÃ¼ri olan proje sayÄ±sÄ±
+        num_instructors: int
+    ) -> Dict[int, int]:
+        """
+        X-Y Modeli ile hedef jÃ¼ri daÄŸÄ±lÄ±mÄ± hesaplama
+        
+        X: Ortalama iÅŸ yÃ¼kÃ¼ (hedef) - mevcut yÃ¼kler + yeni jÃ¼riler hesaba katÄ±lÄ±r
+        Y: Eksik jÃ¼ri olan proje sayÄ±sÄ±
+        
+        AdÄ±m 1: Minimuma tamamlama (X-1)
+        AdÄ±m 2: Ortalama seviyeye Ã§Ä±karma (X)
+        AdÄ±m 3: Maksimum seviyeye Ã§Ä±karma (X+1)
+        
+        Args:
+            current_workloads: Mevcut iÅŸ yÃ¼kleri (1. Faz sonrasÄ±)
+            y: Eksik jÃ¼ri sayÄ±sÄ±
+            num_instructors: Toplam Ã¶ÄŸretim Ã¼yesi sayÄ±sÄ±
+        
+        Returns:
+            Dict[int, int]: instructor_id -> 2. Faz'da alacaÄŸÄ± jÃ¼ri sayÄ±sÄ±
+        """
+        if y == 0:
+            return {inst_id: 0 for inst_id in current_workloads.keys()}
+        
+        # TÃ¼m Ã¶ÄŸretim Ã¼yelerini dahil et (eÄŸer current_workloads'ta yoksa ekle)
+        for instructor in self.instructors:
+            inst_id = instructor['id']
+            if inst_id not in current_workloads:
+                current_workloads[inst_id] = 0
+        
+        # Mevcut toplam yÃ¼kÃ¼ hesapla
+        total_current_workload = sum(current_workloads.values())
+        
+        # Hedef: Her projede 1 Sorumlu + 2 JÃ¼ri = 3 gÃ¶rev
+        total_projects = len(self.projects) if self.projects else y
+        total_target_tasks = total_projects * 3  # Her proje iÃ§in 3 gÃ¶rev
+        
+        # Ortalama iÅŸ yÃ¼kÃ¼ (hedef): (mevcut yÃ¼k + yeni jÃ¼riler) / Ã¶ÄŸretim Ã¼yesi sayÄ±sÄ±
+        # Yeni jÃ¼riler = Y (eksik jÃ¼ri sayÄ±sÄ±)
+        # X = (mevcut_yÃ¼k + Y) / num_instructors
+        x = (total_current_workload + y) / num_instructors if num_instructors > 0 else 0
+        x_min = max(0, int(x) - 1)  # Minimum (negatif olamaz)
+        x_max = int(x) + 1  # Maksimum
+        
+        logger.info(f"  X-Y Modeli: Mevcut toplam yÃ¼k={total_current_workload}, Y={y}, X={x:.2f}, X_min={x_min}, X_max={x_max}")
+        
+        # Her Ã¶ÄŸretim Ã¼yesi iÃ§in kota baÅŸlangÄ±Ã§ deÄŸeri
+        quota = {inst_id: 0 for inst_id in current_workloads.keys()}
+        
+        # Mevcut yÃ¼kleri sÄ±rala (az yÃ¼kten Ã§ok yÃ¼ke)
+        sorted_instructors = sorted(
+            current_workloads.items(),
+            key=lambda x: x[1]
+        )
+        
+        remaining_assignments = y
+        assigned_quota = 0
+        
+        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # AdÄ±m 1: Minimuma tamamlama (X-1) - UNIFORM DAÄILIM GARANTÄ°SÄ°
+        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # Ã–NEMLÄ°: Uniform daÄŸÄ±lÄ±m iÃ§in Ã–NCE herkesi X-1'e Ã§Ä±karmalÄ±yÄ±z
+        # EÄŸer bu iÅŸlem iÃ§in yeterli jÃ¼ri yoksa, mÃ¼mkÃ¼n olduÄŸunca eÅŸit daÄŸÄ±tÄ±lÄ±r
+        logger.info(f"  AdÄ±m 1: Minimuma tamamlama baÅŸlatÄ±lÄ±yor (X-1={x_min})...")
+        
+        # Ã–nce X-1'in altÄ±nda kalan TÃœM hocalarÄ± belirle
+        instructors_below_x_min = [
+            (inst_id, current_load) 
+            for inst_id, current_load in sorted_instructors 
+            if current_load < x_min
+        ]
+        
+        if instructors_below_x_min:
+            total_needed_for_x_min = sum(x_min - load for _, load in instructors_below_x_min)
+            logger.info(f"    {len(instructors_below_x_min)} hoca X-1 seviyesine Ã§Ä±karÄ±lacak, gerekli jÃ¼ri: {total_needed_for_x_min}")
+            
+            # EÄŸer yeterli jÃ¼ri varsa, HERKESÄ° X-1'e Ã§Ä±kar
+            if remaining_assignments >= total_needed_for_x_min:
+                for inst_id, current_load in instructors_below_x_min:
+                    needed = x_min - current_load
+                    quota[inst_id] = needed
+                    assigned_quota += needed
+                    remaining_assignments -= needed
+                    logger.debug(f"    Hoca {inst_id}: {current_load} -> {current_load + needed} (X-1'e Ã§Ä±karÄ±ldÄ±)")
+                logger.info(f"  âœ… AdÄ±m 1 (Min): TÃ¼m hocalar X-1 seviyesine Ã§Ä±karÄ±ldÄ±, kalan: {remaining_assignments}")
+            else:
+                # Yeterli jÃ¼ri yoksa, mÃ¼mkÃ¼n olduÄŸunca eÅŸit daÄŸÄ±t
+                # En az yÃ¼kteki hocalardan baÅŸla
+                for inst_id, current_load in instructors_below_x_min:
+                    if remaining_assignments <= 0:
+                        break
+                    needed = x_min - current_load
+                    assigned = min(needed, remaining_assignments)
+                    quota[inst_id] = assigned
+                    assigned_quota += assigned
+                    remaining_assignments -= assigned
+                    logger.debug(f"    Hoca {inst_id}: {current_load} -> {current_load + assigned} (kÄ±smi: {assigned}/{needed})")
+                logger.warning(f"  âš ï¸ AdÄ±m 1 (Min): Yeterli jÃ¼ri yok, {assigned_quota} jÃ¼ri daÄŸÄ±tÄ±ldÄ±, kalan: {remaining_assignments}, "
+                             f"{len([inst for inst, load in instructors_below_x_min if (load + quota.get(inst, 0)) < x_min])} hoca hala X-1 altÄ±nda")
+        
+        # Erken durdurma kontrolÃ¼: EÄŸer tÃ¼m jÃ¼riler daÄŸÄ±tÄ±ldÄ±ysa dur
+        if remaining_assignments <= 0:
+            logger.info(f"  AdÄ±m 1 (Min) tamamlandÄ±: {assigned_quota} jÃ¼ri kotasÄ± daÄŸÄ±tÄ±ldÄ±")
+            # Uniform daÄŸÄ±lÄ±m kontrolÃ¼: EÄŸer herkes X-1 veya Ã¼zerindeyse ve jÃ¼ri kalmadÄ±ysa OK
+            final_totals_after_step1 = {inst_id: current_workloads[inst_id] + quota[inst_id] for inst_id in current_workloads.keys()}
+            all_above_x_min = all(total >= x_min for total in final_totals_after_step1.values())
+            if all_above_x_min:
+                logger.info(f"  âœ… Uniform daÄŸÄ±lÄ±m saÄŸlandÄ±: TÃ¼m hocalar X-1 ({x_min}) veya Ã¼zerinde")
+                return quota
+            else:
+                below_count = sum(1 for total in final_totals_after_step1.values() if total < x_min)
+                logger.warning(f"  âš ï¸ {below_count} hoca hala X-1 altÄ±nda, ancak jÃ¼ri kalmadÄ±")
+                return quota
+        
+        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # AdÄ±m 2: Ortalama seviyeye Ã§Ä±karma (X) - UNIFORM DAÄILIM GARANTÄ°SÄ°
+        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # Ã–NEMLÄ°: MÃ¼mkÃ¼n olduÄŸunca Ã§ok hocayÄ± X seviyesine Ã§Ä±kar
+        logger.info(f"  AdÄ±m 2: Ortalama seviyeye Ã§Ä±karma baÅŸlatÄ±lÄ±yor (X={x:.2f})...")
+        
+        # X'in altÄ±nda kalan hocalarÄ± belirle (quota dahil)
+        instructors_below_x = [
+            (inst_id, current_load + quota.get(inst_id, 0))
+            for inst_id, current_load in sorted_instructors
+            if (current_load + quota.get(inst_id, 0)) < x
+        ]
+        
+        if instructors_below_x:
+            # Ã–nce herkesi X seviyesine Ã§Ä±karmaya Ã§alÄ±ÅŸ
+            for inst_id, current_total in instructors_below_x:
+                if remaining_assignments <= 0:
+                    break
+                needed = max(1, int(x) - current_total)  # En az 1
+                additional = min(needed, remaining_assignments)
+                quota[inst_id] = quota.get(inst_id, 0) + additional
+                assigned_quota += additional
+                remaining_assignments -= additional
+                logger.debug(f"    Hoca {inst_id}: {current_total} -> {current_total + additional} (kota: +{additional})")
+        
+        # Erken durdurma kontrolÃ¼
+        if remaining_assignments <= 0:
+            logger.info(f"  AdÄ±m 2 (Avg) tamamlandÄ±: {assigned_quota} jÃ¼ri kotasÄ± daÄŸÄ±tÄ±ldÄ±")
+            # Uniform daÄŸÄ±lÄ±m kontrolÃ¼: DaÄŸÄ±lÄ±m X-1, X, X+1 arasÄ±nda mÄ±?
+            final_totals_after_step2 = {inst_id: current_workloads[inst_id] + quota[inst_id] for inst_id in current_workloads.keys()}
+            if final_totals_after_step2:
+                wl_max = max(final_totals_after_step2.values())
+                wl_min = min(final_totals_after_step2.values())
+                wl_diff = wl_max - wl_min
+                if wl_diff <= 2:  # Maks-Min farkÄ± 2 veya daha az = uniform (x-1, x, x+1)
+                    logger.info(f"  âœ… Uniform daÄŸÄ±lÄ±m saÄŸlandÄ±: Min={wl_min}, Max={wl_max}, Fark={wl_diff} (X-1, X, X+1 aralÄ±ÄŸÄ±nda)")
+                    return quota
+            return quota
+        
+        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # AdÄ±m 3: Maksimum seviyeye Ã§Ä±karma (X+1) - UNIFORM DAÄILIM GARANTÄ°SÄ°
+        # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+        # Ã–NEMLÄ°: BazÄ± hocalarÄ± X+1'e Ã§Ä±kararak uniform daÄŸÄ±lÄ±mÄ± tamamla
+        logger.info(f"  AdÄ±m 3: Maksimum seviyeye Ã§Ä±karma baÅŸlatÄ±lÄ±yor (X+1={x_max})...")
+        
+        # X+1'in altÄ±nda kalan hocalarÄ± belirle ve en az yÃ¼kteki hocalardan baÅŸla
+        sorted_for_max = sorted(
+            [(inst_id, current_load + quota.get(inst_id, 0)) for inst_id, current_load in sorted_instructors],
+            key=lambda x: x[1]
+        )
+        
+        for inst_id, current_total in sorted_for_max:
+            if remaining_assignments <= 0:
+                break
+            if current_total < x_max:
+                needed = x_max - current_total
+                additional = min(needed, remaining_assignments)
+                quota[inst_id] = quota.get(inst_id, 0) + additional
+                assigned_quota += additional
+                remaining_assignments -= additional
+                logger.debug(f"    Hoca {inst_id}: {current_total} -> {current_total + additional} (kota: +{additional})")
+        
+        logger.info(f"  AdÄ±m 3 (Max) tamamlandÄ±: {assigned_quota} jÃ¼ri kotasÄ± daÄŸÄ±tÄ±ldÄ±, kalan: {remaining_assignments}")
+        
+        # Uniform daÄŸÄ±lÄ±m kontrolÃ¼: EÄŸer fark 2 veya daha azsa ve jÃ¼ri kaldÄ±ysa bile erken durdur
+        current_totals = {inst_id: current_workloads[inst_id] + quota[inst_id] for inst_id in current_workloads.keys()}
+        if current_totals:
+            wl_max = max(current_totals.values())
+            wl_min = min(current_totals.values())
+            wl_diff = wl_max - wl_min
+            if wl_diff <= 2 and remaining_assignments > 0:
+                logger.info(f"  âœ… Uniform daÄŸÄ±lÄ±m saÄŸlandÄ± (AdÄ±m 3): Min={wl_min}, Max={wl_max}, Fark={wl_diff} "
+                           f"(X-1, X, X+1 aralÄ±ÄŸÄ±nda). Kalan {remaining_assignments} jÃ¼ri atlanÄ±yor (uniform daÄŸÄ±lÄ±m iÃ§in yeterli)")
+                return quota
+        
+        # EÄŸer hala kalan varsa, en az yÃ¼kteki hocalara EÅÄ°T daÄŸÄ±t
+        # Uniform daÄŸÄ±lÄ±m iÃ§in kritik: Her hoca iÃ§in toplam yÃ¼k (current + quota) hedef ortalama civarÄ±nda olmalÄ±
+        if remaining_assignments > 0:
+            logger.warning(f"  UYARI: {remaining_assignments} jÃ¼ri kotasÄ± kaldÄ±, uniform daÄŸÄ±lÄ±m iÃ§in en az yÃ¼kteki hocalara eÅŸit daÄŸÄ±tÄ±lÄ±yor")
+            # Ortalama hedef deÄŸer (final toplam yÃ¼k hedefi)
+            target_avg = (sum(current_workloads.values()) + y) / num_instructors
+            
+            # Ä°YÄ°LEÅTÄ°RME: Daha akÄ±llÄ± round-robin daÄŸÄ±tÄ±m
+            # Her iterasyonda toplam yÃ¼kÃ¼ yeniden hesapla ve en az yÃ¼kteki hocalara dÃ¶nÃ¼ÅŸÃ¼mlÃ¼ daÄŸÄ±t
+            while remaining_assignments > 0:
+                # Åu anki toplam yÃ¼kleri hesapla (current + quota)
+                current_totals = {
+                    inst_id: current_workloads[inst_id] + quota[inst_id] 
+                    for inst_id in current_workloads.keys()
+                }
+                
+                # En az yÃ¼kteki hocalarÄ± bul (hedef ortalamanÄ±n Ã¼stÃ¼ne Ã§Ä±kmamÄ±ÅŸ olanlar)
+                eligible_instructors = [
+                    (inst_id, total) 
+                    for inst_id, total in current_totals.items() 
+                    if total < target_avg + 1.5  # Hedef ortalamanÄ±n 1.5 Ã¼stÃ¼ne Ã§Ä±kmamÄ±ÅŸ olanlar
+                ]
+                
+                # EÄŸer hepsi ortalamadan 1.5 Ã¼stÃ¼ndeyse, yine de en az yÃ¼ktekilere daÄŸÄ±t
+                if not eligible_instructors:
+                    eligible_instructors = sorted(
+                        current_totals.items(),
+                        key=lambda x: x[1]
+                    )
+                
+                # En az yÃ¼kteki hocalarÄ± sÄ±rala
+                eligible_instructors.sort(key=lambda x: x[1])
+                
+                # DÃ¶nÃ¼ÅŸÃ¼mlÃ¼ daÄŸÄ±t: Her seferinde en az yÃ¼kteki hocalara birer birer ver
+                # AynÄ± anda birden fazla hoca aynÄ± yÃ¼kteyse hepsine dÃ¶nÃ¼ÅŸÃ¼mlÃ¼ daÄŸÄ±t
+                lowest_workload = eligible_instructors[0][1] if eligible_instructors else 0
+                same_lowest = [
+                    inst_id for inst_id, total in eligible_instructors 
+                    if total == lowest_workload
+                ]
+                
+                # En az yÃ¼kteki hocalara dÃ¶nÃ¼ÅŸÃ¼mlÃ¼ daÄŸÄ±t
+                distributed_this_round = 0
+                for inst_id in same_lowest:
+                    if remaining_assignments <= 0:
+                        break
+                quota[inst_id] += 1
+                remaining_assignments -= 1
+                assigned_quota += 1
+                distributed_this_round += 1
+                logger.debug(f"    Hoca {inst_id}: kotaya +1 eklendi (toplam: {current_totals[inst_id] + 1}, kalan: {remaining_assignments})")
+                
+                # EÄŸer bu turda hiÃ§bir ÅŸey daÄŸÄ±tÄ±lamadÄ±ysa (nadir durum), zorla en az yÃ¼ktekiye ver
+                if distributed_this_round == 0 and remaining_assignments > 0:
+                    if eligible_instructors:
+                        inst_id = eligible_instructors[0][0]
+                        quota[inst_id] += 1
+                        remaining_assignments -= 1
+                        assigned_quota += 1
+                        logger.debug(f"    Hoca {inst_id}: ZORLA +1 eklendi (toplam: {current_totals[inst_id] + 1}, kalan: {remaining_assignments})")
+                    else:
+                        # GerÃ§ekten hiÃ§ hoca yoksa, rastgele birine ver (Ã§ok nadir)
+                        inst_id = list(current_workloads.keys())[0]
+                        quota[inst_id] += 1
+                        remaining_assignments -= 1
+                        assigned_quota += 1
+                        logger.warning(f"    âš ï¸ Hoca {inst_id}: ACÄ°L durum +1 eklendi (toplam: {current_totals.get(inst_id, 0) + 1}, kalan: {remaining_assignments})")
+        
+        logger.info(f"  âœ… X-Y Modeli tamamlandÄ±: Toplam {assigned_quota} jÃ¼ri kotasÄ± daÄŸÄ±tÄ±ldÄ±")
+        return quota
+
+    def _build_assignability_matrix(
+        self,
+        assignments: List[Dict[str, Any]],
+        projects_needing_jury: List[Dict[str, Any]],
+        sorted_timeslots: List[Dict[str, Any]],
+        timeslot_to_index: Dict[int, int]
+    ) -> Dict[Tuple[int, int], bool]:
+        """
+        Atanabilirlik matrisi oluÅŸtur (Aáµ¢â‚›)
+        
+        Aáµ¢â‚› = 1 eÄŸer Ã¶ÄŸretim Ã¼yesi i, slot s'ye uygunsa
+        
+        Args:
+            assignments: TÃ¼m atamalar
+            projects_needing_jury: Eksik jÃ¼ri olan projeler
+            sorted_timeslots: SÄ±ralÄ± timeslot listesi
+            timeslot_to_index: Timeslot ID -> index mapping
+        
+        Returns:
+            Dict[Tuple[int, int], bool]: (instructor_id, slot_key) -> atanabilir mi?
+        """
+        matrix = {}
+        
+        # Her instructor iÃ§in her slot'u kontrol et
+        for instructor in self.instructors:
+            inst_id = instructor['id']
+            
+            for project_assignment in projects_needing_jury:
+                project_id = project_assignment.get('project_id')
+                classroom_id = project_assignment.get('classroom_id')
+                timeslot_id = project_assignment.get('timeslot_id')
+                
+                slot_key = (classroom_id, timeslot_id)
+                
+                # Atanabilirlik kontrolÃ¼
+                is_assignable = self._check_instructor_assignability(
+                    inst_id,
+                    project_assignment,
+                    assignments
+                )
+                
+                matrix[(inst_id, slot_key)] = is_assignable
+        
+        return matrix
+
+    def _check_instructor_assignability(
+        self,
+        instructor_id: int,
+        project_assignment: Dict[str, Any],
+        all_assignments: List[Dict[str, Any]]
+    ) -> bool:
+        """
+        Bir Ã¶ÄŸretim Ã¼yesinin bir slota atanabilir olup olmadÄ±ÄŸÄ±nÄ± kontrol et
+        
+        KoÅŸullar:
+        1. AynÄ± saatte baÅŸka gÃ¶revi yok
+        2. AynÄ± projede zaten jÃ¼ri veya sorumlu deÄŸil
+        3. Zaman Ã§akÄ±ÅŸmasÄ± yok
+        
+        Args:
+            instructor_id: Ã–ÄŸretim Ã¼yesi ID
+            project_assignment: Proje atamasÄ±
+            all_assignments: TÃ¼m atamalar
+        
+        Returns:
+            bool: Atanabilir mi?
+        """
+        target_timeslot_id = project_assignment.get('timeslot_id')
+        target_project_id = project_assignment.get('project_id')
+        
+        # AynÄ± timeslot'ta baÅŸka gÃ¶revi var mÄ±?
+        for assignment in all_assignments:
+            if assignment.get('timeslot_id') == target_timeslot_id:
+                instructors = assignment.get('instructors', [])
+                if instructor_id in instructors:
+                    return False
+        
+        # AynÄ± projede zaten gÃ¶revli mi?
+        for assignment in all_assignments:
+            if assignment.get('project_id') == target_project_id:
+                instructors = assignment.get('instructors', [])
+                responsible_id = assignment.get('responsible_instructor_id')
+                if not responsible_id and instructors:
+                    responsible_id = instructors[0]
+                
+                if instructor_id in instructors or instructor_id == responsible_id:
+                    return False
+        
+        return True
+
+    def _calculate_continuity_score(
+        self,
+        instructor_id: int,
+        classroom_id: int,
+        timeslot_id: int,
+        assignments: List[Dict[str, Any]],
+        sorted_timeslots: List[Dict[str, Any]],
+        timeslot_to_index: Dict[int, int]
+    ) -> float:
+        """
+        Continuity skoru hesapla (Ráµ¢â‚›)
+        
+        AynÄ± sÄ±nÄ±fta, bitiÅŸik oturumlarda gÃ¶rev varsa â†’ skor 1
+        Zaman boÅŸluÄŸu veya sÄ±nÄ±f deÄŸiÅŸimi varsa â†’ skor 0
+        
+        Args:
+            instructor_id: Ã–ÄŸretim Ã¼yesi ID
+            classroom_id: Hedef sÄ±nÄ±f ID
+            timeslot_id: Hedef timeslot ID
+            assignments: TÃ¼m atamalar
+            sorted_timeslots: SÄ±ralÄ± timeslot listesi
+            timeslot_to_index: Timeslot ID -> index mapping
+        
+        Returns:
+            float: Continuity skoru (0 veya 1)
+        """
+        # YardÄ±mcÄ±: timeslot'tan gÃ¼n bilgisini gÃ¼venli ÅŸekilde Ã§ek
+        def _get_day_key(ts: Dict[str, Any]) -> Any:
+            for key in ('day_id', 'day', 'date', 'date_str'):
+                if key in ts:
+                    return ts.get(key)
+            return None
+
+        # Hedef timeslot objesini bul
+        target_ts = None
+        for ts in sorted_timeslots:
+            if ts.get('id') == timeslot_id:
+                target_ts = ts
+                break
+        if target_ts is None:
+            return 0.0
+        
+        target_day = _get_day_key(target_ts)
+
+        # AynÄ± gÃ¼nÃ¼n slotlarÄ±nÄ± zaman sÄ±rasÄ±na gÃ¶re Ã§Ä±kar
+        same_day_slots = [ts for ts in sorted_timeslots if _get_day_key(ts) == target_day]
+        if not same_day_slots:
+            same_day_slots = sorted_timeslots  # gÃ¼n bilgisi yoksa tÃ¼m liste
+
+        # same_day_slots iÃ§inde hedef index'i bul
+        day_index = None
+        for idx, ts in enumerate(same_day_slots):
+            if ts.get('id') == timeslot_id:
+                day_index = idx
+                break
+        if day_index is None:
+            return 0.0
+
+        # Ã–nceki ve sonraki slot id'lerini al (aynÄ± gÃ¼n)
+        prev_timeslot_id = same_day_slots[day_index - 1]['id'] if day_index - 1 >= 0 else None
+        next_timeslot_id = same_day_slots[day_index + 1]['id'] if day_index + 1 < len(same_day_slots) else None
+
+        # Ã–nceki slot kontrolÃ¼ (aynÄ± sÄ±nÄ±f)
+        if prev_timeslot_id is not None:
+            for assignment in assignments:
+                if (assignment.get('classroom_id') == classroom_id and
+                    assignment.get('timeslot_id') == prev_timeslot_id):
+                    instructors = assignment.get('instructors', [])
+                    responsible_id = assignment.get('responsible_instructor_id')
+                    if not responsible_id and instructors:
+                        responsible_id = instructors[0]
+                    if instructor_id in instructors or instructor_id == responsible_id:
+                        return 1.0
+        
+        # Sonraki slot kontrolÃ¼ (aynÄ± sÄ±nÄ±f)
+        if next_timeslot_id is not None:
+            for assignment in assignments:
+                if (assignment.get('classroom_id') == classroom_id and
+                    assignment.get('timeslot_id') == next_timeslot_id):
+                    instructors = assignment.get('instructors', [])
+                    responsible_id = assignment.get('responsible_instructor_id')
+                    if not responsible_id and instructors:
+                        responsible_id = instructors[0]
+                    if instructor_id in instructors or instructor_id == responsible_id:
+                        return 1.0
+        
+        return 0.0
+
+    def _calculate_chain_extension_score(
+        self,
+        instructor_id: int,
+        classroom_id: int,
+        timeslot_id: int,
+        assignments: List[Dict[str, Any]],
+        sorted_timeslots: List[Dict[str, Any]],
+        timeslot_to_index: Dict[int, int]
+    ) -> int:
+        """
+        Bir hocanÄ±n hedef slotta gÃ¶revlendirilmesi halinde, aynÄ± sÄ±nÄ±fta oluÅŸacak bitiÅŸik zincirin
+        uzama potansiyelini hesaplar.
+
+        DÃ¶nÃ¼ÅŸ:
+            int: Sol bitiÅŸik streak + saÄŸ bitiÅŸik streak (hedef slot dahil edilmeden)
+        """
+        # Hedef timeslot objesini bul
+        target_ts = None
+        for ts in sorted_timeslots:
+            if ts.get('id') == timeslot_id:
+                target_ts = ts
+                break
+        if target_ts is None:
+            return 0
+
+        # AynÄ± gÃ¼nÃ¼n slotlarÄ±nÄ± sÄ±rala
+        def _get_day_key(ts: Dict[str, Any]) -> Any:
+            for key in ('day_id', 'day', 'date', 'date_str'):
+                if key in ts:
+                    return ts.get(key)
+            return None
+
+        target_day = _get_day_key(target_ts)
+        same_day_slots = [ts for ts in sorted_timeslots if _get_day_key(ts) == target_day]
+        if not same_day_slots:
+            same_day_slots = sorted_timeslots
+
+        # Hedef index'i bul
+        idx_target = None
+        for idx, ts in enumerate(same_day_slots):
+            if ts.get('id') == timeslot_id:
+                idx_target = idx
+                break
+        if idx_target is None:
+            return 0
+
+        # YardÄ±mcÄ±: belirli timeslot'ta aynÄ± sÄ±nÄ±fta bu hoca var mÄ±?
+        def _has_instructor_at(ts_id: int) -> bool:
+            for a in assignments:
+                if a.get('classroom_id') != classroom_id:
+                    continue
+                if a.get('timeslot_id') != ts_id:
+                    continue
+                ins_list = a.get('instructors', [])
+                resp_id = a.get('responsible_instructor_id')
+                if not resp_id and ins_list:
+                    first_ins = ins_list[0]
+                    resp_id = first_ins.get('id') if isinstance(first_ins, dict) else first_ins
+                if isinstance(resp_id, dict):
+                    resp_id = resp_id.get('id')
+                # Normalize
+                for ins in ins_list:
+                    iid = ins.get('id') if isinstance(ins, dict) else ins
+                    if iid == instructor_id:
+                        return True
+                if resp_id and resp_id == instructor_id:
+                    return True
+            return False
+
+        # Sol streak
+        left = 0
+        i = idx_target - 1
+        while i >= 0:
+            ts_id = same_day_slots[i].get('id')
+            if _has_instructor_at(ts_id):
+                left += 1
+                i -= 1
+            else:
+                break
+
+        # SaÄŸ streak
+        right = 0
+        i = idx_target + 1
+        while i < len(same_day_slots):
+            ts_id = same_day_slots[i].get('id')
+            if _has_instructor_at(ts_id):
+                right += 1
+                i += 1
+            else:
+                break
+
+        return left + right
+
+    def _continuity_priority_prepass(
+        self,
+        assignments: List[Dict[str, Any]],
+        projects_needing_jury: List[Dict[str, Any]],
+        quota_plan: Dict[int, int],
+        assignability_matrix: Dict[Tuple[int, int], bool],
+        sorted_timeslots: List[Dict[str, Any]],
+        timeslot_to_index: Dict[int, int],
+        locked_jurors_by_project: Optional[Dict[int, Set[int]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Continuity=1 olan ve underloaded (Ã¶zellikle X-1 altÄ±) hocalarÄ± Ã¶nceliklendirerek
+        eksik 2. jÃ¼ri slotlarÄ±nÄ± doldurmaya Ã§alÄ±ÅŸÄ±r. XÂ±1 sÄ±nÄ±rlarÄ±na uyar.
+        """
+        made = 0
+        quota_used = defaultdict(int)
+
+        # Hedef XÂ±1 sÄ±nÄ±rlarÄ± (global)
+        num_instructors = len(self.instructors) if hasattr(self, 'instructors') else 0
+        total_projects = len(self.projects) if hasattr(self, 'projects') else 0
+        final_avg = (3 * total_projects) / num_instructors if num_instructors > 0 else 0
+        x_int = int(final_avg)
+        x_min_bound = max(0, x_int - 1)
+        x_max_bound = x_int + 1
+
+        # Mevcut workloads
+        def get_wl():
+            return self._calculate_current_workloads(assignments)
+
+        # Projeleri continuity potansiyeline gÃ¶re sÄ±rala (zaten ana akÄ±ÅŸta da sÄ±ralanÄ±yor)
+        ordered = projects_needing_jury.copy()
+
+        # Tek taramada mÃ¼mkÃ¼n olanlarÄ± yerleÅŸtir
+        for pa in ordered:
+            project_id = pa.get('project_id')
+            classroom_id = pa.get('classroom_id')
+            timeslot_id = pa.get('timeslot_id')
+            slot_key = (classroom_id, timeslot_id)
+
+            assignment = next((a for a in assignments if a.get('project_id') == project_id), None)
+            if not assignment:
+                continue
+            instrs = assignment.get('instructors', [])
+            if 'instructors' not in assignment:
+                assignment['instructors'] = instrs
+            responsible_id = assignment.get('responsible_instructor_id')
+            if not responsible_id and instrs:
+                responsible_id = instrs[0]
+
+            # Zaten 2 jÃ¼ri var mÄ±?
+            current_jury_count = len([i for i in assignment['instructors'] if i != responsible_id])
+            if current_jury_count >= 2:
+                continue
+
+            wl = get_wl()
+            if not wl:
+                wl = {}
+            avg_wl = (sum(wl.values()) / len(wl)) if wl else 0
+
+            candidates = []
+            for ins in self.instructors:
+                ins_id = ins['id']
+                if not assignability_matrix.get((ins_id, slot_key), False):
+                    continue
+                if ins_id == responsible_id:
+                    continue
+                if any(((i.get('id') if isinstance(i, dict) else i) == ins_id) for i in assignment['instructors']):
+                    continue
+                # X+1 Ã¼st sÄ±nÄ±r
+                if wl.get(ins_id, 0) >= x_max_bound:
+                    continue
+
+                cont = self._calculate_continuity_score(
+                    ins_id, classroom_id, timeslot_id, assignments, sorted_timeslots, timeslot_to_index
+                )
+                if cont < 1.0:
+                    continue  # Pre-pass sadece continuity=1
+
+                chain_ext = self._calculate_chain_extension_score(
+                    ins_id, classroom_id, timeslot_id, assignments, sorted_timeslots, timeslot_to_index
+                )
+                # Quota kontrolÃ¼
+                q_limit = quota_plan.get(ins_id, 999)
+                q_rem = q_limit - quota_used[ins_id]
+                if q_rem <= 0:
+                    continue
+
+                candidates.append({
+                    'id': ins_id,
+                    'wl': wl.get(ins_id, 0),
+                    'cont': cont,
+                    'chain': chain_ext,
+                    'under_min': wl.get(ins_id, 0) < x_min_bound,
+                    'under_avg': wl.get(ins_id, 0) <= avg_wl
+                })
+
+            if not candidates:
+                continue
+
+            # Ã–nce X-1 altÄ±ndakileri, sonra <= ortalama olanlarÄ±, sonra zincir uzunluÄŸuna gÃ¶re sÄ±rala
+            under_min = [c for c in candidates if c['under_min']]
+            pool = under_min if under_min else (
+                [c for c in candidates if c['under_avg']] if candidates else []
+            )
+            if not pool:
+                pool = candidates
+
+            pool.sort(key=lambda c: (c['under_min'], c['under_avg'], c['chain'], -c['wl']), reverse=True)
+            chosen = pool[0]
+
+            # Atama
+            assignment['instructors'].append(chosen['id'])
+            made += 1
+
+            # Assignability matrix'i global olarak yenile
+            assignability_matrix.update(self._build_assignability_matrix(
+                assignments,
+                projects_needing_jury,
+                sorted_timeslots,
+                timeslot_to_index
+            ))
+
+        return {"assignments_made": made}
+
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    # ğŸ¯ 3. FAZ: FÄ°XATION (Eksik JÃ¼riyi AraÅŸtÄ±rma GÃ¶revlisi ile Tamamlama)
+    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    def _create_ra_placeholder(self) -> Dict[str, Any]:
+        """AraÅŸtÄ±rma GÃ¶revlisi placeholder objesi oluÅŸturur."""
+        return {"id": "RA_PLACEHOLDER", "name": "[AraÅŸtÄ±rma GÃ¶revlisi]", "is_placeholder": True}
+
+    def _is_placeholder_instructor(self, instr: Any) -> bool:
+        if isinstance(instr, dict):
+            return bool(instr.get("is_placeholder"))
+        return False
+
+    def _execute_phase3_fixation(
+        self,
+        phase2_assignments: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        3. Faz: 2. Faz sonrasÄ±nda hala "1 Sorumlu + 1 JÃ¼ri" olan projeleri,
+        2. jÃ¼ri olarak [AraÅŸtÄ±rma GÃ¶revlisi] placeholder ile tamamlar.
+
+        Notlar:
+        - HiÃ§bir Ã¶nceki atama deÄŸiÅŸtirilmez.
+        - Workload/continuity yeniden hesaplanmaz, placeholder istatistiklere dahil edilmez.
+        - Sadece eksik projelere placeholder eklenir.
+        """
+        logger.info("3. FAZ: Fixation baÅŸlÄ±yor - eksik projeler placeholder ile tamamlanacak")
+
+        final_assignments = [a.copy() for a in phase2_assignments]
+        fixed_projects: List[int] = []
+
+        for ass in final_assignments:
+            proj_id = ass.get("project_id")
+            instructors = ass.get("instructors", [])
+            if "instructors" not in ass:
+                ass["instructors"] = instructors
+
+            responsible_id = ass.get("responsible_instructor_id")
+            if not responsible_id and instructors:
+                first_ins = instructors[0]
+                responsible_id = first_ins.get("id") if isinstance(first_ins, dict) else first_ins
+
+            # Mevcut jÃ¼ri sayÄ±sÄ±nÄ± (placeholder hariÃ§) hesapla
+            jury_count = 0
+            for ins in instructors:
+                # Placeholder'Ä± jÃ¼ri sayÄ±mÄ±na dahil etme
+                if self._is_placeholder_instructor(ins):
+                    continue
+                ins_id = ins.get("id") if isinstance(ins, dict) else ins
+                if ins_id != responsible_id:
+                    jury_count += 1
+
+            if jury_count < 2:
+                needed = 2 - jury_count
+                for _ in range(needed):
+                    ass["instructors"].append(self._create_ra_placeholder())
+                fixed_projects.append(proj_id)
+
+        logger.info(f"3. FAZ: Tamamlanan proje sayÄ±sÄ±: {len(fixed_projects)}")
+        return {
+            "assignments": final_assignments,
+            "phase3_stats": {
+                "fixed_projects": fixed_projects,
+                "num_fixed": len(fixed_projects)
+            }
+        }
+
+    def _try_chain_swap_for_second_jury(
+        self,
+        target_assignment: Dict[str, Any],
+        assignments: List[Dict[str, Any]],
+        sorted_timeslots: List[Dict[str, Any]],
+        timeslot_to_index: Dict[int, int],
+        x_max: int,
+        locked_jurors_by_project: Optional[Dict[int, Set[int]]] = None
+    ) -> Tuple[bool, Optional[int]]:
+        """
+        Zaman Ã§akÄ±ÅŸmasÄ± nedeniyle ikinci jÃ¼ri atanamayan bir proje iÃ§in zincirli swap denemesi yap.
+
+        Strateji:
+        - Hedef slot ile aynÄ± timeslot'ta gÃ¶revli bir hocayÄ± (sadece jÃ¼ri olan) hedef projeye taÅŸÄ±yabilmek iÃ§in,
+          o hocanÄ±n gÃ¶revli olduÄŸu diÄŸer projede yerine geÃ§ebilecek uygun bir yedek hoca bul.
+        - BÃ¶ylece iki seviyeli bir deÄŸiÅŸ-tokuÅŸ ile hedef projeye jÃ¼ri eklenir, diÄŸer projede jÃ¼ri sayÄ±sÄ± korunur.
+
+        Kurallar:
+        - Sorumlu hoca swap edilemez.
+        - Yedek hoca atanabilir olmalÄ± ve iÅŸ yÃ¼kÃ¼ x_max'i aÅŸmamalÄ±.
+        - Hedefe taÅŸÄ±nacak hoca hedef projede sorumlu/jÃ¼ri olmamalÄ± (duplicate olmamalÄ±).
+
+        Returns:
+            (baÅŸarÄ±lÄ±_mÄ±, eklenen_hoca_id)
+        """
+        project_id = target_assignment.get('project_id')
+        classroom_id = target_assignment.get('classroom_id')
+        timeslot_id = target_assignment.get('timeslot_id')
+        target_instructors = target_assignment.get('instructors', [])
+        responsible_id = target_assignment.get('responsible_instructor_id')
+        if not responsible_id and target_instructors:
+            first_instr = target_instructors[0]
+            responsible_id = first_instr.get('id') if isinstance(first_instr, dict) else first_instr
+
+        # Mevcut iÅŸ yÃ¼klerini hesapla (x_max kontrolÃ¼ iÃ§in)
+        workloads = self._calculate_current_workloads(assignments)
+
+        # 1) AynÄ± timeslot'ta gÃ¶revli hocalarÄ± tara (sadece jÃ¼ri olanlar) ve continuity/cost skorla en iyiyi seÃ§
+        best_choice = None  # (score, cand_id, conflicting_assignment, replacement_id)
+        for candidate in self.instructors:
+            cand_id = candidate['id']
+            if cand_id == responsible_id:
+                continue
+            # Hedef projede zaten jÃ¼ri ise atla
+            if any(((i.get('id') if isinstance(i, dict) else i) == cand_id) for i in target_instructors):
+                continue
+
+            # Bu adayÄ±n aynÄ± timeslot'ta jÃ¼ri olduÄŸu assignment'Ä± bul
+            candidate_confs = []
+            for ass in assignments:
+                if ass.get('timeslot_id') != timeslot_id:
+                    continue
+                ass_instructors = ass.get('instructors', [])
+                ass_responsible = ass.get('responsible_instructor_id')
+                if not ass_responsible and ass_instructors:
+                    fi = ass_instructors[0]
+                    ass_responsible = fi.get('id') if isinstance(fi, dict) else fi
+                if isinstance(ass_responsible, dict):
+                    ass_responsible = ass_responsible.get('id')
+
+                # Aday bu assignment'ta jÃ¼ri mi?
+                found_here = False
+                for j in ass_instructors:
+                    jid = j.get('id') if isinstance(j, dict) else j
+                    if jid == cand_id and cand_id != ass_responsible:
+                        # Kilitli ise atla
+                        conf_proj_id = ass.get('project_id')
+                        if locked_jurors_by_project and conf_proj_id in locked_jurors_by_project and cand_id in locked_jurors_by_project[conf_proj_id]:
+                            found_here = False
+                            break
+                        # KÄ±rÄ±lma maliyeti (bu assignment'ta continuity)
+                        break_cost = self._calculate_continuity_score(
+                            cand_id,
+                            ass.get('classroom_id'),
+                            ass.get('timeslot_id'),
+                            assignments,
+                            sorted_timeslots,
+                            timeslot_to_index
+                        )
+                        candidate_confs.append((ass, break_cost))
+                        found_here = True
+                        break
+                # devam
+            if not candidate_confs:
+                continue
+
+            # Hedef slot iÃ§in continuity ve zincir uzatma kazancÄ±
+            gain_cont = self._calculate_continuity_score(
+                cand_id,
+                classroom_id,
+                timeslot_id,
+                assignments,
+                sorted_timeslots,
+                timeslot_to_index
+            )
+            gain_chain = self._calculate_chain_extension_score(
+                cand_id,
+                classroom_id,
+                timeslot_id,
+                assignments,
+                sorted_timeslots,
+                timeslot_to_index
+            )
+
+            # AdayÄ±n en az continuity kÄ±racaÄŸÄ± assignment'Ä± seÃ§
+            candidate_confs.sort(key=lambda x: x[1])  # dÃ¼ÅŸÃ¼k kÄ±rÄ±lma Ã¶nce
+            conflicting_assignment, break_cost = candidate_confs[0]
+
+            # 2) Conflicting assignment iÃ§in uygun yedek hocalarÄ± topla ve continuity/zincir kazancÄ± yÃ¼ksek olanÄ± seÃ§
+            conf_instructors = conflicting_assignment.get('instructors', [])
+            conf_responsible = conflicting_assignment.get('responsible_instructor_id')
+            if not conf_responsible and conf_instructors:
+                fi = conf_instructors[0]
+                conf_responsible = fi.get('id') if isinstance(fi, dict) else fi
+            if isinstance(conf_responsible, dict):
+                conf_responsible = conf_responsible.get('id')
+
+            best_repl = None  # (score, repl_id)
+            for repl in self.instructors:
+                repl_id = repl['id']
+                if repl_id == cand_id or repl_id == conf_responsible:
+                    continue
+                # Zaten bu assignment'ta jÃ¼ri ise atla
+                if any(((i.get('id') if isinstance(i, dict) else i) == repl_id) for i in conf_instructors):
+                    continue
+                # Atanabilirlik ve yÃ¼k Ã¼st sÄ±nÄ±rÄ±
+                if not self._check_instructor_assignability(repl_id, conflicting_assignment, assignments):
+                    continue
+                repl_wl = workloads.get(repl_id, 0)
+                if repl_wl >= x_max:
+                    continue
+                # Replacement continuity ve zincir kazancÄ±
+                repl_gain = self._calculate_continuity_score(
+                    repl_id,
+                    conflicting_assignment.get('classroom_id'),
+                    conflicting_assignment.get('timeslot_id'),
+                    assignments,
+                    sorted_timeslots,
+                    timeslot_to_index
+                )
+                repl_chain = self._calculate_chain_extension_score(
+                    repl_id,
+                    conflicting_assignment.get('classroom_id'),
+                    conflicting_assignment.get('timeslot_id'),
+                    assignments,
+                    sorted_timeslots,
+                    timeslot_to_index
+                )
+                # Continuity + zincir gÃ¼Ã§lÃ¼ Ã¶ncelik; ardÄ±ndan daha dÃ¼ÅŸÃ¼k yÃ¼k
+                repl_score = (repl_gain * 4000000) + (repl_chain * 2000000) + (100 - repl_wl)
+                if not best_repl or repl_score > best_repl[0]:
+                    best_repl = (repl_score, repl_id)
+
+            if not best_repl:
+                continue
+
+            # Toplam skor: continuity + zincir kazanÄ±mÄ± Ã§ok gÃ¼Ã§lÃ¼, continuity kÄ±rÄ±lma maliyeti yÃ¼ksek cezalÄ±
+            total_score = (gain_cont * 5000000) + (gain_chain * 3000000) - (break_cost * 4000000) + (200 - workloads.get(cand_id, 0))
+            if not best_choice or total_score > best_choice[0]:
+                best_choice = (total_score, cand_id, conflicting_assignment, best_repl[1])
+
+        if best_choice:
+            _, cand_id, conflicting_assignment, repl_id = best_choice
+            conf_instructors = conflicting_assignment.get('instructors', [])
+            # 2.1) AdayÄ± conflicting assignment'tan Ã§Ä±kar
+            for idx, jj in enumerate(conf_instructors):
+                jjid = jj.get('id') if isinstance(jj, dict) else jj
+                if jjid == cand_id:
+                    conf_instructors.pop(idx)
+                    break
+            # 2.2) YedeÄŸi conflicting assignment'a ekle
+            conflicting_assignment['instructors'].append(repl_id)
+            # 2.3) AdayÄ± hedef projeye ekle
+            target_assignment.setdefault('instructors', []).append(cand_id)
+            return True, cand_id
+
+        # HiÃ§bir zincirli swap bulunamadÄ±
+        return False, None
+
+    def _relieve_overload_via_swap(
+        self,
+        overloaded_instructor_id: int,
+        assignments: List[Dict[str, Any]],
+        underloaded_instructor_ids: Set[int],
+        locked_jurors_by_project: Optional[Dict[int, Set[int]]],
+        sorted_timeslots: List[Dict[str, Any]],
+        timeslot_to_index: Dict[int, int]
+    ) -> bool:
+        """
+        AÅŸÄ±rÄ±/Ã¼st sÄ±nÄ±rdaki bir hocanÄ±n baÅŸka bir projedeki jÃ¼ri slotunu,
+        uygun (atanabilir) ve dÃ¼ÅŸÃ¼k yÃ¼klÃ¼ bir hocaya devrederek yÃ¼kÃ¼nÃ¼ dÃ¼ÅŸÃ¼r.
+
+        Kilitli (Phase 1) jÃ¼riye dokunulmaz. Sorumluya da dokunulmaz.
+
+        BaÅŸarÄ±lÄ± olursa True dÃ¶ner.
+        """
+        for assignment in assignments:
+            instructors = assignment.get('instructors', [])
+            responsible_id = assignment.get('responsible_instructor_id')
+            if not responsible_id and instructors:
+                fi = instructors[0]
+                responsible_id = fi.get('id') if isinstance(fi, dict) else fi
+            if isinstance(responsible_id, dict):
+                responsible_id = responsible_id.get('id')
+
+            # Overloaded hoca bu assignment'ta jÃ¼ri mi? (ve kilitli deÄŸil mi?)
+            is_jury_here = False
+            for instr in instructors:
+                iid = instr.get('id') if isinstance(instr, dict) else instr
+                if iid == overloaded_instructor_id and iid != responsible_id:
+                    # Kilit kontrolÃ¼
+                    proj_id_here = assignment.get('project_id')
+                    if locked_jurors_by_project and proj_id_here in locked_jurors_by_project:
+                        if iid in locked_jurors_by_project[proj_id_here]:
+                            is_jury_here = False
+                            break
+                    is_jury_here = True
+                    break
+
+            if not is_jury_here:
+                continue
+
+            # Bu assignment'a atanabilecek underloaded biri var mÄ±?
+            for under_id in underloaded_instructor_ids:
+                if self._check_instructor_assignability(under_id, assignment, assignments):
+                    # Devir yap: overloaded'Ä± Ã§Ä±kar, under'Ä± ekle
+                    for idx, ins in enumerate(instructors):
+                        iid = ins.get('id') if isinstance(ins, dict) else ins
+                        if iid == overloaded_instructor_id:
+                            instructors.pop(idx)
+                            break
+                    assignment['instructors'].append(under_id)
+                    return True
+
+        return False
+
+    def _complete_jury_assignments(
+        self,
+        assignments: List[Dict[str, Any]],
+        projects_needing_jury: List[Dict[str, Any]],
+        quota_plan: Dict[int, int],
+        assignability_matrix: Dict[Tuple[int, int], bool],
+        sorted_timeslots: List[Dict[str, Any]],
+        timeslot_to_index: Dict[int, int],
+        locked_jurors_by_project: Optional[Dict[int, Set[int]]] = None
+    ) -> Dict[str, Any]:
+        """
+        JÃ¼ri atamalarÄ±nÄ± tamamla
+        
+        Ã–ncelik sÄ±rasÄ±:
+        1. Kota dengesi (en az yÃ¼kÃ¼ olan)
+        2. Continuity skoru
+        3. Atanabilirlik
+        
+        Args:
+            assignments: TÃ¼m atamalar (gÃ¼ncellenecek)
+            projects_needing_jury: Eksik jÃ¼ri olan projeler
+            quota_plan: Her hoca iÃ§in jÃ¼ri kotasÄ±
+            assignability_matrix: Atanabilirlik matrisi
+            sorted_timeslots: SÄ±ralÄ± timeslot listesi
+            timeslot_to_index: Timeslot ID -> index mapping
+        
+        Returns:
+            Dict: Ä°statistikler
+        """
+        assignments_made = 0
+        quota_used = defaultdict(int)
+        failed_assignments = 0
+        
+        logger.info(f"  JÃ¼ri atama baÅŸlatÄ±lÄ±yor: {len(projects_needing_jury)} proje iÃ§in")
+        
+        # Hedef iÅŸ yÃ¼kÃ¼ sÄ±nÄ±rlarÄ± (XÂ±1): X = toplam hedef gÃ¶rev / eÄŸitmen sayÄ±sÄ±
+        num_instructors = len(self.instructors) if hasattr(self, 'instructors') else 0
+        total_projects = len(self.projects) if hasattr(self, 'projects') else 0
+        final_avg = (3 * total_projects) / num_instructors if num_instructors > 0 else 0
+        x_int = int(final_avg)
+        x_min_bound = max(0, x_int - 1)
+        x_max_bound = x_int + 1
+        
+        # Ä°ÅŸ yÃ¼kÃ¼ takibi iÃ§in: Her iterasyonda gerÃ§ek iÅŸ yÃ¼kÃ¼nÃ¼ hesapla
+        def get_current_real_workload():
+            """GerÃ§ek zamanlÄ± iÅŸ yÃ¼kÃ¼nÃ¼ hesapla (sadece quota_used deÄŸil, tÃ¼m assignments)"""
+            real_workloads = self._calculate_current_workloads(assignments)
+            return real_workloads
+        
+        # Projeleri sÄ±rala: continuity potansiyeli (Ã¶zellikle UNDERLOADED + continuity) yÃ¼ksek olanlarÄ± Ã¶nce iÅŸle
+        real_workloads_for_order = self._calculate_current_workloads(assignments)
+        avg_wl_for_order = (sum(real_workloads_for_order.values()) / len(real_workloads_for_order)) if real_workloads_for_order else 0
+        project_continuity_scores = []
+        for pa in projects_needing_jury:
+            cls_id = pa.get('classroom_id')
+            ts_id = pa.get('timeslot_id')
+            slot_key_scan = (cls_id, ts_id)
+            cont_under_hits = 0
+            cont_hits = 0
+            for ins in self.instructors:
+                ins_id_scan = ins['id']
+                if assignability_matrix.get((ins_id_scan, slot_key_scan), False):
+                    cont_val = self._calculate_continuity_score(
+                        ins_id_scan, cls_id, ts_id, assignments, sorted_timeslots, timeslot_to_index
+                    )
+                    if cont_val >= 1.0:
+                        cont_hits += 1
+                        if real_workloads_for_order.get(ins_id_scan, 0) <= avg_wl_for_order:
+                            cont_under_hits += 1
+            # Ã–nce underloaded+continuity sayÄ±sÄ±na, sonra toplam continuity sayÄ±sÄ±na gÃ¶re sÄ±rala
+            project_continuity_scores.append(((cont_under_hits, cont_hits), pa))
+        sorted_projects = [pa for _, pa in sorted(project_continuity_scores, key=lambda x: (x[0][0], x[0][1]), reverse=True)]
+        
+        logger.info(f"  Projeler continuity potansiyeli iÃ§in sÄ±ralandÄ±")
+        
+        # Erken durdurma flag'i: Uniform daÄŸÄ±lÄ±m saÄŸlandÄ±ÄŸÄ±nda tÃ¼m projeler iÃ§in dur
+        early_stop_uniform_achieved = False
+        
+        # Her proje iÃ§in jÃ¼ri atama
+        for project_assignment in sorted_projects:
+            # Erken durdurma kontrolÃ¼: EÄŸer uniform daÄŸÄ±lÄ±m saÄŸlandÄ±ysa, kalan tÃ¼m projeleri atla
+            if early_stop_uniform_achieved:
+                logger.debug(f"    Proje {project_assignment.get('project_id')} atlandÄ±: Uniform daÄŸÄ±lÄ±m zaten saÄŸlandÄ±")
+                continue
+            project_id = project_assignment.get('project_id')
+            classroom_id = project_assignment.get('classroom_id')
+            timeslot_id = project_assignment.get('timeslot_id')
+            slot_key = (classroom_id, timeslot_id)
+            
+            # Bu proje iÃ§in assignment'Ä± bul
+            assignment = next(
+                (a for a in assignments if a.get('project_id') == project_id),
+                None
+            )
+            
+            if not assignment:
+                logger.warning(f"    Proje {project_id} iÃ§in assignment bulunamadÄ±!")
+                continue
+            
+            # Mevcut jÃ¼ri sayÄ±sÄ±nÄ± hesapla
+            if 'instructors' not in assignment:
+                assignment['instructors'] = []
+            
+            responsible_id = assignment.get('responsible_instructor_id')
+            if not responsible_id and assignment.get('instructors'):
+                responsible_id = assignment['instructors'][0]
+            
+            current_jury_count = len([i for i in assignment['instructors'] if i != responsible_id])
+            
+            # 2 jÃ¼ri olana kadar jÃ¼ri ekle
+            while current_jury_count < 2:
+                # GERÃ‡EK Ä°Å YÃœKÃœNÃœ HESAPLA (tÃ¼m adaylar iÃ§in ortak)
+                real_workloads = get_current_real_workload()
+                if real_workloads:
+                    avg_workload = sum(real_workloads.values()) / len(real_workloads)
+                    max_workload = max(real_workloads.values())
+                    min_workload = min(real_workloads.values())
+                    workload_diff = max_workload - min_workload
+                    # AÅŸÄ±rÄ± yÃ¼klÃ¼ hocalar iÃ§in threshold (daha sÄ±kÄ±: ortalama + 1.5)
+                    # Bu, aÅŸÄ±rÄ± yÃ¼klenmeyi Ã¶nlemek iÃ§in kritik
+                    overload_threshold = avg_workload + 1.5
+                    
+                    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+                    # ERKEN DURDURMA KONTROLÃœ: Uniform daÄŸÄ±lÄ±m saÄŸlandÄ±ysa dur
+                    # â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+                    # EÄŸer iÅŸ yÃ¼kÃ¼ daÄŸÄ±lÄ±mÄ± X-1, X, X+1 aralÄ±ÄŸÄ±nda ve fark 2 veya daha azsa,
+                    # ve de minimum iÅŸ yÃ¼kÃ¼ X-1 veya Ã¼zerideyse, uniform daÄŸÄ±lÄ±m saÄŸlanmÄ±ÅŸtÄ±r
+                    uniform_distribution_achieved = (
+                        workload_diff <= 2 and  # Maks-Min farkÄ± 2 veya daha az
+                        min_workload >= x_min_bound and  # Minimum X-1 veya Ã¼zeri
+                        max_workload <= x_max_bound  # Maksimum X+1 veya altÄ±
+                    )
+                    
+                    if uniform_distribution_achieved:
+                        # Uniform daÄŸÄ±lÄ±m saÄŸlandÄ±, kalan projeler iÃ§in erken durdur
+                        remaining_projects_count = len(sorted_projects) - sorted_projects.index(project_assignment) - 1
+                        logger.info(f"  âœ… UNIFORM DAÄILIM SAÄLANDI: Min={min_workload}, Max={max_workload}, "
+                                   f"Fark={workload_diff} (X-1, X, X+1 aralÄ±ÄŸÄ±nda)")
+                        logger.info(f"  ğŸ¯ Erken durdurma: Kalan {remaining_projects_count + (1 if current_jury_count < 2 else 0)} proje atlanÄ±yor "
+                                   f"(uniform daÄŸÄ±lÄ±m korunuyor)")
+                        early_stop_uniform_achieved = True  # TÃ¼m kalan projeler iÃ§in dur
+                        break  # Bu proje iÃ§in dÃ¶ngÃ¼den Ã§Ä±k
+                else:
+                    avg_workload = 0
+                    max_workload = 0
+                    min_workload = 0
+                    overload_threshold = 999
+                
+                # JÃ¼ri adaylarÄ±nÄ± belirle
+                candidates = []
+                for instructor in self.instructors:
+                    inst_id = instructor['id']
+                    
+                    # Atanabilir mi? (Ã¶ncelik 1)
+                    if not assignability_matrix.get((inst_id, slot_key), False):
+                        continue
+                    
+                    # Zaten eklenmiÅŸ mi?
+                    if inst_id in assignment['instructors']:
+                        continue
+                    
+                    # Sorumlu instructor olamaz
+                    if inst_id == responsible_id:
+                        continue
+                    
+                    # GERÃ‡EK Ä°Å YÃœKÃœNÃœ HESAPLA
+                    current_real_workload = real_workloads.get(inst_id, 0)
+                    
+                    # Sert Ã¼st sÄ±nÄ±r: X+1'i aÅŸamaz
+                    if current_real_workload >= x_max_bound:
+                        continue
+                    
+                    # AÅIRI YÃœK KONTROLÃœ: EÄŸer hoca ortalamadan 1.0'dan fazla yÃ¼ksekse, atlama (daha sÄ±kÄ±)
+                    # Bu, uniform daÄŸÄ±lÄ±mÄ± saÄŸlamak iÃ§in kritik - daha agresif dengeleme
+                    if current_real_workload > overload_threshold:
+                        # EÄŸer Ã§ok fazla dengesizlik varsa (min ortalamadan 3'ten fazla dÃ¼ÅŸÃ¼kse), 
+                        # aÅŸÄ±rÄ± yÃ¼klÃ¼ hocayÄ± da kabul et ama Ã§ok dÃ¼ÅŸÃ¼k skor ver
+                        if min_workload < avg_workload - 3:
+                            # Ã‡ok bÃ¼yÃ¼k dengesizlik var, bu hocayÄ± atlama ama en son tercih et
+                            pass  # Devam et ama skor dÃ¼ÅŸÃ¼k olacak
+                        else:
+                            logger.debug(f"    Hoca {inst_id} atlandÄ±: AÅŸÄ±rÄ± yÃ¼klÃ¼ ({current_real_workload:.1f} > {overload_threshold:.1f})")
+                            continue
+                    
+                    # Ek kontrol: EÄŸer min workload ortalamadan 2'den fazla dÃ¼ÅŸÃ¼kse ve bu hoca da ortalamanÄ±n altÄ±ndaysa, MUTLAKA Ã¶ncelik ver
+                    # Bu, uniform daÄŸÄ±lÄ±mÄ± saÄŸlamak iÃ§in kritik
+                    prioritize_underloaded = (min_workload < avg_workload - 2) and (current_real_workload <= avg_workload)
+                    
+                    # Ã‡ok bÃ¼yÃ¼k dengesizlik varsa (min ortalamadan 3'ten fazla dÃ¼ÅŸÃ¼kse), 
+                    # ortalamanÄ±n altÄ±ndaki TÃœM hocalara Ã§ok yÃ¼ksek Ã¶ncelik ver
+                    force_prioritize_underloaded = (min_workload < avg_workload - 3) and (current_real_workload <= avg_workload + 0.5)
+                    
+                    # Continuity ve zincir uzatma skoru
+                    continuity = self._calculate_continuity_score(
+                        inst_id, classroom_id, timeslot_id,
+                        assignments, sorted_timeslots, timeslot_to_index
+                    )
+                    chain_extension = self._calculate_chain_extension_score(
+                        inst_id, classroom_id, timeslot_id,
+                        assignments, sorted_timeslots, timeslot_to_index
+                    )
+                    
+                    # Kota durumu (plan bazlÄ±)
+                    quota_limit = quota_plan.get(inst_id, 999)
+                    quota_remaining = quota_limit - quota_used[inst_id]
+                    
+                    # Ortalama sapmasÄ±nÄ± hesapla
+                    workload_deviation = current_real_workload - avg_workload
+                    
+                    # Ã–ncelik skoru: Continuity Ã¶ncelikli, ardÄ±ndan iÅŸ yÃ¼kÃ¼ dengesi
+                    # Continuity aÄŸÄ±rlÄ±ÄŸÄ± yÃ¼kseltildi; uniform daÄŸÄ±lÄ±m korunur (X+1 sÄ±nÄ±rÄ± ve overload cezasÄ±)
+                    # AÅŸÄ±rÄ± yÃ¼klÃ¼ hocalar iÃ§in ceza (eÄŸer atlanmadÄ±ysa)
+                    penalty_for_overloaded = 0
+                    if current_real_workload > overload_threshold:
+                        penalty_for_overloaded = (current_real_workload - overload_threshold) * 50000000
+                    
+                    priority_score = (
+                        -workload_deviation * 8000000 +
+                        -current_real_workload * 200000 +
+                        (2000000 if prioritize_underloaded else 0) +
+                        (5000000 if force_prioritize_underloaded else 0) +
+                        quota_remaining * 600000 +
+                        continuity * 12000000 +
+                        chain_extension * 6000000 -
+                        penalty_for_overloaded
+                    )
+                    
+                    candidates.append({
+                        'instructor_id': inst_id,
+                        'continuity': continuity,
+                        'current_workload': current_real_workload,
+                        'workload_deviation': workload_deviation,
+                        'quota_limit': quota_limit,
+                        'quota_remaining': quota_remaining,
+                        'priority_score': priority_score
+                    })
+                
+                # Strict underload-first: X-1 altÄ± varsa Ã¶nce onlarÄ± seÃ§
+                strict_under = [c for c in candidates if c.get('current_workload', 0) < x_min_bound]
+                if strict_under:
+                    candidates = strict_under
+
+                # Quota-first: quota_remaining>0 olanlarÄ± tercih et
+                quota_first = [c for c in candidates if c.get('quota_remaining', 0) > 0]
+                if quota_first:
+                    candidates = quota_first
+
+                # Continuity-first prefilter (Ã¶nce continuity+underloaded, sonra continuity)
+                if candidates:
+                    cont_and_under = [
+                        c for c in candidates
+                        if c.get('continuity', 0) >= 1.0 and c.get('current_workload', 0) <= avg_workload
+                    ]
+                    if cont_and_under:
+                        candidates = cont_and_under
+                    else:
+                        cont_first = [c for c in candidates if c.get('continuity', 0) >= 1.0]
+                        if cont_first:
+                            candidates = cont_first
+
+                # En iyi adayÄ± seÃ§ (Ã¶ncelik skoruna gÃ¶re)
+                if not candidates:
+                    # Ä°lk denemede uygun aday yoksa, kota kontrolÃ¼nÃ¼ gevÅŸet
+                    candidates_flexible = []
+                    for instructor in self.instructors:
+                        inst_id = instructor['id']
+                        
+                        # Temel kontroller (atanabilirlik, duplicate, sorumlu)
+                        if not assignability_matrix.get((inst_id, slot_key), False):
+                            continue
+                        if inst_id in assignment['instructors']:
+                            continue
+                        if inst_id == responsible_id:
+                            continue
+                        
+                        # GERÃ‡EK Ä°Å YÃœKÃœNÃœ HESAPLA
+                        real_workloads_flex = get_current_real_workload()
+                        current_real_workload_flex = real_workloads_flex.get(inst_id, 0)
+                        
+                        # Sert Ã¼st sÄ±nÄ±r: X+1'i aÅŸamaz
+                        if current_real_workload_flex >= x_max_bound:
+                            continue
+                        
+                        # Flexible modda bile aÅŸÄ±rÄ± yÃ¼klÃ¼ hocalarÄ± kontrol et (ama daha esnek threshold)
+                        if real_workloads_flex:
+                            avg_workload_flex = sum(real_workloads_flex.values()) / len(real_workloads_flex)
+                            min_workload_flex = min(real_workloads_flex.values())
+                            overload_threshold_flex = avg_workload_flex + 2.0  # Daha esnek ama hala kontrollÃ¼ (2.5'ten 2.0'a dÃ¼ÅŸÃ¼rÃ¼ldÃ¼)
+                            if current_real_workload_flex > overload_threshold_flex:
+                                # Ã‡ok fazla dengesizlik varsa kabul et ama ceza ver
+                                if min_workload_flex < avg_workload_flex - 3:
+                                    pass  # Devam et ama skor dÃ¼ÅŸÃ¼k olacak
+                                else:
+                                    logger.debug(f"    Hoca {inst_id} atlandÄ±: AÅŸÄ±rÄ± yÃ¼klÃ¼ ({current_real_workload_flex:.1f} > {overload_threshold_flex:.1f})") 
+                                continue
+                            workload_deviation_flex = current_real_workload_flex - avg_workload_flex
+                            # Ã‡ok dÃ¼ÅŸÃ¼k yÃ¼klÃ¼ hocalara Ã¶ncelik kontrolÃ¼
+                            prioritize_underloaded_flex = (min_workload_flex < avg_workload_flex - 2) and (current_real_workload_flex <= avg_workload_flex)
+                            force_prioritize_underloaded_flex = (min_workload_flex < avg_workload_flex - 3) and (current_real_workload_flex <= avg_workload_flex + 0.5)
+                        else:
+                            avg_workload_flex = 0
+                            min_workload_flex = 0
+                            workload_deviation_flex = 0
+                            prioritize_underloaded_flex = False
+                            force_prioritize_underloaded_flex = False
+                        
+                        continuity = self._calculate_continuity_score(
+                            inst_id, classroom_id, timeslot_id,
+                            assignments, sorted_timeslots, timeslot_to_index
+                        )
+                        chain_extension = self._calculate_chain_extension_score(
+                            inst_id, classroom_id, timeslot_id,
+                            assignments, sorted_timeslots, timeslot_to_index
+                        )
+                        
+                        quota_limit = quota_plan.get(inst_id, 999)
+                        quota_remaining = quota_limit - quota_used[inst_id]
+                        
+                        # AÅŸÄ±rÄ± yÃ¼klÃ¼ hocalar iÃ§in ceza (eÄŸer atlanmadÄ±ysa)
+                        penalty_for_overloaded_flex = 0
+                        if real_workloads_flex and current_real_workload_flex > avg_workload_flex + 2.0:
+                            penalty_for_overloaded_flex = (current_real_workload_flex - (avg_workload_flex + 2.0)) * 50000000
+                        
+                        # Flexible mod: continuity gÃ¼Ã§lÃ¼ Ã¶ncelik, ardÄ±ndan iÅŸ yÃ¼kÃ¼ dengesi
+                        priority_score = (
+                            -workload_deviation_flex * 8000000 +
+                            -current_real_workload_flex * 200000 +
+                            (2000000 if prioritize_underloaded_flex else 0) +
+                            (5000000 if force_prioritize_underloaded_flex else 0) +
+                            quota_remaining * 600000 +
+                            continuity * 12000000 +
+                            chain_extension * 6000000 -
+                            penalty_for_overloaded_flex
+                        )
+                        
+                        candidates_flexible.append({
+                            'instructor_id': inst_id,
+                            'continuity': continuity,
+                            'current_workload': current_real_workload_flex,
+                            'workload_deviation': workload_deviation_flex,
+                            'quota_limit': quota_limit,
+                            'quota_remaining': quota_remaining,
+                            'priority_score': priority_score
+                        })
+                    
+                    # Strict underload-first (flex): X-1 altÄ± varsa Ã¶nce onlarÄ± seÃ§
+                    strict_under_flex = [c for c in candidates_flexible if c.get('current_workload', 0) < x_min_bound]
+                    if strict_under_flex:
+                        candidates_flexible = strict_under_flex
+
+                    # Continuity-first prefilter (flex): Ã¶nce continuity+underloaded, sonra continuity
+                    if candidates_flexible:
+                        cont_and_under_flex = [
+                            c for c in candidates_flexible
+                            if c.get('continuity', 0) >= 1.0 and c.get('current_workload', 0) <= avg_workload_flex
+                        ]
+                        if cont_and_under_flex:
+                            candidates_flexible = cont_and_under_flex
+                        else:
+                            cont_first_flex = [c for c in candidates_flexible if c.get('continuity', 0) >= 1.0]
+                            if cont_first_flex:
+                                candidates_flexible = cont_first_flex
+
+                    # Quota-first (flex)
+                    if candidates_flexible:
+                        quota_first_flex = [c for c in candidates_flexible if c.get('quota_remaining', 0) > 0]
+                        if quota_first_flex:
+                            candidates_flexible = quota_first_flex
+
+                    if not candidates_flexible:
+                        # HiÃ§ aday yok, Ã‡OK AGRESIF mod: Sadece temel Ã§akÄ±ÅŸma kontrolÃ¼ yaparak mutlaka bir aday bul
+                        logger.warning(f"    âš ï¸ Proje {project_id} iÃ§in flexible aday bulunamadÄ±, ULTRA-AGRESIF mod aktif!")
+                        candidates_ultra_aggressive = []
+                        for instructor in self.instructors:
+                            inst_id = instructor['id']
+                            
+                            # ULTRA-AGRESIF: Sadece temel Ã§akÄ±ÅŸmalarÄ± kontrol et
+                            # 1. Zaten bu projede gÃ¶revli mi (sorumlu veya jÃ¼ri)?
+                            if inst_id == responsible_id:
+                                continue
+                            if inst_id in assignment['instructors']:
+                                continue
+                            
+                            # 2. AynÄ± timeslot'ta baÅŸka bir gÃ¶revi var mÄ±? (mutlak Ã§akÄ±ÅŸma)
+                            has_timeslot_conflict = False
+                            for other_assignment in assignments:
+                                if other_assignment.get('timeslot_id') == timeslot_id:
+                                    other_instructors = other_assignment.get('instructors', [])
+                                    other_responsible = other_assignment.get('responsible_instructor_id')
+                                    if not other_responsible and other_instructors:
+                                        other_responsible = other_instructors[0]
+                                    if isinstance(other_responsible, dict):
+                                        other_responsible = other_responsible.get('id')
+                                    if isinstance(inst_id, dict):
+                                        inst_id_check = inst_id.get('id') if isinstance(inst_id, dict) else inst_id
+                                    else:
+                                        inst_id_check = inst_id
+                                    
+                                    # Normalize diÄŸer instructors
+                                    for o_instr in other_instructors:
+                                        o_instr_id = o_instr.get('id') if isinstance(o_instr, dict) else o_instr
+                                        if o_instr_id == inst_id_check:
+                                            has_timeslot_conflict = True
+                                            break
+                                    if other_responsible and other_responsible == inst_id_check:
+                                        has_timeslot_conflict = True
+                                    if has_timeslot_conflict:
+                                        break
+                            
+                            if has_timeslot_conflict:
+                                continue  # Zaman Ã§akÄ±ÅŸmasÄ± varsa atlama
+                            
+                            # GERÃ‡EK Ä°Å YÃœKÃœNÃœ HESAPLA
+                            real_workloads_ultra = get_current_real_workload()
+                            current_real_workload_ultra = real_workloads_ultra.get(inst_id, 0)
+
+                            # Sert Ã¼st sÄ±nÄ±r: X+1'i aÅŸamaz
+                            if current_real_workload_ultra >= x_max_bound:
+                                continue
+                            
+                            # ULTRA-AGRESIF modda bile iÅŸ yÃ¼kÃ¼ dengesine Ã¶ncelik ver
+                            if real_workloads_ultra:
+                                avg_workload_ultra = sum(real_workloads_ultra.values()) / len(real_workloads_ultra)
+                                min_workload_ultra = min(real_workloads_ultra.values())
+                                workload_deviation_ultra = current_real_workload_ultra - avg_workload_ultra
+                                prioritize_underloaded_ultra = (min_workload_ultra < avg_workload_ultra - 2) and (current_real_workload_ultra <= avg_workload_ultra)
+                                force_prioritize_underloaded_ultra = (min_workload_ultra < avg_workload_ultra - 3) and (current_real_workload_ultra <= avg_workload_ultra + 0.5)
+                            else:
+                                avg_workload_ultra = 0
+                                min_workload_ultra = 0
+                                workload_deviation_ultra = 0
+                                prioritize_underloaded_ultra = False
+                                force_prioritize_underloaded_ultra = False
+                            
+                            continuity = self._calculate_continuity_score(
+                                inst_id, classroom_id, timeslot_id,
+                                assignments, sorted_timeslots, timeslot_to_index
+                            )
+                            chain_extension = self._calculate_chain_extension_score(
+                                inst_id, classroom_id, timeslot_id,
+                                assignments, sorted_timeslots, timeslot_to_index
+                            )
+                            
+                            quota_limit = quota_plan.get(inst_id, 999)
+                            quota_remaining = quota_limit - quota_used[inst_id]
+                            
+                            # ULTRA-AGRESIF modda bile Ã§ok yÃ¼ksek yÃ¼klÃ¼ hocalara ceza ver (ama atlama)
+                            penalty_for_overloaded_ultra = 0
+                            if real_workloads_ultra and current_real_workload_ultra > avg_workload_ultra + 2.5:
+                                penalty_for_overloaded_ultra = (current_real_workload_ultra - (avg_workload_ultra + 2.5)) * 30000000
+                            
+                            # ULTRA-AGRESIF mod: continuity gÃ¼Ã§lÃ¼ Ã¶ncelik
+                            priority_score = (
+                                -workload_deviation_ultra * 8000000 +
+                                -current_real_workload_ultra * 200000 +
+                                (2000000 if prioritize_underloaded_ultra else 0) +
+                                (5000000 if force_prioritize_underloaded_ultra else 0) +
+                                quota_remaining * 600000 +
+                                continuity * 12000000 +
+                                chain_extension * 6000000 -
+                                penalty_for_overloaded_ultra
+                            )
+                            
+                            candidates_ultra_aggressive.append({
+                                'instructor_id': inst_id,
+                                'continuity': continuity,
+                                'current_workload': current_real_workload_ultra,
+                                'workload_deviation': workload_deviation_ultra,
+                                'quota_limit': quota_limit,
+                                'quota_remaining': quota_remaining,
+                                'priority_score': priority_score
+                            })
+                        
+                        # Strict underload-first (ultra): X-1 altÄ± varsa Ã¶nce onlarÄ± seÃ§
+                        strict_under_ultra = [c for c in candidates_ultra_aggressive if c.get('current_workload', 0) < x_min_bound]
+                        if strict_under_ultra:
+                            candidates_ultra_aggressive = strict_under_ultra
+
+                        # Continuity-first prefilter (ultra)
+                        if candidates_ultra_aggressive:
+                            cont_first_ultra = [c for c in candidates_ultra_aggressive if c.get('continuity', 0) >= 1.0]
+                            if cont_first_ultra:
+                                candidates_ultra_aggressive = cont_first_ultra
+
+                        # Quota-first (ultra)
+                        if candidates_ultra_aggressive:
+                            quota_first_ultra = [c for c in candidates_ultra_aggressive if c.get('quota_remaining', 0) > 0]
+                            if quota_first_ultra:
+                                candidates_ultra_aggressive = quota_first_ultra
+
+                        if not candidates_ultra_aggressive:
+                            # Zincirli swap ile kurtarmayÄ± dene
+                            success, added_id = self._try_chain_swap_for_second_jury(
+                                assignment,
+                                assignments,
+                                sorted_timeslots,
+                                timeslot_to_index,
+                                x_max_bound,
+                                locked_jurors_by_project
+                            )
+                            if success:
+                                # BaÅŸarÄ±lÄ± kurtarma: sayaÃ§larÄ± gÃ¼ncelle
+                                assignments_made += 1
+                                current_jury_count += 1
+                                # Assignability matrix'i yeniden oluÅŸtur (iki assignment deÄŸiÅŸti)
+                                assignability_matrix = self._build_assignability_matrix(
+                                    assignments,
+                                    projects_needing_jury,
+                                    sorted_timeslots,
+                                    timeslot_to_index
+                                )
+                                logger.debug(f"    âœ“ Proje {project_id}: Zincirli swap ile hoca {added_id} eklendi")
+                                continue
+
+                            # Son Ã§are: X+1 Ã¼stÃ¼ geÃ§ici atama + anÄ±nda devir ile sÄ±nÄ±rlar korunur
+                            real_wl_final = get_current_real_workload()
+                            x_int_local = int(sum(real_wl_final.values()) / len(real_wl_final)) if real_wl_final else 0
+                            x_min_local = max(0, x_int_local - 1)
+                            under_ids = {iid for iid, wl in real_wl_final.items() if wl < x_min_local}
+                            if under_ids:
+                                # GeÃ§ici adaylar: atanabilir olan HER hoca (X+1 sÄ±nÄ±rÄ±nÄ± bu Ã¶zel adÄ±mda esnetme)
+                                temp_candidates = []
+                                for instructor in self.instructors:
+                                    inst_id2 = instructor['id']
+                                    if not assignability_matrix.get((inst_id2, slot_key), False):
+                                        continue
+                                    if inst_id2 in assignment['instructors'] or inst_id2 == responsible_id:
+                                        continue
+                                    cont2 = self._calculate_continuity_score(
+                                        inst_id2, classroom_id, timeslot_id,
+                                        assignments, sorted_timeslots, timeslot_to_index
+                                    )
+                                    temp_candidates.append((inst_id2, cont2))
+                                temp_candidates.sort(key=lambda x: x[1], reverse=True)
+
+                                placed = False
+                                for inst_id2, cont2 in temp_candidates:
+                                    # Ã–nce ekle, sonra anÄ±nda yÃ¼k dÃ¼ÅŸÃ¼rÃ¼cÃ¼ swap dene
+                                    assignment['instructors'].append(inst_id2)
+                                    relieved = self._relieve_overload_via_swap(
+                                        inst_id2,
+                                        assignments,
+                                        under_ids,
+                                        locked_jurors_by_project,
+                                        sorted_timeslots,
+                                        timeslot_to_index
+                                    )
+                                    if relieved:
+                                        assignments_made += 1
+                                        current_jury_count += 1
+                                        assignability_matrix = self._build_assignability_matrix(
+                                            assignments,
+                                            projects_needing_jury,
+                                            sorted_timeslots,
+                                            timeslot_to_index
+                                        )
+                                        logger.debug(f"    âœ“ Proje {project_id}: GeÃ§ici atama + anÄ±nda devir ile hoca {inst_id2} eklendi")
+                                        placed = True
+                                        break
+                                    else:
+                                        try:
+                                            assignment['instructors'].remove(inst_id2)
+                                        except ValueError:
+                                            pass
+
+                                if placed:
+                                    continue
+
+                            # HÃ¢lÃ¢ yerleÅŸtirilemiyorsa, kayÄ±t altÄ±na al
+                            logger.error(f"    âŒ Proje {project_id} iÃ§in HÄ°Ã‡ aday bulunamadÄ±! TÃ¼m hocalar zaman/limit nedeniyle bloke.")
+                        failed_assignments += 1
+                        break
+                    
+                        candidates = candidates_ultra_aggressive
+                    else:
+                        candidates = candidates_flexible
+                
+                # Ã–ncelik skoruna gÃ¶re sÄ±rala (yÃ¼ksek skor = Ã¶ncelikli)
+                candidates.sort(key=lambda x: x['priority_score'], reverse=True)
+                best_candidate = candidates[0]
+                selected_instructor = best_candidate['instructor_id']
+                
+                # Yeni jÃ¼riyi ekle
+                assignment['instructors'].append(selected_instructor)
+                quota_used[selected_instructor] += 1
+                assignments_made += 1
+                current_jury_count += 1
+                
+                logger.debug(
+                    f"    âœ“ Proje {project_id}: Hoca {selected_instructor} jÃ¼ri olarak eklendi "
+                    f"(YÃ¼k: {best_candidate['current_workload']} -> {best_candidate['current_workload'] + 1}, "
+                    f"Deviation: {best_candidate.get('workload_deviation', 0):.1f}, "
+                    f"Continuity: {best_candidate['continuity']})"
+                )
+                
+                # Assignability matrix'i gÃ¼ncelle (yeni jÃ¼ri eklenince diÄŸer adaylarÄ±n durumu deÄŸiÅŸebilir)
+                for inst_id in [i['id'] for i in self.instructors]:
+                    assignability_matrix[(inst_id, slot_key)] = (
+                        self._check_instructor_assignability(
+                            inst_id, assignment, assignments
+                        )
+                    )
+                
+                # Her 5 atamada bir intermediate rebalancing yap
+                # Bu, bÃ¼yÃ¼k dengesizliklerin birikmesini Ã¶nler
+                if assignments_made % 5 == 0 and assignments_made > 0:
+                    current_wl = get_current_real_workload()
+                    if current_wl:
+                        wl_max = max(current_wl.values())
+                        wl_min = min(current_wl.values())
+                        wl_diff = wl_max - wl_min
+                        wl_avg = sum(current_wl.values()) / len(current_wl)
+                        
+                        # EÄŸer fark 3'ten bÃ¼yÃ¼kse hÄ±zlÄ± bir rebalancing yap
+                        if wl_diff > 3:
+                            logger.debug(f"    ğŸ”„ Intermediate rebalancing (fark: {wl_diff:.1f}, Ort: {wl_avg:.1f})")
+                            # HÄ±zlÄ± swap denemesi (sadece 10 iterasyon)
+                            quick_swap_count = self._quick_rebalance_pass(
+                                assignments,
+                                sorted_timeslots,
+                                timeslot_to_index,
+                                locked_jurors_by_project,
+                                max_iterations=10
+                            )
+                            if quick_swap_count > 0:
+                                logger.debug(f"      âœ“ {quick_swap_count} hÄ±zlÄ± swap yapÄ±ldÄ±")
+        
+        logger.info(f"  âœ… JÃ¼ri atama tamamlandÄ±: {assignments_made} jÃ¼ri atandÄ±, {failed_assignments} baÅŸarÄ±sÄ±z")
+        
+        return {
+            "assignments_made": assignments_made,
+            "quota_used": dict(quota_used),
+            "failed_assignments": failed_assignments
+        }
+
+    def _balance_workload_with_swap(
+        self,
+        assignments: List[Dict[str, Any]],
+        sorted_timeslots: List[Dict[str, Any]],
+        timeslot_to_index: Dict[int, int],
+        locked_jurors_by_project: Optional[Dict[int, Set[int]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Ä°ÅŸ yÃ¼kÃ¼ dengesini swap ile saÄŸla
+        
+        En fazla yÃ¼kteki hoca ile en az yÃ¼kteki hoca arasÄ±ndaki fark 3'ten fazlaysa
+        swap iÅŸlemi baÅŸlatÄ±lÄ±r. Multiple pass yaparak denge saÄŸlanÄ±r.
+        
+        Args:
+            assignments: TÃ¼m atamalar
+            sorted_timeslots: SÄ±ralÄ± timeslot listesi
+            timeslot_to_index: Timeslot ID -> index mapping
+        
+        Returns:
+            Dict: Swap istatistikleri
+        """
+        max_iterations = 1000  # Ã‡ok daha fazla iterasyon (uniform daÄŸÄ±lÄ±m iÃ§in kritik)
+        swaps_performed = 0
+        swaps_this_iteration = 0
+        consecutive_no_swap = 0  # ArdÄ±ÅŸÄ±k swap yapÄ±lamayan iterasyon sayÄ±sÄ±
+        
+        logger.info("  Swap: Ä°ÅŸ yÃ¼kÃ¼ dengeleme baÅŸlatÄ±lÄ±yor...")
+        
+        for iteration in range(max_iterations):
+            workloads = self._calculate_current_workloads(assignments)
+            
+            if not workloads:
+                break
+            
+            max_workload = max(workloads.values())
+            min_workload = min(workloads.values())
+            workload_diff = max_workload - min_workload
+            avg_workload = sum(workloads.values()) / len(workloads) if workloads else 0
+            
+            # Hedef XÂ±1 sÄ±nÄ±rlarÄ±nÄ± hesapla
+            x_int = int(avg_workload) if workloads else 0
+            x_min_bound = max(0, x_int - 1)
+            x_max_bound = x_int + 1
+
+            # Denge kontrolÃ¼: herkes XÂ±1 aralÄ±ÄŸÄ±nda ise dengeli
+            if max_workload <= x_max_bound and min_workload >= x_min_bound:
+                logger.info(f"  âœ… Swap: Denge saÄŸlandÄ± (aralÄ±k: [{x_min_bound}, {x_max_bound}], iterasyon: {iteration + 1})")
+                break
+            
+            # Hedef aralÄ±ÄŸa gÃ¶re hocalarÄ± belirle
+            overloaded_instructors = [(inst_id, wl) for inst_id, wl in workloads.items() if wl > x_max_bound]
+            underloaded_instructors = [(inst_id, wl) for inst_id, wl in workloads.items() if wl < x_min_bound]
+            
+            # ArdÄ±ÅŸÄ±k 20 iterasyon swap yapÄ±lamazsa dur (daha sabÄ±rlÄ±, uniform daÄŸÄ±lÄ±m iÃ§in kritik)
+            if consecutive_no_swap >= 20:
+                logger.warning(f"  âš ï¸ Swap: ArdÄ±ÅŸÄ±k {consecutive_no_swap} iterasyon swap yapÄ±lamadÄ±, durduruluyor")
+                break
+            
+            swaps_this_iteration = 0
+            
+            # En yÃ¼ksek ve en dÃ¼ÅŸÃ¼k yÃ¼kteki hocalarÄ± bul
+            # Birden fazla max/min varsa, hepsini dene
+            # Ã–ncelik: Ortalama Ã¼stÃ¼/altÄ± hocalara odaklan
+            if overloaded_instructors and underloaded_instructors:
+                # SÄ±nÄ±r dÄ±ÅŸÄ±ndakileri Ã¶nceliklendir
+                max_workload_instructors = [inst_id for inst_id, wl in overloaded_instructors if wl > x_max_bound]
+                min_workload_instructors = [inst_id for inst_id, wl in underloaded_instructors if wl < x_min_bound]
+            else:
+                # Fallback: En yÃ¼ksek/dÃ¼ÅŸÃ¼k yÃ¼kteki hocalar
+                max_workload_instructors = [inst_id for inst_id, wl in workloads.items() if wl == max_workload]
+                min_workload_instructors = [inst_id for inst_id, wl in workloads.items() if wl == min_workload]
+            
+            if not max_workload_instructors:
+                max_workload_instructors = [inst_id for inst_id, wl in workloads.items() if wl == max_workload]
+            if not min_workload_instructors:
+                min_workload_instructors = [inst_id for inst_id, wl in workloads.items() if wl == min_workload]
+            
+            swapped = False
+            swaps_this_iteration = 0
+            
+            # Ä°YÄ°LEÅTÄ°RME: AynÄ± iterasyonda birden fazla swap yapabilmek iÃ§in
+            # Her max yÃ¼kteki hoca iÃ§in swap dene (artÄ±k tek swap ile sÄ±nÄ±rlÄ± deÄŸil)
+            for max_instructor in max_workload_instructors[:10]:  # En fazla 10 max hocaya bak (performans)
+                # Max yÃ¼kteki hocadan jÃ¼ri slotlarÄ±nÄ± bul (sorumlu ve kilitli jÃ¼ri hariÃ§)
+                max_instructor_slots = []
+                for assignment in assignments:
+                    instructors = assignment.get('instructors', [])
+                    responsible_id = assignment.get('responsible_instructor_id')
+                    if not responsible_id and instructors:
+                        first_instr = instructors[0]
+                        responsible_id = first_instr.get("id") if isinstance(first_instr, dict) else first_instr
+                    
+                    if isinstance(responsible_id, dict):
+                        responsible_id = responsible_id.get("id")
+                    
+                    # Normalize instructors
+                    for instr in instructors:
+                        instr_id = instr.get("id") if isinstance(instr, dict) else instr
+                        # JÃ¼ri gÃ¶revi olan slotlarÄ± topla (sorumlu olmayan ve kilitli olmayan)
+                        if instr_id == max_instructor and instr_id != responsible_id:
+                            proj_id_here = assignment.get('project_id')
+                            if locked_jurors_by_project and proj_id_here in locked_jurors_by_project:
+                                if instr_id in locked_jurors_by_project[proj_id_here]:
+                                    continue
+                        max_instructor_slots.append({
+                            'assignment': assignment,
+                            'instructor_id': max_instructor,
+                            'project_id': assignment.get('project_id'),
+                            'classroom_id': assignment.get('classroom_id'),
+                            'timeslot_id': assignment.get('timeslot_id')
+                        })
+                        break  # Bu assignment'ta bu hocayÄ± bulduk, diÄŸerine geÃ§
+                
+                # SlotlarÄ± continuity skoruna gÃ¶re sÄ±rala (dÃ¼ÅŸÃ¼k continuity = Ã¶ncelikli swap iÃ§in)
+                max_instructor_slots.sort(
+                    key=lambda s: self._calculate_continuity_score(
+                        max_instructor, s['classroom_id'], s['timeslot_id'],
+                        assignments, sorted_timeslots, timeslot_to_index
+                    )
+                )
+                
+                # EÄŸer continuity=0 olan en az bir slot varsa, continuity=1 olanlarÄ± ÅŸimdilik atla
+                has_zero_cont_slot = any(
+                    self._calculate_continuity_score(
+                        max_instructor, s['classroom_id'], s['timeslot_id'],
+                        assignments, sorted_timeslots, timeslot_to_index
+                    ) == 0 for s in max_instructor_slots
+                )
+                
+                # Her min yÃ¼kteki hoca iÃ§in swap dene (birden fazla swap yapÄ±labilir)
+                for slot_info in max_instructor_slots:
+                    if has_zero_cont_slot:
+                        cont_here = self._calculate_continuity_score(
+                            max_instructor, slot_info['classroom_id'], slot_info['timeslot_id'],
+                            assignments, sorted_timeslots, timeslot_to_index
+                        )
+                        if cont_here >= 1.0:
+                            continue
+                    assignment = slot_info['assignment']
+                    classroom_id = slot_info['classroom_id']
+                    timeslot_id = slot_info['timeslot_id']
+                    
+                    # Max hocanÄ±n bu slot'ta jÃ¼ri olduÄŸundan emin ol
+                    instructors = assignment.get('instructors', [])
+                    max_found = False
+                    for instr in instructors:
+                        instr_id = instr.get("id") if isinstance(instr, dict) else instr
+                        if instr_id == max_instructor:
+                            max_found = True
+                            break
+                    
+                    if not max_found:
+                        continue
+                    
+                    # Min yÃ¼kteki hocalar arasÄ±ndan continuity=1 olanlarÄ± Ã¶nceliklendir
+                    viable_min = []
+                    for min_instructor in min_workload_instructors[:10]:  # En fazla 10 min hocaya bak
+                        can_assign = self._check_instructor_assignability(
+                            min_instructor,
+                            assignment,
+                            assignments
+                        )
+                        if not can_assign:
+                            continue
+                        cont_gain = self._calculate_continuity_score(
+                            min_instructor, classroom_id, timeslot_id,
+                            assignments, sorted_timeslots, timeslot_to_index
+                        )
+                        viable_min.append((cont_gain, min_instructor))
+                    if not viable_min:
+                        continue
+                    viable_min.sort(key=lambda x: x[0], reverse=True)
+                    min_instructor = viable_min[0][1]
+
+                    # Swap yap
+                    # Normalize et ve remove
+                    for i, instr in enumerate(instructors):
+                        instr_id = instr.get("id") if isinstance(instr, dict) else instr
+                        if instr_id == max_instructor:
+                            instructors.pop(i)
+                            break
+                    
+                    # Min hocayÄ± ekle
+                    assignment['instructors'].append(min_instructor)
+                    
+                    swaps_performed += 1
+                    swaps_this_iteration += 1
+                    swapped = True
+                    
+                    # Yeni yÃ¼kleri hesapla
+                    new_workloads = self._calculate_current_workloads(assignments)
+                    new_max = max(new_workloads.values()) if new_workloads else 0
+                    new_min = min(new_workloads.values()) if new_workloads else 0
+                    new_diff = new_max - new_min
+                    
+                    logger.debug(f"    Swap #{swaps_performed}: Hoca {max_instructor} â†’ Hoca {min_instructor} (Proje {slot_info['project_id']}, Yeni fark: {new_diff})")
+                    consecutive_no_swap = 0  # BaÅŸarÄ±lÄ± swap yapÄ±ldÄ±
+                    
+                    # Bu swap'tan sonra yÃ¼kleri yeniden hesapla ve gÃ¼ncelle
+                    workloads = new_workloads
+                    max_workload = new_max
+                    min_workload = new_min
+                    workload_diff = new_diff
+                    
+                    # EÄŸer fark 2'nin altÄ±na dÃ¼ÅŸtÃ¼yse, swap'Ä± durdur
+                    if workload_diff <= 2:
+                        break
+                    
+                    # Bu slot'tan sonra diÄŸer max hocaya geÃ§ (birden fazla swap iÃ§in)
+                    break
+                
+                if workload_diff <= 2:
+                    break
+            
+            # EÄŸer bu iterasyonda swap yapÄ±ldÄ±ysa, yÃ¼kleri gÃ¼ncelle
+            if swapped and swaps_this_iteration > 0:
+                workloads = self._calculate_current_workloads(assignments)
+                if workloads:
+                    max_workload = max(workloads.values())
+                    min_workload = min(workloads.values())
+                    workload_diff = max_workload - min_workload
+                    avg_workload = sum(workloads.values()) / len(workloads)
+                    
+                    # Fark 2'nin altÄ±ndaysa dur
+                    if workload_diff <= 2:
+                        logger.info(f"  âœ… Swap: Denge saÄŸlandÄ± (fark: {workload_diff}, iterasyon: {iteration + 1})")
+                        break
+            
+            if not swapped or swaps_this_iteration == 0:
+                consecutive_no_swap += 1
+                # Bu iterasyonda swap yapÄ±lamadÄ±
+                if iteration == 0:
+                    logger.warning(f"  âš ï¸ Swap: Ä°lk iterasyonda hiÃ§ swap yapÄ±lamadÄ± (fark: {workload_diff}, Ort: {avg_workload:.1f})")
+                elif iteration % 20 == 0:
+                    logger.info(f"  Swap: Ä°terasyon {iteration + 1}, fark: {workload_diff}, Ort: {avg_workload:.1f}, "
+                               f"AÅŸÄ±rÄ± yÃ¼klÃ¼: {len(overloaded_instructors)}, Az yÃ¼klÃ¼: {len(underloaded_instructors)}")
+                # DÃ¶ngÃ¼ devam etsin, baÅŸka max/min hoca Ã§iftleri dene
+        
+        final_workloads = self._calculate_current_workloads(assignments)
+        final_diff = max(final_workloads.values()) - min(final_workloads.values()) if final_workloads else 0
+        
+        logger.info(f"  Swap tamamlandÄ±: {swaps_performed} swap yapÄ±ldÄ±, final fark: {final_diff}")
+        
+        return {
+            "swaps_performed": swaps_performed,
+            "final_workload_diff": final_diff
+        }
+
+    def _enforce_lower_bound_with_swaps(
+        self,
+        assignments: List[Dict[str, Any]],
+        sorted_timeslots: List[Dict[str, Any]],
+        timeslot_to_index: Dict[int, int],
+        x_min_bound: int,
+        x_max_bound: int,
+        locked_jurors_by_project: Optional[Dict[int, Set[int]]] = None,
+        max_iterations: int = 500
+    ) -> int:
+        """
+        Herkesin iÅŸ yÃ¼kÃ¼nÃ¼ en az x_min_bound seviyesine Ã§Ä±karmak iÃ§in hedefli swap uygula.
+        DonÃ¶r hocalar: iÅŸ yÃ¼kÃ¼ > x_min_bound olanlar (tercihen continuity kaybÄ± dÃ¼ÅŸÃ¼k slotlarÄ±ndan).
+        AlÄ±cÄ± hocalar: iÅŸ yÃ¼kÃ¼ < x_min_bound olanlar.
+        """
+        swaps = 0
+        for _ in range(max_iterations):
+            workloads = self._calculate_current_workloads(assignments)
+            if not workloads:
+                break
+            min_wl = min(workloads.values())
+            if min_wl >= x_min_bound:
+                break
+            # En az yÃ¼klÃ¼ hocayÄ± al
+            under_instructor = min(workloads, key=lambda k: workloads[k])
+            under_wl = workloads[under_instructor]
+            if under_wl >= x_min_bound:
+                continue
+
+            # DonÃ¶r adaylarÄ± (yÃ¼kÃ¼ > x_min_bound) Ã§oktan aza sÄ±rala
+            donors = sorted(
+                [iid for iid, wl in workloads.items() if wl > x_min_bound],
+                key=lambda k: (workloads[k] > x_max_bound, workloads[k]),
+                reverse=True
+            )
+            swapped = False
+            for donor in donors:
+                # DonÃ¶rÃ¼n jÃ¼ri olduÄŸu slotlarÄ± continuity dÃ¼ÅŸÃ¼kten yÃ¼kseÄŸe sÄ±rala (kilitli jÃ¼riyi koru)
+                donor_slots = []
+                for assignment in assignments:
+                    instructors = assignment.get('instructors', [])
+                    responsible_id = assignment.get('responsible_instructor_id')
+                    if not responsible_id and instructors:
+                        fi = instructors[0]
+                        responsible_id = fi.get('id') if isinstance(fi, dict) else fi
+                    if isinstance(responsible_id, dict):
+                        responsible_id = responsible_id.get('id')
+                    # DonÃ¶r bu assignment'ta jÃ¼ri mi?
+                    for instr in instructors:
+                        iid = instr.get('id') if isinstance(instr, dict) else instr
+                        if iid == donor and iid != responsible_id:
+                            proj_id_here = assignment.get('project_id')
+                            if locked_jurors_by_project and proj_id_here in locked_jurors_by_project:
+                                if iid in locked_jurors_by_project[proj_id_here]:
+                                    continue
+                            cont = self._calculate_continuity_score(
+                                donor,
+                                assignment.get('classroom_id'),
+                                assignment.get('timeslot_id'),
+                                assignments,
+                                sorted_timeslots,
+                                timeslot_to_index
+                            )
+                            donor_slots.append((assignment, cont))
+                            break
+                donor_slots.sort(key=lambda x: x[1])  # continuity dÃ¼ÅŸÃ¼k Ã¶nce
+                # continuity=0 varsa onlarÄ± tercih et
+                has_zero = any(c == 0 for _, c in donor_slots)
+
+                for assignment, cont_val in donor_slots:
+                    if has_zero and cont_val >= 1.0:
+                        continue
+                    # AlÄ±cÄ± bu assignment'a atanabilir mi ve continuity saÄŸlayacak mÄ±?
+                    if not self._check_instructor_assignability(under_instructor, assignment, assignments):
+                        continue
+                    cont_gain_under = self._calculate_continuity_score(
+                        under_instructor,
+                        assignment.get('classroom_id'),
+                        assignment.get('timeslot_id'),
+                        assignments,
+                        sorted_timeslots,
+                        timeslot_to_index
+                    )
+                    # Continuity tercihi sÃ¼rer; ancak min yÃ¼kseltme kritikse continuity=0'a da izin ver
+
+                    # DonÃ¶rÃ¼n iÅŸ yÃ¼kÃ¼nÃ¼ dÃ¼ÅŸÃ¼rmek x_min_bound altÄ±na inmemeli
+                    if workloads[donor] - 1 < x_min_bound:
+                        continue
+
+                    # AlÄ±cÄ± X+1'i aÅŸmamalÄ±
+                    if workloads.get(under_instructor, 0) + 1 > x_max_bound:
+                        continue
+
+                    # Swap uygula: donÃ¶rÃ¼ Ã§Ä±kar, alÄ±cÄ±yÄ± ekle
+                    instrs = assignment.get('instructors', [])
+                    for i, ins in enumerate(instrs):
+                        iid = ins.get('id') if isinstance(ins, dict) else ins
+                        if iid == donor:
+                            instrs.pop(i)
+                            break
+                    assignment['instructors'].append(under_instructor)
+
+                    swaps += 1
+                    swapped = True
+                    break
+                if swapped:
+                    break
+
+            if not swapped:
+                # Daha fazla iyileÅŸtirme mÃ¼mkÃ¼n deÄŸil
+                break
+
+        return swaps
+
+    def _aggressive_workload_rebalancing(
+        self,
+        assignments: List[Dict[str, Any]],
+        sorted_timeslots: List[Dict[str, Any]],
+        timeslot_to_index: Dict[int, int],
+        current_workloads: Dict[int, int],
+        locked_jurors_by_project: Optional[Dict[int, Set[int]]] = None
+    ) -> int:
+        """
+        Agresif Ã§oklu swap ile iÅŸ yÃ¼kÃ¼ dengeleme
+        
+        Fark Ã§ok bÃ¼yÃ¼kse (5'ten fazla), aynÄ± iterasyonda birden fazla swap yaparak
+        daha hÄ±zlÄ± denge saÄŸlar.
+        
+        Args:
+            assignments: TÃ¼m atamalar
+            sorted_timeslots: SÄ±ralÄ± timeslot listesi
+            timeslot_to_index: Timeslot ID -> index mapping
+            current_workloads: Mevcut iÅŸ yÃ¼kleri
+        
+        Returns:
+            int: YapÄ±lan swap sayÄ±sÄ±
+        """
+        swaps_performed = 0
+        max_aggressive_iterations = 50
+        
+        if not current_workloads:
+            return 0
+        
+        avg_workload = sum(current_workloads.values()) / len(current_workloads)
+        max_workload = max(current_workloads.values())
+        min_workload = min(current_workloads.values())
+        workload_diff = max_workload - min_workload
+        
+        if workload_diff <= 2:
+            return 0
+        
+        logger.info(f"  ğŸ”¥ Agresif dengeleme: Fark={workload_diff}, Ort={avg_workload:.1f}")
+        
+        for iteration in range(max_aggressive_iterations):
+            workloads = self._calculate_current_workloads(assignments)
+            if not workloads:
+                break
+            
+            max_wl = max(workloads.values())
+            min_wl = min(workloads.values())
+            diff = max_wl - min_wl
+            
+            if diff <= 2:
+                logger.info(f"  âœ… Agresif dengeleme baÅŸarÄ±lÄ±: Fark {diff}'e dÃ¼ÅŸtÃ¼")
+                break
+            
+            # AÅŸÄ±rÄ± yÃ¼klÃ¼ ve az yÃ¼klÃ¼ hocalarÄ± bul
+            overloaded = sorted(
+                [(inst_id, wl) for inst_id, wl in workloads.items() if wl > avg_workload + 1],
+                key=lambda x: x[1],
+                reverse=True
+            )
+            underloaded = sorted(
+                [(inst_id, wl) for inst_id, wl in workloads.items() if wl < avg_workload - 1],
+                key=lambda x: x[1]
+            )
+            
+            if not overloaded or not underloaded:
+                break
+            
+            # Her iterasyonda birden fazla swap yapmaya Ã§alÄ±ÅŸ
+            swaps_this_iteration = 0
+            max_swaps_per_iteration = min(3, len(overloaded), len(underloaded))  # En fazla 3 swap
+            
+            for swap_idx in range(max_swaps_per_iteration):
+                if swap_idx >= len(overloaded) or swap_idx >= len(underloaded):
+                    break
+                
+                max_inst = overloaded[swap_idx][0]
+                min_inst = underloaded[swap_idx][0]
+                
+                # Max hocadan uygun slot bul (kilitli jÃ¼riyi koru)
+                max_inst_slots = []
+                for assignment in assignments:
+                    instructors = assignment.get('instructors', [])
+                    responsible_id = assignment.get('responsible_instructor_id')
+                    if not responsible_id and instructors:
+                        first_instr = instructors[0]
+                        responsible_id = first_instr.get("id") if isinstance(first_instr, dict) else first_instr
+                    
+                    if isinstance(responsible_id, dict):
+                        responsible_id = responsible_id.get("id")
+                    
+                    # Max hocanÄ±n jÃ¼ri slotlarÄ±nÄ± bul
+                    for instr in instructors:
+                        instr_id = instr.get("id") if isinstance(instr, dict) else instr
+                        if instr_id == max_inst and instr_id != responsible_id:
+                            proj_id_here = assignment.get('project_id')
+                            if locked_jurors_by_project and proj_id_here in locked_jurors_by_project:
+                                if instr_id in locked_jurors_by_project[proj_id_here]:
+                                    continue
+                            max_inst_slots.append({
+                                'assignment': assignment,
+                                'project_id': assignment.get('project_id'),
+                                'classroom_id': assignment.get('classroom_id'),
+                                'timeslot_id': assignment.get('timeslot_id')
+                            })
+                            break
+                
+                # Min hocaya uygun slot bul
+                swapped = False
+                for slot_info in max_inst_slots:
+                    assignment = slot_info['assignment']
+                    can_assign = self._check_instructor_assignability(
+                        min_inst,
+                        assignment,
+                        assignments
+                    )
+                    
+                    if can_assign:
+                        # Swap yap
+                        instructors_list = assignment.get('instructors', [])
+                        # Max hocayÄ± kaldÄ±r, min hocayÄ± ekle
+                        new_instructors = []
+                        for instr in instructors_list:
+                            instr_id = instr.get("id") if isinstance(instr, dict) else instr
+                            if instr_id != max_inst:
+                                new_instructors.append(instr)
+                        new_instructors.append(min_inst)
+                        assignment['instructors'] = new_instructors
+                        
+                        swaps_performed += 1
+                        swaps_this_iteration += 1
+                        swapped = True
+                        logger.debug(f"    ğŸ”¥ Agresif swap #{swaps_performed}: Hoca {max_inst} â†’ Hoca {min_inst}")
+                        break
+                
+                if not swapped:
+                    # Bu Ã§ift iÃ§in swap yapÄ±lamadÄ±, sonrakine geÃ§
+                    continue
+            
+            if swaps_this_iteration == 0:
+                # Bu iterasyonda hiÃ§ swap yapÄ±lamadÄ±
+                break
+        
+        return swaps_performed
+
+    def _quick_rebalance_pass(
+        self,
+        assignments: List[Dict[str, Any]],
+        sorted_timeslots: List[Dict[str, Any]],
+        timeslot_to_index: Dict[int, int],
+        locked_jurors_by_project: Optional[Dict[int, Set[int]]] = None,
+        max_iterations: int = 10
+    ) -> int:
+        """
+        HÄ±zlÄ± rebalancing pass - assignment sÄ±rasÄ±nda Ã§aÄŸrÄ±lÄ±r
+        
+        Args:
+            assignments: TÃ¼m atamalar
+            sorted_timeslots: SÄ±ralÄ± timeslot listesi
+            timeslot_to_index: Timeslot ID -> index mapping
+            max_iterations: Maksimum iterasyon sayÄ±sÄ±
+        
+        Returns:
+            int: YapÄ±lan swap sayÄ±sÄ±
+        """
+        swaps_performed = 0
+        
+        for iteration in range(max_iterations):
+            workloads = self._calculate_current_workloads(assignments)
+            
+            if not workloads:
+                break
+            
+            max_workload = max(workloads.values())
+            min_workload = min(workloads.values())
+            workload_diff = max_workload - min_workload
+            
+            # EÄŸer fark 2 veya daha azsa yeterli dengede
+            if workload_diff <= 2:
+                break
+            
+            avg_workload = sum(workloads.values()) / len(workloads)
+            
+            # En yÃ¼ksek ve en dÃ¼ÅŸÃ¼k yÃ¼kteki hocalarÄ± bul
+            max_instructors = [inst_id for inst_id, wl in workloads.items() if wl == max_workload]
+            min_instructors = [inst_id for inst_id, wl in workloads.items() if wl == min_workload]
+            
+            swapped = False
+            
+            # Sadece bir swap yap (hÄ±zlÄ± olmalÄ±)
+            for max_instructor in max_instructors:
+                if swapped:
+                    break
+                
+                # Max hocadan bir jÃ¼ri slotu bul (kilitli jÃ¼riyi koru)
+                for assignment in assignments:
+                    instructors = assignment.get('instructors', [])
+                    responsible_id = assignment.get('responsible_instructor_id')
+                    if not responsible_id and instructors:
+                        first_instr = instructors[0]
+                        responsible_id = first_instr.get("id") if isinstance(first_instr, dict) else first_instr
+                    
+                    if isinstance(responsible_id, dict):
+                        responsible_id = responsible_id.get("id")
+                    
+                    # Max hocanÄ±n jÃ¼ri gÃ¶revi var mÄ±?
+                    is_jury = False
+                    for instr in instructors:
+                        instr_id = instr.get("id") if isinstance(instr, dict) else instr
+                        if instr_id == max_instructor and instr_id != responsible_id:
+                            proj_id_here = assignment.get('project_id')
+                            if locked_jurors_by_project and proj_id_here in locked_jurors_by_project:
+                                if instr_id in locked_jurors_by_project[proj_id_here]:
+                                    continue
+                            is_jury = True
+                            break
+                    
+                    if not is_jury:
+                        continue
+                    
+                    # Min hocaya atanabilir mi?
+                    for min_instructor in min_instructors:
+                        if swapped:
+                            break
+                        
+                        can_assign = self._check_instructor_assignability(
+                            min_instructor,
+                            assignment,
+                            assignments
+                        )
+                        
+                        if can_assign:
+                            # Swap yap
+                            new_instructors = []
+                            for instr in instructors:
+                                instr_id = instr.get("id") if isinstance(instr, dict) else instr
+                                if instr_id != max_instructor:
+                                    new_instructors.append(instr)
+                            new_instructors.append(min_instructor)
+                            assignment['instructors'] = new_instructors
+                            
+                            swaps_performed += 1
+                            swapped = True
+                            break
+                
+                if swapped:
+                    break
+            
+            if not swapped:
+                # Bu iterasyonda swap yapÄ±lamadÄ±, dur
+                break
+        
+        return swaps_performed
+
+    def _parse_time(self, time_str: str) -> dt_time:
+        """Zaman string'ini datetime.time'a Ã§evir"""
+        try:
+            if isinstance(time_str, dt_time):
+                return time_str
+            parts = str(time_str).split(':')

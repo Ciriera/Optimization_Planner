@@ -32,6 +32,7 @@ class Instructor(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)
+    email = Column(String(200), index=True, nullable=True)  # Email address for notifications
     type = Column(String, index=True)  # Changed from role to type
     bitirme_count = Column(Integer, default=0)
     ara_count = Column(Integer, default=0)
@@ -52,8 +53,9 @@ class Instructor(Base):
         return {
             "id": self.id,
             "name": self.name,
+            "email": self.email,
             "type": self.type,
-            "department": self.department,
+            "department": getattr(self, "department", None),
             "bitirme_count": self.bitirme_count,
             "ara_count": self.ara_count,
             "total_load": self.total_load

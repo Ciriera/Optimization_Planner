@@ -14,10 +14,10 @@ DATABASE_URL = os.getenv(
     f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@{settings.POSTGRES_SERVER}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
 )
 
-# Async PostgreSQL connection URL
+# Async PostgreSQL connection URL - psycopg3 kullanıyoruz (Python 3.14 uyumlu)
 ASYNC_DATABASE_URL = os.getenv(
     "ASYNC_DATABASE_URL", 
-    f"postgresql+asyncpg://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@{settings.POSTGRES_SERVER}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
+    f"postgresql+psycopg://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@{settings.POSTGRES_SERVER}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
 )
 
 # Create engines

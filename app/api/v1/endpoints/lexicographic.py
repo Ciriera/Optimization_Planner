@@ -80,7 +80,8 @@ async def optimize_with_lexicographic(
                 {
                     "id": p.id,
                     "title": p.title,
-                    "supervisor_id": p.responsible_instructor_id,
+                    "responsible_id": p.responsible_instructor_id,
+                    "responsible_instructor_id": p.responsible_instructor_id,
                     "type": p.type.value if hasattr(p.type, 'value') else str(p.type),
                     "is_makeup": p.is_makeup
                 }
@@ -90,8 +91,8 @@ async def optimize_with_lexicographic(
                 {
                     "id": i.id,
                     "name": i.name,
-                    "project_count": len([p for p in projects if p.responsible_instructor_id == i.id]),
-                    "availability": [True] * len(timeslots)  # Varsayılan olarak tüm zaman dilimlerinde müsait
+                    "type": i.type,
+                    "project_count": len([p for p in projects if p.responsible_instructor_id == i.id])
                 }
                 for i in instructors
             ],
@@ -110,7 +111,8 @@ async def optimize_with_lexicographic(
                     "capacity": c.capacity
                 }
                 for c in classrooms
-            ]
+            ],
+            "classroom_count": algorithm_in.get("classroom_count") if algorithm_in else None
         }
         
         # Lexicographic algoritmasını başlat
@@ -128,79 +130,77 @@ async def optimize_with_lexicographic(
         saved_count = 0
         
         for assignment in assignments:
-            # Supervisor ve jury bilgilerini al
-            supervisor_id = assignment.get("supervisor_id")
-            jury_id = assignment.get("jury_id")
-            time_slot_id = assignment.get("time_slot_id")
+            project_id = assignment.get("project_id")
+            classroom_id = assignment.get("classroom_id")
+            timeslot_id = assignment.get("timeslot_id")
+            instructors = assignment.get("instructors", [])
             
-            if supervisor_id and jury_id and time_slot_id:
-                # Projeyi bul (supervisor'a göre)
+            if project_id and classroom_id and timeslot_id:
+                # Projeyi bul
                 project_result = await db.execute(
-                    select(Project).where(Project.responsible_instructor_id == supervisor_id).limit(1)
+                    select(Project).where(Project.id == project_id)
                 )
                 project = project_result.scalar_one_or_none()
                 
                 if project:
-                    # Algoritmanın atadığı sınıfı kullan veya rastgele bir sınıf seç
-                    classroom_id = assignment.get("classroom_id")
+                    # Instructors'ı normalize et: Placeholder'ları koru, gerçek ID'leri al
+                    normalized_instructors = []
+                    for inst in instructors:
+                        if isinstance(inst, dict):
+                            # Placeholder veya dict formatında instructor
+                            if inst.get("is_placeholder", False):
+                                # Placeholder'ı özel format olarak sakla
+                                normalized_instructors.append({
+                                    "id": -1,
+                                    "name": inst.get("name", "[Araştırma Görevlisi]"),
+                                    "is_placeholder": True
+                                })
+                            else:
+                                # Normal instructor dict
+                                normalized_instructors.append(inst.get("id", inst))
+                        elif isinstance(inst, int):
+                            # Integer ID
+                            normalized_instructors.append(inst)
+                        else:
+                            # String veya diğer formatlar
+                            normalized_instructors.append(inst)
                     
-                    # Eğer sınıf ID'si yoksa veya geçersizse rastgele bir sınıf seç
-                    if not classroom_id or not any(c.id == classroom_id for c in classrooms):
-                        # Sınıf dağılımını optimize etmek için en az kullanılan sınıfı seç
-                        classroom_usage = {}
-                        for c in classrooms:
-                            classroom_usage[c.id] = 0
-                        
-                        # Mevcut atamaları say
-                        for a in assignments:
-                            if a.get("classroom_id") in classroom_usage:
-                                classroom_usage[a.get("classroom_id")] += 1
-                        
-                        # En az kullanılan sınıfları bul
-                        min_usage = min(classroom_usage.values()) if classroom_usage else 0
-                        least_used_classrooms = [c for c in classrooms if classroom_usage.get(c.id, 0) == min_usage]
-                        
-                        # Rastgele bir sınıf seç (çeşitlilik için)
-                        import random
-                        classroom = random.choice(least_used_classrooms) if least_used_classrooms else (classrooms[0] if classrooms else None)
-                    else:
-                        # Algoritmanın atadığı sınıfı bul
-                        classroom = next((c for c in classrooms if c.id == classroom_id), classrooms[0] if classrooms else None)
-                    
-                    if classroom:
-                        # Schedule oluştur
-                        new_schedule = Schedule(
-                            project_id=project.id,
-                            classroom_id=classroom.id,
-                            timeslot_id=time_slot_id,
-                            is_makeup=False
-                        )
-                        db.add(new_schedule)
-                        saved_count += 1
+                    # Schedule oluştur (instructors JSON alanında sakla)
+                    new_schedule = Schedule(
+                        project_id=project.id,
+                        classroom_id=classroom_id,
+                        timeslot_id=timeslot_id,
+                        instructors=normalized_instructors,  # JSON alanında sakla
+                        is_makeup=assignment.get("is_makeup", False)
+                    )
+                    db.add(new_schedule)
+                    saved_count += 1
         
         await db.commit()
         
         logger.info(f"✅ {saved_count} schedule kaydedildi")
         
-        # AI metriklerini hesapla
-        ai_metrics = lexicographic.get_ai_enhanced_metrics()
-        
         # Sonuçları döndür
+        stats = result.get("stats", {})
         return {
             "id": 1,
             "task_id": f"lexicographic_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
             "status": "success",
-            "message": f"🤖 Lexicographic optimization başarıyla tamamlandı! {len(assignments)} atama yapıldı, {saved_count} schedule kaydedildi.",
+            "message": f"🧩 Lexicographic optimization başarıyla tamamlandı! {len(assignments)} atama yapıldı, {saved_count} schedule kaydedildi.",
             "algorithm_type": "lexicographic",
             "result": {
                 "assignments": assignments,
-                "ai_metrics": ai_metrics,
+                "schedule": result.get("schedule", assignments),
                 "stats": {
                     "total_assignments": len(assignments),
                     "saved_assignments": saved_count,
-                    "workload_distribution": ai_metrics.get("workload_distribution", 0),
-                    "pairing_efficiency": ai_metrics.get("pairing_efficiency", 0),
-                    "schedule_optimization": ai_metrics.get("schedule_optimization", 0)
+                    "total_projects": stats.get("total_projects", 0),
+                    "total_instructors": stats.get("total_instructors", 0),
+                    "total_classrooms": stats.get("total_classrooms", 0),
+                    "placeholder_count": stats.get("placeholder_count", 0),
+                    "uniformity_metric": stats.get("uniformity_metric", 0.0),
+                    "execution_time": result.get("execution_time", 0.0),
+                    "fitness": result.get("fitness", 0.0)
                 }
             },
             "timestamp": datetime.now().isoformat()

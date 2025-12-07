@@ -12,6 +12,7 @@ from app.models.algorithm import AlgorithmRun, AlgorithmType
 from app.models.user import User, UserRole
 from app.models.student import Student, project_student, student_keyword
 from app.models.keyword import Keyword
+from app.models.notification import NotificationLog, NotificationStatus
 
 __all__ = [
     "AuditLog",
@@ -28,4 +29,6 @@ __all__ = [
     "Keyword",
     "project_student",
     "student_keyword",
+    "NotificationLog",
+    "NotificationStatus",
 ] 

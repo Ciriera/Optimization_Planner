@@ -1,3785 +1,2979 @@
 """
-Simulated Annealing Algorithm Implementation - AI-BASED Randomizer with Temperature-Based Optimization
-Uses AI-driven temperature scheduling for intelligent exploration vs exploitation
+Simulated Annealing Algorithm for Academic Project Exam/Jury Scheduling
 
-🔧 CONFLICT RESOLUTION INTEGRATED:
-- Automatic conflict detection and resolution
-- Temperature-based conflict resolution strategies
-- Real-time conflict monitoring during optimization
+This module implements a comprehensive Simulated Annealing (SA) optimizer
+for the multi-criteria, multi-constraint academic project scheduling problem.
+
+Key Features:
+- Multi-objective optimization (H1-H4 penalties)
+- Configurable priority modes (ARA_ONCE, BITIRME_ONCE, ESIT)
+- Flexible temperature schedules
+- Adaptive cooling and reheating
+- Memory-based restart mechanism
+- Full constraint satisfaction via repair mechanism
+
+Author: Optimization Planner System
 """
 
-from typing import Dict, Any, List, Tuple
-import time
-import logging
 import random
 import math
-import numpy as np
+import time
+import logging
+from dataclasses import dataclass, field
+from typing import Dict, List, Any, Optional, Tuple, Set
 from collections import defaultdict
-from datetime import time as dt_time
-from app.algorithms.base import OptimizationAlgorithm
-from app.algorithms.gap_free_assignment import GapFreeAssignment
+from enum import Enum
+from copy import deepcopy
 
+# Configure logging
 logger = logging.getLogger(__name__)
 
 
-class SimulatedAnnealing(OptimizationAlgorithm):
+# =============================================================================
+# ENUMS AND CONFIGURATION
+# =============================================================================
+
+class PriorityMode(Enum):
+    """Project type prioritization mode"""
+    ARA_ONCE = "ARA_ONCE"           # Interim projects first
+    BITIRME_ONCE = "BITIRME_ONCE"   # Final projects first
+    ESIT = "ESIT"                   # No priority
+
+
+class TimePenaltyMode(Enum):
+    """Time/gap penalty calculation mode"""
+    BINARY = "BINARY"                       # 0 or 1 penalty
+    GAP_PROPORTIONAL = "GAP_PROPORTIONAL"   # Penalty proportional to gap size
+
+
+class WorkloadConstraintMode(Enum):
+    """Workload constraint enforcement mode"""
+    SOFT_ONLY = "SOFT_ONLY"           # Only soft penalty
+    SOFT_AND_HARD = "SOFT_AND_HARD"   # Soft penalty + hard limit
+
+
+class CoolingSchedule(Enum):
+    """Temperature cooling schedule types"""
+    GEOMETRIC = "GEOMETRIC"       # T = T * alpha
+    LINEAR = "LINEAR"             # T = T - delta
+    EXPONENTIAL = "EXPONENTIAL"   # T = T * exp(-alpha * iter)
+    ADAPTIVE = "ADAPTIVE"         # Adaptive based on acceptance rate
+    REHEATING = "REHEATING"       # Periodic reheating
+
+
+@dataclass
+class SAConfig:
+    """Configuration for Simulated Annealing algorithm"""
+    
+    # Temperature parameters
+    initial_temperature: float = 1000.0
+    final_temperature: float = 0.1
+    cooling_rate: float = 0.995
+    cooling_schedule: CoolingSchedule = CoolingSchedule.GEOMETRIC
+    
+    # Iteration limits
+    max_iterations: int = 50000
+    max_no_improve: int = 5000
+    iterations_per_temperature: int = 100
+    
+    # Restart parameters
+    num_restarts: int = 3
+    restart_on_stagnation: bool = True
+    stagnation_threshold: int = 2000
+    
+    # Reheating parameters
+    reheat_threshold: int = 1000
+    reheat_factor: float = 1.5
+    
+    # Class count
+    class_count: int = 6
+    auto_class_count: bool = True
+    
+    # Priority and penalty modes
+    priority_mode: PriorityMode = PriorityMode.ESIT
+    time_penalty_mode: TimePenaltyMode = TimePenaltyMode.GAP_PROPORTIONAL
+    workload_constraint_mode: WorkloadConstraintMode = WorkloadConstraintMode.SOFT_ONLY
+    workload_hard_limit: int = 4  # B_max
+    
+    # Penalty weights (C1, C2, C3, C4, C5, C6)
+    weight_h1: float = 1.0    # Time/Gap penalty
+    weight_h2: float = 2.0    # Workload uniformity penalty (most important)
+    weight_h3: float = 3.0    # Class change penalty
+    weight_h4: float = 0.5    # Class load balance penalty
+    weight_continuity: float = 5.0   # Continuity penalty
+    weight_timeslot_conflict: float = 1000.0  # Timeslot conflict (HARD)
+    weight_unused_class: float = 10000.0  # Unused class penalty (HARD - VERY HIGH)
+    
+    # Slot parameters
+    slot_duration: float = 0.5  # 30 minutes
+    tolerance: float = 0.001
+    
+    # Neighbour move probabilities
+    prob_j1_swap: float = 0.18
+    prob_j1_reassign: float = 0.22
+    prob_class_move: float = 0.20
+    prob_class_swap: float = 0.15
+    prob_order_swap: float = 0.15
+    prob_fill_unused_class: float = 0.10  # NEW: Move project to unused class
+    
+    # Memory parameters
+    memory_size: int = 10
+    use_memory: bool = True
+
+
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
+
+@dataclass
+class Project:
+    """Project data structure"""
+    id: int
+    name: str
+    type: str  # "INTERIM" or "FINAL"
+    responsible_id: int  # PS (advisor) - fixed
+
+
+@dataclass
+class Instructor:
+    """Instructor data structure"""
+    id: int
+    name: str
+    type: str  # "instructor" or "research_assistant"
+
+
+@dataclass
+class ProjectAssignment:
+    """Assignment of a single project"""
+    project_id: int
+    class_id: int
+    order_in_class: int
+    ps_id: int      # Fixed advisor
+    j1_id: int      # Jury 1 (decision variable)
+    j2_id: int = -1  # Placeholder for RA
+
+
+@dataclass
+class SAState:
+    """SA solution state"""
+    assignments: List[ProjectAssignment] = field(default_factory=list)
+    class_count: int = 6
+    cost: float = float('inf')
+    
+    def copy(self) -> 'SAState':
+        """Create a deep copy of this state"""
+        new_state = SAState(class_count=self.class_count, cost=self.cost)
+        new_state.assignments = [
+            ProjectAssignment(
+                project_id=a.project_id,
+                class_id=a.class_id,
+                order_in_class=a.order_in_class,
+                ps_id=a.ps_id,
+                j1_id=a.j1_id,
+                j2_id=a.j2_id
+            )
+            for a in self.assignments
+        ]
+        return new_state
+    
+    def get_project_assignment(self, project_id: int) -> Optional[ProjectAssignment]:
+        """Get assignment for a specific project"""
+        for a in self.assignments:
+            if a.project_id == project_id:
+                return a
+        return None
+
+
+# =============================================================================
+# PENALTY CALCULATOR
+# =============================================================================
+
+class SAPenaltyCalculator:
     """
-    Simulated Annealing Algorithm - FULL AI-BASED OPTIMIZATION with Phase 1, 2, 3 Intelligence.
+    Calculate all penalty values for SA cost function.
     
-    PHASE 1: AI-BASED RANDOMIZER & TEMPERATURE MANAGEMENT
-    1. TEMPERATURE-BASED INSTRUCTOR SELECTION - Higher temp = more randomness, Lower temp = more greedy
-    2. AI-BASED CLASSROOM SELECTION - Temperature-driven exploration vs exploitation
-    3. AI-BASED PROJECT ORDERING - Dynamic shuffling based on temperature
-    4. AI-DRIVEN COOLING SCHEDULE - Exponential/Linear/Adaptive cooling strategies
-    5. INTELLIGENT ACCEPTANCE PROBABILITY - Metropolis criterion for bad moves
-    6. ENERGY-BASED FITNESS - Projects with better fitness get priority at low temperatures
-    
-    PHASE 2: AI-BASED TIMESLOT & JURY ASSIGNMENT
-    7. AI-BASED TIMESLOT SELECTION - Temperature-based early slot preference
-    8. AI-BASED JURY ASSIGNMENT - Strategic jury selection with load balancing
-    9. TEMPERATURE-BASED TIMESLOT INTELLIGENCE - Dynamic timeslot exploration
-    10. TEMPERATURE-BASED JURY INTELLIGENCE - Smart jury pairing
-    
-    PHASE 3: AI-BASED CONFLICT RESOLUTION & ADAPTIVE SEARCH
-    11. AI-BASED CONFLICT RESOLUTION - Temperature-based conflict resolution strategy
-    12. ADAPTIVE NEIGHBORHOOD SEARCH - Dynamic search radius based on temperature
-    13. INTELLIGENT CONFLICT DETECTION - Advanced conflict analysis
-    14. MULTI-PASS RESOLUTION - Multiple attempts to resolve conflicts
-    15. REAL-TIME CONFLICT MONITORING - Continuous conflict detection during optimization
-    16. AUTOMATIC CONFLICT RESOLUTION - Seamless integration with optimization process
-    7. ADAPTIVE NEIGHBORHOOD SEARCH - Temperature affects how far we explore
-    8. SMART RESTART MECHANISM - Reheat when stuck in local optima
-    9. EARLY TIMESLOT OPTIMIZATION - Prefers earlier timeslots (GLOBAL)
-    10. GAP-FREE OPTIMIZATION - Minimizes empty slots (GLOBAL)
-    11. CLASSROOM-WISE EARLY SLOT OPTIMIZATION - Fills early gaps per classroom (NEW)
-    12. CLASSROOM-WISE GAP PENALTY - Penalizes gaps in each classroom individually (NEW)
-    13. BALANCED CLASSROOM USAGE - Rewards balanced distribution across classrooms (NEW)
-    
-    Core Principles:
-    - HIGH TEMPERATURE (T > 100): Random exploration, accept bad moves frequently
-    - MEDIUM TEMPERATURE (50 < T < 100): Balanced exploration and exploitation
-    - LOW TEMPERATURE (T < 50): Greedy selection, only accept good moves
-    - FREEZING (T < 10): Pure greedy, no randomness
-    - EARLY TIMESLOT PREFERENCE: Rewards using earlier timeslots (GLOBAL + PER CLASSROOM)
-    - GAP MINIMIZATION: Penalizes empty slots in schedule (GLOBAL + PER CLASSROOM)
-    - CLASSROOM BALANCE: Ensures balanced usage across all classrooms
-    
-    Strategy:
-    "AI-based randomizer uses temperature to control randomness level dynamically.
-    At high temperatures, we explore randomly. As temperature cools, we become
-    more selective and exploit good solutions."
+    Implements:
+    - H1: Time/Gap penalty
+    - H2: Workload uniformity penalty
+    - H3: Class change penalty
+    - H4: Class load balance penalty
+    - H5: Continuity penalty
+    - H6: Timeslot conflict penalty (hard)
+    - H7: Unused class penalty (hard)
     """
-
-    def __init__(self, params: Dict[str, Any] = None):
-        super().__init__(params)
-        self.name = "Simulated Annealing Algorithm (AI-BASED)"
-        self.description = "AI-BASED Randomizer with Temperature-Based Intelligence"
-        
-        # AI-Based Parameters
-        self.initial_temperature = params.get("initial_temperature", 1000.0) if params else 1000.0
-        self.final_temperature = params.get("final_temperature", 1.0) if params else 1.0
-        self.cooling_rate = params.get("cooling_rate", 0.90) if params else 0.90  # Faster cooling (was 0.95)
-        self.max_iterations = params.get("max_iterations", 20) if params else 20  # Reduced from 100 to 20
-        self.reheat_temperature = params.get("reheat_temperature", 500.0) if params else 500.0
-        self.cooling_strategy = params.get("cooling_strategy", "exponential") if params else "exponential"
-        
-        # OPTIMIZATION: Early stopping parameters
-        self.early_stopping_threshold = params.get("early_stopping_threshold", 5) if params else 5
-        self.no_improvement_count = 0
-        
-        # 🔧 CONFLICT RESOLUTION PARAMETERS
-        self.conflict_resolution_enabled = params.get("conflict_resolution_enabled", True) if params else True
-        self.conflict_detection_frequency = params.get("conflict_detection_frequency", 5) if params else 5
-        self.auto_resolve_conflicts = params.get("auto_resolve_conflicts", True) if params else True
-        self.conflict_types = {
-            'instructor_double_assignment': 'Aynı instructor aynı zaman diliminde 2 farklı görevde',
-            'instructor_double_jury': 'Aynı instructor aynı zaman diliminde 2 farklı jüri üyesi',
-            'instructor_supervisor_jury_conflict': 'Aynı instructor hem sorumlu hem jüri aynı zamanda',
-            'classroom_double_booking': 'Aynı sınıf aynı zaman diliminde 2 projede',
-            'timeslot_overflow': 'Zaman dilimi kapasitesi aşıldı'
-        }
-        
-        # AI-BASED Early Timeslot & Gap Optimization Parameters (ULTRA-AGGRESSIVE!)
-        self.reward_early_timeslot = params.get("reward_early_timeslot", 50.0) if params else 50.0  # Increased!
-        self.penalty_gap = params.get("penalty_gap", -500.0) if params else -500.0  # ULTRA-AGGRESSIVE!
-        self.penalty_late_timeslot = params.get("penalty_late_timeslot", -50.0) if params else -50.0  # Increased!
-        
-        # SINIFLARARASI OPTİMİZASYON (ULTRA-AGGRESSIVE GAP!)
-        self.reward_classroom_early_slot = params.get("reward_classroom_early_slot", 100.0) if params else 100.0  # Increased!
-        self.penalty_classroom_gap = params.get("penalty_classroom_gap", -300.0) if params else -300.0  # ULTRA-AGGRESSIVE!
-        self.reward_balanced_classroom_usage = params.get("reward_balanced_classroom_usage", 200.0) if params else 200.0
-        
-        # ULTRA-AGGRESSIVE UNIFORM DISTRIBUTION (NEW!)
-        self.reward_perfect_uniform = params.get("reward_perfect_uniform", 500.0) if params else 500.0  # Perfect uniform = huge reward
-        self.penalty_uniform_imbalance = params.get("penalty_uniform_imbalance", -300.0) if params else -300.0  # Imbalance = huge penalty
-        
-        # ULTRA-AGGRESSIVE GAP-FILLING PARAMETERS (NEW!)
-        self.reward_gap_filled = params.get("reward_gap_filled", 200.0) if params else 200.0  # Huge reward for filling gaps
-        self.penalty_large_gap = params.get("penalty_large_gap", -1000.0) if params else -1000.0  # Massive penalty for large gaps
-        self.force_gap_filling = params.get("force_gap_filling", True) if params else True  # Force fill gaps
-        
-        # SUPER AGGRESSIVE: COMPACT CLASSROOMS (NEW!)
-        self.compact_classrooms = params.get("compact_classrooms", True) if params else True  # Compact assignments into fewer classrooms
-        self.reward_full_classroom = params.get("reward_full_classroom", 500.0) if params else 500.0  # Huge reward for fully filled classroom
-        self.penalty_empty_classroom = params.get("penalty_empty_classroom", -200.0) if params else -200.0  # Penalty for empty classrooms
-        
-        # POST-OPTIMIZATION COMPACTION (NEW!)
-        self.post_optimization_compaction = params.get("post_optimization_compaction", True) if params else True  # Automatic upward shift after optimization
-        self.aggressive_upward_shift = params.get("aggressive_upward_shift", True) if params else True  # Aggressively shift assignments to early slots
-        
-        # CLASSROOM TIMESLOT BALANCING (NEW!)
-        self.classroom_timeslot_balancing = params.get("classroom_timeslot_balancing", True) if params else True  # Balance timeslot usage across classrooms
-        self.balance_target_range = params.get("balance_target_range", 3) if params else 3  # Max timeslot range difference between classrooms
-        
-        # PHASE 3: AI-BASED CONFLICT RESOLUTION (NEW!)
-        self.ai_based_conflict_resolution = params.get("ai_based_conflict_resolution", True) if params else True  # AI-based conflict resolution
-        self.temperature_based_resolution = params.get("temperature_based_resolution", True) if params else True  # Temperature-based resolution strategy
-        
-        # PHASE 3: ADAPTIVE NEIGHBORHOOD SEARCH (NEW!)
-        self.adaptive_neighborhood_search = params.get("adaptive_neighborhood_search", True) if params else True  # Adaptive neighborhood search
-        self.min_neighborhood_size = params.get("min_neighborhood_size", 2) if params else 2  # Minimum neighborhood radius
-        self.max_neighborhood_size = params.get("max_neighborhood_size", 10) if params else 10  # Maximum neighborhood radius
-        
-        # PHASE 2: AI-BASED TIMESLOT & JURY ASSIGNMENT
-        self.ai_based_timeslot_selection = params.get("ai_based_timeslot_selection", True) if params else True
-        self.ai_based_jury_assignment = params.get("ai_based_jury_assignment", True) if params else True
-        
-        # AI Learning Parameters
-        self.temperature = self.initial_temperature
-        self.current_iteration = 0
-        self.best_energy = float('inf')
-        self.stuck_count = 0
-        self.max_stuck_iterations = 20
-        
-        # Initialize data storage
-        self.projects = []
-        self.instructors = []
-        self.classrooms = []
-        self.timeslots = []
-
-    def initialize(self, data: Dict[str, Any]):
-        """Initialize the algorithm with problem data."""
-        self.data = data
-        self.projects = data.get("projects", [])
-        self.instructors = data.get("instructors", [])
-        self.classrooms = data.get("classrooms", [])
-        self.timeslots = data.get("timeslots", [])
-
-        # Validate data
-        if not self.projects or not self.instructors or not self.classrooms or not self.timeslots:
-            raise ValueError("Insufficient data for Real Simplex Algorithm")
-
-    def optimize(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Run AI-BASED Simulated Annealing optimization with Temperature-Based Randomizer.
-        Uses intelligent temperature scheduling for optimal exploration-exploitation balance.
-        """
-        start_time = time.time()
-        self.initialize(data)
-        
-        logger.info("=" * 80)
-        logger.info("AI-BASED SIMULATED ANNEALING ALGORITHM")
-        logger.info("=" * 80)
-        logger.info(f"🔥 Initial Temperature: {self.initial_temperature}°C")
-        logger.info(f"❄️  Final Temperature: {self.final_temperature}°C")
-        logger.info(f"📉 Cooling Rate: {self.cooling_rate}")
-        logger.info(f"🔄 Max Iterations: {self.max_iterations}")
-        logger.info(f"🔥 Reheat Temperature: {self.reheat_temperature}°C")
-        logger.info(f"📊 Cooling Strategy: {self.cooling_strategy}")
-        logger.info("")
-        logger.info(f"📊 Projeler: {len(self.projects)}")
-        logger.info(f"👥 Instructors: {len(self.instructors)}")
-        logger.info(f"🏫 Sınıflar: {len(self.classrooms)}")
-        logger.info(f"⏰ Zaman Slotları: {len(self.timeslots)}")
-        logger.info("")
-
-        # AI-BASED Temperature Annealing Loop
-        best_solution = None
-        best_energy = float('inf')
-        current_solution = None
-        current_energy = float('inf')
-        
-        logger.info("🔥 AI-BASED Temperature Annealing başlatılıyor...")
-        
-        for iteration in range(self.max_iterations):
-            self.current_iteration = iteration
-            
-            # Create solution with current temperature
-            logger.info("")
-            logger.info(f"🔄 Iteration {iteration + 1}/{self.max_iterations}")
-            current_solution = self._create_pure_consecutive_grouping_solution()
-            
-            # ULTRA-AGGRESSIVE GAP MINIMIZATION: Minimize gaps by compacting assignments
-            current_solution = self._ultra_aggressive_gap_minimization(current_solution)
-            
-            # SUPER AGGRESSIVE: COMPACT CLASSROOMS - Fill fewer classrooms completely
-            if self.compact_classrooms:
-                current_solution = self._compact_into_fewer_classrooms(current_solution)
-            
-            current_energy = self._calculate_energy(current_solution)
-            
-            # AI-Based Acceptance Criterion (Metropolis)
-            if current_energy < best_energy:
-                # Better solution - always accept
-                improvement = best_energy - current_energy
-                best_solution = current_solution
-                best_energy = current_energy
-                self.stuck_count = 0
-                self.no_improvement_count = 0  # Reset early stopping counter
-                logger.info(f"   ✅ NEW BEST: Energy = {best_energy:.2f} (improved by {improvement:.2f})")
-            else:
-                # Worse solution - accept with probability based on temperature
-                delta_energy = current_energy - best_energy
-                acceptance_probability = math.exp(-delta_energy / self.temperature) if self.temperature > 0 else 0
-                
-                if random.random() < acceptance_probability:
-                    # Accept worse solution (exploration)
-                    best_solution = current_solution
-                    best_energy = current_energy
-                    self.stuck_count = 0
-                    self.no_improvement_count += 1
-                    logger.info(f"   🎲 EXPLORATION: Energy = {best_energy:.2f} (accepted with P={acceptance_probability:.3f})")
-                else:
-                    # Reject worse solution
-                    self.stuck_count += 1
-                    self.no_improvement_count += 1
-                    logger.info(f"   ❌ REJECTED: Energy = {current_energy:.2f} (stuck: {self.stuck_count}, no improve: {self.no_improvement_count})")
-            
-            # OPTIMIZATION: Early stopping if no improvement for N iterations
-            if self.no_improvement_count >= self.early_stopping_threshold:
-                logger.warning(f"   ⏹️  EARLY STOPPING: No improvement for {self.no_improvement_count} iterations")
-                break
-            
-            # AI-Based Temperature Cooling
-            self._cool_temperature()
-            
-            # Smart Restart: Reheat if stuck in local optima
-            if self.stuck_count >= self.max_stuck_iterations:
-                logger.warning(f"   🔥 REHEAT: Stuck in local optima, reheating to {self.reheat_temperature}°C")
-                self.temperature = self.reheat_temperature
-                self.stuck_count = 0
-            
-            # Early termination if temperature is too low
-            if self.temperature < self.final_temperature:
-                logger.info(f"   ❄️  FROZEN: Temperature reached {self.temperature:.1f}°C, terminating")
-                break
-        
-        logger.info("")
-        logger.info("=" * 80)
-        logger.info("AI-BASED Simulated Annealing completed")
-        logger.info("=" * 80)
-        logger.info(f"   Best Energy: {best_energy:.2f}")
-        logger.info(f"   Final Temperature: {self.temperature:.1f}°C")
-        logger.info(f"   Total Iterations: {self.current_iteration + 1}")
-        logger.info(f"   Assignments: {len(best_solution) if best_solution else 0}")
-        logger.info("=" * 80)
-        
-        # POST-OPTIMIZATION COMPACTION: Automatic upward shift to fill early slots and minimize gaps
-        if self.post_optimization_compaction and best_solution:
-            logger.info("")
-            logger.info("🚀 POST-OPTIMIZATION COMPACTION başlatılıyor...")
-            best_solution = self._post_optimization_compact(best_solution)
-            logger.info("✅ POST-OPTIMIZATION COMPACTION tamamlandı!")
-        
-        # CLASSROOM TIMESLOT BALANCING: Balance timeslot ranges across classrooms
-        if self.classroom_timeslot_balancing and best_solution:
-            logger.info("")
-            logger.info("⚖️  CLASSROOM TIMESLOT BALANCING başlatılıyor...")
-            best_solution = self._balance_classroom_timeslots(best_solution)
-            logger.info("✅ CLASSROOM TIMESLOT BALANCING tamamlandı!")
-        
-        # Conflict detection ve resolution
-        if best_solution and len(best_solution) > 0:
-            logger.info("Conflict detection ve resolution...")
-            conflicts = self._detect_conflicts(best_solution)
-            
-            if conflicts:
-                logger.warning(f"  {len(conflicts)} conflict detected!")
-                best_solution = self._resolve_conflicts(best_solution)
-                
-                remaining_conflicts = self._detect_conflicts(best_solution)
-                if remaining_conflicts:
-                    logger.error(f"  WARNING: {len(remaining_conflicts)} conflicts still remain!")
-                else:
-                    logger.info("  All conflicts successfully resolved!")
-            else:
-                logger.info("  No conflicts detected.")
-        
-        # 🔧 CONFLICT RESOLUTION: Final check and resolution
-        if self.conflict_resolution_enabled and best_solution:
-            logger.info("🔧 [SA] CONFLICT RESOLUTION: Final check and resolution...")
-            conflicts = self._detect_all_conflicts(best_solution)
-            
-            if conflicts:
-                logger.warning(f"  {len(conflicts)} conflicts detected in final solution!")
-                if self.auto_resolve_conflicts:
-                    resolved_solution, resolution_log = self._resolve_conflicts(best_solution, conflicts)
-                    best_solution = resolved_solution
-                    successful_resolutions = len([r for r in resolution_log if r['success']])
-                    logger.info(f"  {successful_resolutions}/{len(conflicts)} conflicts resolved!")
-                else:
-                    logger.warning("  Auto-resolve disabled - conflicts remain!")
-            else:
-                logger.info("  ✅ No conflicts detected in final solution!")
-        
-        # Final stats
-        final_stats = self._calculate_grouping_stats(best_solution)
-        logger.info(f"  Final consecutive grouping stats:")
-        logger.info(f"    Consecutive instructors: {final_stats['consecutive_count']}")
-        logger.info(f"    Avg classroom changes: {final_stats['avg_classroom_changes']:.2f}")
-
-        end_time = time.time()
-        execution_time = end_time - start_time
-        logger.info(f"Simulated Annealing Algorithm completed. Execution time: {execution_time:.2f}s")
-
-        return {
-            "assignments": best_solution or [],
-            "schedule": best_solution or [],
-            "solution": best_solution or [],
-            "fitness_scores": self._calculate_fitness_scores(best_solution or []),
-            "execution_time": execution_time,
-            "algorithm": "Full AI-Powered Simulated Annealing with Conflict Resolution",
-            "status": "completed",
-            "success": True,
-            "optimizations_applied": [
-                "ai_based_temperature_randomizer",
-                "ai_based_classroom_selection",
-                "ai_based_project_ordering",
-                "intelligent_cooling_schedule",
-                "metropolis_acceptance_criterion",
-                "energy_based_fitness",
-                "adaptive_neighborhood_search",
-                "smart_restart_mechanism",
-                "pure_consecutive_grouping",
-                "smart_jury_assignment",
-                "consecutive_jury_pairing",
-                "conflict_detection_and_resolution",
-                "uniform_classroom_distribution",
-                "earliest_slot_assignment",
-                "early_timeslot_optimization",
-                "gap_free_optimization",
-                "classroom_wise_early_slot_optimization",
-                "classroom_wise_gap_penalty",
-                "balanced_classroom_usage",
-                "ultra_aggressive_uniform_distribution",
-                "perfect_uniform_reward",
-                "uniform_imbalance_penalty",
-                "fallback_jury_assignment",
-                "ai_based_timeslot_selection",
-                "ai_based_jury_assignment",
-                "temperature_based_timeslot_intelligence",
-                "temperature_based_jury_intelligence",
-                "ultra_aggressive_gap_minimization",
-                "force_gap_filling",
-                "large_gap_penalty",
-                "gap_filled_reward",
-                "massive_gap_penalties",
-                "huge_gap_rewards",
-                "super_aggressive_compact_classrooms",
-                "reward_full_classroom",
-                "penalty_empty_classroom",
-                "minimum_classrooms_usage",
-                "post_optimization_compaction",
-                "automatic_upward_shift",
-                "early_slot_maximization",
-                "gap_minimization_post_process",
-                "classroom_timeslot_balancing",
-                "balanced_timeslot_ranges",
-                "cross_classroom_optimization",
-                "ai_based_conflict_resolution",
-                "temperature_based_resolution",
-                "adaptive_neighborhood_search",
-                "dynamic_neighborhood_sizing",
-                "intelligent_conflict_detection"
-            ],
-            "stats": final_stats,
-            "parameters": {
-                "algorithm_type": "ai_based_simulated_annealing",
-                "initial_temperature": self.initial_temperature,
-                "final_temperature": self.final_temperature,
-                "cooling_rate": self.cooling_rate,
-                "max_iterations": self.max_iterations,
-                "reheat_temperature": self.reheat_temperature,
-                "cooling_strategy": self.cooling_strategy,
-                "actual_iterations": self.current_iteration + 1,
-                "best_energy": best_energy,
-                "final_temperature_reached": self.temperature,
-                "ai_based_randomizer": True,
-                "ai_based_classroom_selection": True,
-                "ai_based_project_ordering": True,
-                "temperature_based_exploration": True,
-                "smart_restart": True,
-                "reward_early_timeslot": self.reward_early_timeslot,
-                "penalty_gap": self.penalty_gap,
-                "penalty_late_timeslot": self.penalty_late_timeslot,
-                "reward_classroom_early_slot": self.reward_classroom_early_slot,
-                "penalty_classroom_gap": self.penalty_classroom_gap,
-                "reward_balanced_classroom_usage": self.reward_balanced_classroom_usage,
-                "reward_perfect_uniform": self.reward_perfect_uniform,
-                "penalty_uniform_imbalance": self.penalty_uniform_imbalance,
-                "early_timeslot_optimization": True,
-                "gap_free_optimization": True,
-                "classroom_wise_optimization": True,
-                "ultra_aggressive_uniform_distribution": True,
-                "fallback_jury_assignment": True,
-                "ai_based_timeslot_selection": self.ai_based_timeslot_selection,
-                "ai_based_jury_assignment": self.ai_based_jury_assignment,
-                "phase2_ai_intelligence": True,
-                "ultra_aggressive_gap_minimization": self.force_gap_filling,
-                "reward_gap_filled": self.reward_gap_filled,
-                "penalty_large_gap": self.penalty_large_gap,
-                "massive_gap_penalties": True,
-                "huge_gap_rewards": True,
-                "super_aggressive_compact_classrooms": self.compact_classrooms,
-                "reward_full_classroom": self.reward_full_classroom,
-                "penalty_empty_classroom": self.penalty_empty_classroom,
-                "post_optimization_compaction": self.post_optimization_compaction,
-                "aggressive_upward_shift": self.aggressive_upward_shift,
-                "classroom_timeslot_balancing": self.classroom_timeslot_balancing,
-                "balance_target_range": self.balance_target_range,
-                "ai_based_conflict_resolution": self.ai_based_conflict_resolution,
-                "temperature_based_resolution": self.temperature_based_resolution,
-                "adaptive_neighborhood_search": self.adaptive_neighborhood_search,
-                "min_neighborhood_size": self.min_neighborhood_size,
-                "max_neighborhood_size": self.max_neighborhood_size,
-                "phase3_ai_intelligence": True,
-                "conflict_resolution": True
-            },
-            "ai_metrics": {
-                "best_energy": best_energy,
-                "final_temperature": self.temperature,
-                "iterations_completed": self.current_iteration + 1,
-                "cooling_strategy": self.cooling_strategy,
-                "reheat_count": 0  # Could track this in future
-            }
-        }
-
-    def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute method for compatibility with AlgorithmService"""
-        return self.optimize(data)
-
-    def evaluate_fitness(self, solution: Dict[str, Any]) -> float:
-        """Evaluate the fitness of a solution."""
-        assignments = solution.get("assignments", [])
-        if not assignments:
-            return float('inf')
-        
-        # Simple fitness: number of assignments (more is better)
-        return -len(assignments)  # Negative because we minimize
     
-    def _calculate_fitness_scores(self, solution: List[Dict[str, Any]]) -> Dict[str, float]:
-        """Calculate fitness scores for a solution."""
-        if not solution:
-            return {
-                "load_balance": 0.0,
-                "classroom_changes": 0.0,
-                "time_efficiency": 0.0,
-                "total": 0.0
-            }
+    def __init__(
+        self, 
+        projects: List[Project], 
+        instructors: List[Instructor], 
+        config: SAConfig
+    ):
+        self.projects = {p.id: p for p in projects}
+        self.instructors = {i.id: i for i in instructors}
+        self.config = config
         
-        load_balance = self._calculate_load_balance_score(solution)
-        classroom_changes = self._calculate_classroom_changes_score(solution)
-        time_efficiency = self._calculate_time_efficiency_score(solution)
-        
-        total = load_balance + classroom_changes + time_efficiency
-        
-        return {
-            "load_balance": load_balance,
-            "classroom_changes": classroom_changes,
-            "time_efficiency": time_efficiency,
-            "total": total
+        # Filter real faculty (not research assistants)
+        self.faculty_instructors = {
+            i.id: i for i in instructors 
+            if i.type == "instructor"
         }
+        
+        # Calculate average workload
+        num_projects = len(projects)
+        num_faculty = len(self.faculty_instructors)
+        self.avg_workload = (2 * num_projects) / num_faculty if num_faculty > 0 else 0
     
-    def _calculate_load_balance_score(self, solution: List[Dict[str, Any]]) -> float:
-        """Calculate load balance score."""
-        instructor_loads = {}
+    def calculate_total_cost(self, state: SAState) -> float:
+        """
+        Calculate total cost (penalty) for a state.
         
-        for assignment in solution:
-            for instructor_id in assignment.get("instructors", []):
-                instructor_loads[instructor_id] = instructor_loads.get(instructor_id, 0) + 1
+        Cost = C1*H1 + C2*H2 + C3*H3 + C4*H4 + C5*H5 + C6*H6 + C7*H7
+        """
+        h1 = self.calculate_h1_time_penalty(state)
+        h2 = self.calculate_h2_workload_penalty(state)
+        h3 = self.calculate_h3_class_change_penalty(state)
+        h4 = self.calculate_h4_class_load_penalty(state)
+        h5 = self.calculate_continuity_penalty(state)
+        h6 = self.calculate_timeslot_conflict_penalty(state)
+        h7 = self.calculate_unused_class_penalty(state)
         
-        if not instructor_loads:
+        total = (
+            self.config.weight_h1 * h1 +
+            self.config.weight_h2 * h2 +
+            self.config.weight_h3 * h3 +
+            self.config.weight_h4 * h4 +
+            self.config.weight_continuity * h5 +
+            self.config.weight_timeslot_conflict * h6 +
+            self.config.weight_unused_class * h7
+        )
+        
+        return total
+    
+    def calculate_h1_time_penalty(self, state: SAState) -> float:
+        """
+        H1: Time/Gap penalty for non-consecutive tasks.
+        
+        Binary mode: 1 if not consecutive, 0 otherwise
+        GAP_PROPORTIONAL mode: gap size as penalty
+        """
+        total_penalty = 0.0
+        
+        # Build task matrix for each instructor
+        instructor_tasks = self._build_instructor_task_matrix(state)
+        
+        for instructor_id, tasks in instructor_tasks.items():
+            if len(tasks) <= 1:
+                continue
+            
+            # Sort by timeslot (class_id * 100 + order)
+            tasks.sort(key=lambda x: x['class_id'] * 100 + x['order'])
+            
+            # Calculate gap penalties between consecutive tasks
+            for i in range(len(tasks) - 1):
+                current = tasks[i]
+                next_task = tasks[i + 1]
+                
+                # Check if same class and consecutive
+                if current['class_id'] == next_task['class_id']:
+                    gap = next_task['order'] - current['order'] - 1
+                    if gap > 0:
+                        if self.config.time_penalty_mode == TimePenaltyMode.BINARY:
+                            total_penalty += 1
+                        else:  # GAP_PROPORTIONAL
+                            total_penalty += gap
+                else:
+                    # Different class - always penalty
+                    if self.config.time_penalty_mode == TimePenaltyMode.BINARY:
+                        total_penalty += 1
+                    else:
+                        # Calculate equivalent gap
+                        total_penalty += 2  # Cross-class penalty
+        
+        return total_penalty
+    
+    def calculate_h2_workload_penalty(self, state: SAState) -> float:
+        """
+        H2: Workload uniformity penalty.
+        
+        For each instructor:
+        penalty = max(0, |Load(h) - AvgLoad| - 2)
+        """
+        total_penalty = 0.0
+        
+        # Count workload per instructor
+        workloads = defaultdict(int)
+        for assignment in state.assignments:
+            workloads[assignment.ps_id] += 1  # PS role
+            workloads[assignment.j1_id] += 1  # J1 role
+        
+        # Calculate penalty for each faculty member
+        for instructor_id in self.faculty_instructors.keys():
+            load = workloads.get(instructor_id, 0)
+            deviation = abs(load - self.avg_workload)
+            penalty = max(0, deviation - 2)
+            total_penalty += penalty
+        
+        return total_penalty
+    
+    def calculate_h3_class_change_penalty(self, state: SAState) -> float:
+        """
+        H3: Class change penalty.
+        
+        For each instructor:
+        penalty = max(0, NumberOfClasses(h) - 2)^2 * 5
+        """
+        total_penalty = 0.0
+        
+        # Find classes used by each instructor
+        instructor_classes = defaultdict(set)
+        for assignment in state.assignments:
+            instructor_classes[assignment.ps_id].add(assignment.class_id)
+            instructor_classes[assignment.j1_id].add(assignment.class_id)
+        
+        for instructor_id in self.faculty_instructors.keys():
+            class_count = len(instructor_classes.get(instructor_id, set()))
+            if class_count > 2:
+                # Squared penalty for excessive class changes
+                penalty = (class_count - 2) ** 2 * 5
+                total_penalty += penalty
+        
+        return total_penalty
+    
+    def calculate_h4_class_load_penalty(self, state: SAState) -> float:
+        """
+        H4: Class load balance penalty.
+        
+        Each class should have approximately equal number of projects.
+        AYRICa: Kullanilmayan siniflar icin COK AGIR ceza (HARD KISIT)!
+        """
+        total_penalty = 0.0
+        
+        num_projects = len(state.assignments)
+        if num_projects == 0:
             return 0.0
         
-        loads = list(instructor_loads.values())
-        avg_load = sum(loads) / len(loads)
-        variance = sum((load - avg_load) ** 2 for load in loads) / len(loads)
+        target_per_class = num_projects / state.class_count
         
-        return variance
+        # Count projects per class
+        class_loads = defaultdict(int)
+        for assignment in state.assignments:
+            class_loads[assignment.class_id] += 1
+        
+        # Kullanilmayan siniflar icin COK AGIR ceza (HARD KISIT) - Genetic Algorithm'deki gibi
+        unused_class_penalty = 0.0
+        for class_id in range(state.class_count):
+            load = class_loads.get(class_id, 0)
+            if load == 0:
+                # Kullanilmayan sinif icin cok agir ceza
+                unused_class_penalty += 1000.0  # Cok agir ceza
+            else:
+                # Normal yuk dengesi cezasi
+                penalty = abs(load - target_per_class)
+                total_penalty += penalty
+        
+        # Kullanilmayan sinif cezasi ekle
+        total_penalty += unused_class_penalty
+        
+        return total_penalty
     
-    def _calculate_classroom_changes_score(self, solution: List[Dict[str, Any]]) -> float:
-        """Calculate classroom changes score."""
-        instructor_classrooms = {}
-        changes = 0
+    def calculate_continuity_penalty(self, state: SAState) -> float:
+        """
+        H5: Continuity penalty.
         
-        for assignment in solution:
-            classroom_id = assignment.get("classroom_id")
-            for instructor_id in assignment.get("instructors", []):
-                if instructor_id in instructor_classrooms:
-                    if instructor_classrooms[instructor_id] != classroom_id:
-                        changes += 1
-                instructor_classrooms[instructor_id] = classroom_id
+        Penalizes instructors who have fragmented schedules
+        (multiple separate blocks instead of continuous tasks).
+        """
+        total_penalty = 0.0
         
-        return float(changes)
-    
-    def _calculate_time_efficiency_score(self, solution: List[Dict[str, Any]]) -> float:
-        """Calculate time efficiency score."""
-        instructor_timeslots = {}
-        gaps = 0
+        # Build task matrix
+        instructor_tasks = self._build_instructor_task_matrix(state)
         
-        for assignment in solution:
-            timeslot_id = assignment.get("timeslot_id")
-            for instructor_id in assignment.get("instructors", []):
-                if instructor_id not in instructor_timeslots:
-                    instructor_timeslots[instructor_id] = []
-                instructor_timeslots[instructor_id].append(timeslot_id)
-        
-        for timeslots in instructor_timeslots.values():
-            sorted_slots = sorted(timeslots)
-            for i in range(1, len(sorted_slots)):
-                if sorted_slots[i] - sorted_slots[i-1] > 1:
-                    gaps += 1
-        
-        return float(gaps)
-    
-    def _calculate_grouping_stats(self, assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Calculate consecutive grouping statistics."""
-        if not assignments:
-            return {
-                "consecutive_count": 0,
-                "total_instructors": 0,
-                "avg_classroom_changes": 0.0,
-                "consecutive_percentage": 0.0
-            }
-        
-        instructor_assignments = defaultdict(list)
-        for assignment in assignments:
-            project_id = assignment.get("project_id")
-            project = next((p for p in self.projects if p.get("id") == project_id), None)
-            if project and project.get("responsible_id"):
-                instructor_id = project["responsible_id"]
-                instructor_assignments[instructor_id].append(assignment)
-        
-        consecutive_count = 0
-        total_classroom_changes = 0
-        
-        for instructor_id, instructor_assignment_list in instructor_assignments.items():
-            classrooms_used = set(a.get("classroom_id") for a in instructor_assignment_list)
-            classroom_changes = len(classrooms_used) - 1
-            total_classroom_changes += classroom_changes
+        for instructor_id, tasks in instructor_tasks.items():
+            if len(tasks) <= 1:
+                continue
             
-            timeslot_ids = sorted([a.get("timeslot_id") for a in instructor_assignment_list])
-            is_consecutive = all(
-                timeslot_ids[i] + 1 == timeslot_ids[i+1] 
-                for i in range(len(timeslot_ids) - 1)
-            ) if len(timeslot_ids) > 1 else True
+            # Group tasks by class
+            tasks_by_class = defaultdict(list)
+            for task in tasks:
+                tasks_by_class[task['class_id']].append(task)
             
-            if is_consecutive and len(classrooms_used) == 1:
-                consecutive_count += 1
+            # Count blocks per class
+            for class_id, class_tasks in tasks_by_class.items():
+                if len(class_tasks) <= 1:
+                    continue
+                
+                # Sort by order
+                class_tasks.sort(key=lambda x: x['order'])
+                
+                # Count separate blocks
+                blocks = 1
+                for i in range(len(class_tasks) - 1):
+                    if class_tasks[i + 1]['order'] - class_tasks[i]['order'] > 1:
+                        blocks += 1
+                
+                # Penalty for extra blocks
+                if blocks > 1:
+                    total_penalty += (blocks - 1) ** 2 * 10
         
-        total_instructors = len(instructor_assignments)
-        avg_classroom_changes = total_classroom_changes / total_instructors if total_instructors > 0 else 0
+        return total_penalty
+    
+    def calculate_timeslot_conflict_penalty(self, state: SAState) -> float:
+        """
+        H6: Timeslot conflict penalty (HARD constraint).
         
-        return {
-            "consecutive_count": consecutive_count,
-            "total_instructors": total_instructors,
-            "avg_classroom_changes": avg_classroom_changes,
-            "consecutive_percentage": (consecutive_count / total_instructors * 100) if total_instructors > 0 else 0
-        }
+        Penalizes instructors who have multiple tasks in the same timeslot.
+        """
+        total_penalty = 0.0
+        
+        # Build timeslot occupancy
+        # Key: (instructor_id, class_id, order) -> count
+        timeslot_occupancy = defaultdict(int)
+        
+        for assignment in state.assignments:
+            # PS occupancy
+            key_ps = (assignment.ps_id, assignment.class_id, assignment.order_in_class)
+            timeslot_occupancy[key_ps] += 1
+            
+            # J1 occupancy
+            key_j1 = (assignment.j1_id, assignment.class_id, assignment.order_in_class)
+            timeslot_occupancy[key_j1] += 1
+        
+        # Check for conflicts (any instructor in multiple places at same time)
+        instructor_timeslots = defaultdict(lambda: defaultdict(int))
+        for assignment in state.assignments:
+            slot_key = (assignment.class_id, assignment.order_in_class)
+            instructor_timeslots[assignment.ps_id][slot_key] += 1
+            instructor_timeslots[assignment.j1_id][slot_key] += 1
+        
+        # Global conflict check (same timeslot across different classes)
+        for instructor_id in instructor_timeslots.keys():
+            orders_per_class = defaultdict(list)
+            for (class_id, order) in instructor_timeslots[instructor_id].keys():
+                orders_per_class[order].append(class_id)
+            
+            for order, classes in orders_per_class.items():
+                if len(classes) > 1:
+                    # Same order in multiple classes = conflict
+                    total_penalty += (len(classes) - 1) * 1000
+        
+        return total_penalty
+    
+    def calculate_unused_class_penalty(self, state: SAState) -> float:
+        """
+        H7: Unused class penalty (HARD constraint).
+        
+        All specified classes must be used.
+        CRITICAL: This is a HARD CONSTRAINT - unused classes are NOT allowed!
+        """
+        used_classes = set()
+        for assignment in state.assignments:
+            used_classes.add(assignment.class_id)
+        
+        unused_count = state.class_count - len(used_classes)
+        # EXTREMELY high penalty - squared for unused classes
+        # This makes solutions with unused classes completely unacceptable
+        if unused_count > 0:
+            return unused_count * unused_count * 1000000.0  # Çok daha yüksek ceza
+        return 0.0
+    
+    def has_unused_classes(self, state: SAState) -> bool:
+        """
+        Check if there are unused classes - HARD CONSTRAINT CHECK.
+        
+        Returns True if any class is unused, False otherwise.
+        """
+        used_classes = set()
+        for assignment in state.assignments:
+            used_classes.add(assignment.class_id)
+        
+        return len(used_classes) < state.class_count
+    
+    def _build_instructor_task_matrix(self, state: SAState) -> Dict[int, List[Dict]]:
+        """Build task matrix for each instructor"""
+        instructor_tasks = defaultdict(list)
+        
+        for assignment in state.assignments:
+            # PS task
+            instructor_tasks[assignment.ps_id].append({
+                'project_id': assignment.project_id,
+                'class_id': assignment.class_id,
+                'order': assignment.order_in_class,
+                'role': 'PS'
+            })
+            
+            # J1 task
+            instructor_tasks[assignment.j1_id].append({
+                'project_id': assignment.project_id,
+                'class_id': assignment.class_id,
+                'order': assignment.order_in_class,
+                'role': 'J1'
+            })
+        
+        return instructor_tasks
 
-    def _create_pure_consecutive_grouping_solution(self) -> List[Dict[str, Any]]:
-        """
-        Pure consecutive grouping çözümü oluştur - AI-BASED with Instructor Pairing.
+
+# =============================================================================
+# REPAIR MECHANISM
+# =============================================================================
+
+class SARepairMechanism:
+    """
+    Repair mechanism to ensure hard constraints are satisfied.
+    
+    Repairs:
+    1. PS assignments (must match project's advisor)
+    2. J1 != PS constraint
+    3. Missing J1 assignments
+    4. Back-to-back class ordering
+    5. Timeslot conflicts
+    6. Missing projects
+    7. Priority order (ARA/BITIRME)
+    8. Workload hard limits
+    9. All classes used
+    """
+    
+    def __init__(
+        self, 
+        projects: List[Project], 
+        instructors: List[Instructor], 
+        config: SAConfig
+    ):
+        self.projects = {p.id: p for p in projects}
+        self.project_list = projects
+        self.instructors = {i.id: i for i in instructors}
+        self.config = config
         
-        YENİ STRATEJİ:
-        1. Instructor'ları proje sorumluluk sayısına göre sırala (EN FAZLA -> EN AZ)
-        2. Sıralamayı bozmadan ikiye böl (çift: n/2, n/2 | tek: n, n+1)
-        3. Üst ve alt gruptan birer kişi alarak eşleştir
-        4. Consecutive Grouping: x sorumlu -> y jüri, sonra y sorumlu -> x jüri
-        5. AI-based soft constraints (temperature-based randomization)
-        """
-        assignments = []
+        # Faculty IDs (not research assistants)
+        self.faculty_ids = [
+            i.id for i in instructors 
+            if i.type == "instructor"
+        ]
         
-        # Zaman slotlarını sırala
-        sorted_timeslots = sorted(
-            self.timeslots,
-            key=lambda x: self._parse_time(x.get("start_time", "09:00"))
-        )
+        # Average workload
+        num_projects = len(projects)
+        num_faculty = len(self.faculty_ids)
+        self.avg_workload = (2 * num_projects) / num_faculty if num_faculty > 0 else 0
+    
+    def repair(self, state: SAState) -> SAState:
+        """Apply all repair operations to ensure feasibility"""
+        # 1. PS assignments
+        self._repair_ps_assignments(state)
         
-        # Instructor bazında projeleri grupla
-        instructor_projects = defaultdict(list)
-        for project in self.projects:
-            responsible_id = project.get("responsible_id") or project.get("responsible_instructor_id")
-            if responsible_id:
-                instructor_projects[responsible_id].append(project)
+        # 2. J1 != PS
+        self._repair_j1_not_ps(state)
         
-        # YENİ MANTIK 1: Instructor'ları proje sayısına göre sırala (EN FAZLA -> EN AZ)
-        instructor_list = sorted(
-            instructor_projects.items(),
-            key=lambda x: len(x[1]),  # Proje sayısına göre
-            reverse=True  # Azalan sırada (en fazla üstte)
-        )
+        # 3. Missing J1
+        self._repair_missing_j1(state)
         
-        # 🆕 ADAPTIVE CONSECUTIVE: Sınıf sayısına göre consecutive grouping ayarla - PROJE EKSİK ATANMA SORUNU DÜZELTİLDİ!
-        classroom_count = len(self.classrooms)
-        # SORUN DÜZELTİLDİ: Sınıf sayısı az olsa bile consecutive grouping'i tamamen kapatma!
-        # Sadece esnek hale getir - projelerin eksik atanmasını önle
-        use_consecutive = True  # HEP consecutive kullan - sadece esnek modda
-        flexible_mode = classroom_count < 6  # Az sınıf varsa esnek mod
-        logger.info(f"🔄 ADAPTIVE: Sınıf sayısı {classroom_count} - consecutive grouping: AÇIK (esnek: {'EVET' if flexible_mode else 'HAYIR'})")
+        # 4. Back-to-back ordering
+        self._repair_class_ordering(state)
         
-        # 🔧 SORUN DÜZELTİLDİ: Flexible mode'da bile tüm projelerin atanmasını garanti et!
-        if flexible_mode:
-            logger.info("🔧 FLEXIBLE MODE: Tüm projelerin atanması garanti ediliyor...")
+        # 5. Timeslot conflicts - CRITICAL (run first)
+        self._repair_timeslot_conflicts(state)
+        
+        # 6. Missing projects
+        self._repair_missing_projects(state)
+        
+        # 7. Priority order
+        self._repair_priority_order(state)
+        
+        # 8. Workload hard limits
+        if self.config.workload_constraint_mode == WorkloadConstraintMode.SOFT_AND_HARD:
+            self._repair_workload_hard_limit(state)
+        
+        # 9. All classes used - CRITICAL (Genetic Algorithm'deki gibi agresif)
+        self._repair_all_classes_used(state)
+        
+        # 10. Re-check timeslot conflicts after all class changes
+        self._repair_timeslot_conflicts(state)
+        
+        # 11. Final check for all classes (tekrar - Genetic Algorithm'deki gibi)
+        self._repair_all_classes_used(state)
+        
+        # 12. Final timeslot conflict check
+        self._repair_timeslot_conflicts(state)
+        
+        # 13. ABSOLUTE FINAL: Verify all classes used - MANDATORY (Genetic Algorithm mantigi)
+        # Genetic Algorithm'deki gibi while dongusu ile kontrol
+        final_iterations = 0
+        while final_iterations < 50:  # Ekstra kontrol
+            class_counts = defaultdict(int)
+            for a in state.assignments:
+                class_counts[a.class_id] += 1
             
-            # 🆕 PROJE COVERAGE VALIDATION: Flexible mode'da proje eksik atanmasını önle!
-            self._validate_project_coverage = True
-            self._flexible_mode_retry_count = 0
-            self._max_flexible_retries = 3  # Maksimum 3 deneme
-        
-        logger.info(f"📊 [SA] Instructorlar proje sayısına göre sıralandı (EN FAZLA -> EN AZ):")
-        for inst_id, proj_list in instructor_list[:5]:  # İlk 5'i göster
-            logger.info(f"   Instructor {inst_id}: {len(proj_list)} proje")
-        
-        # YENİ MANTIK 2: İkiye bölme (çift/tek kontrol)
-        total_instructors = len(instructor_list)
-        
-        if total_instructors % 2 == 0:
-            # Çift sayıda: tam ortadan böl
-            split_index = total_instructors // 2
-            upper_group = instructor_list[:split_index]
-            lower_group = instructor_list[split_index:]
-            logger.info(f"✂️ [SA] Çift sayıda instructor ({total_instructors}): Üst grup {split_index}, Alt grup {split_index}")
-        else:
-            # Tek sayıda: üst grup n, alt grup n+1
-            split_index = total_instructors // 2
-            upper_group = instructor_list[:split_index]
-            lower_group = instructor_list[split_index:]
-            logger.info(f"✂️ [SA] Tek sayıda instructor ({total_instructors}): Üst grup {split_index}, Alt grup {len(lower_group)}")
-        
-        # YENİ MANTIK 3: Eşleştirme - üst ve alt gruptan birer kişi
-        instructor_pairs = []
-        for i in range(min(len(upper_group), len(lower_group))):
-            upper_inst = upper_group[i]
-            lower_inst = lower_group[i]
-            instructor_pairs.append((upper_inst, lower_inst))
-            if i < 3:  # İlk 3 eşleştirmeyi göster
-                logger.info(f"👥 [SA] Eşleştirme {i+1}: Instructor {upper_inst[0]} ({len(upper_inst[1])} proje) ↔ Instructor {lower_inst[0]} ({len(lower_inst[1])} proje)")
-        
-        # Eğer alt grup daha fazlaysa (tek sayıda durumda), son elemanı ekle
-        if len(lower_group) > len(upper_group):
-            extra_inst = lower_group[-1]
-            instructor_pairs.append((extra_inst, None))
-            logger.info(f"👤 [SA] Tek kalan: Instructor {extra_inst[0]} ({len(extra_inst[1])} proje)")
-        
-        # Sıkı conflict prevention
-        used_slots = set()  # (classroom_id, timeslot_id)
-        instructor_timeslot_usage = defaultdict(set)  # instructor_id -> set of timeslot_ids
-        assigned_projects = set()  # project_ids that have been assigned
-        
-        # AI-BASED RANDOMIZER: Temperature affects classroom selection
-        logger.info(f"🔥 [SA] AI-BASED RANDOMIZER:")
-        logger.info(f"   Temperature: {self.temperature:.1f}°C")
-        logger.info(f"   Cooling Strategy: {self.cooling_strategy}")
-        logger.info(f"   Iteration: {self.current_iteration}/{self.max_iterations}")
-        
-        # YENİ MANTIK 4: CONSECUTIVE GROUPING + ÇIFT BAZLI JÜRİ EŞLEŞTİRMESİ
-        # Her bir eşleştirilmiş çift için: x sorumlu -> y jüri, sonra y sorumlu -> x jüri
-        
-        classroom_idx = 0
-        timeslot_idx = 0
-        
-        for pair_idx, pair in enumerate(instructor_pairs):
-            if pair[1] is None:
-                # Tek kalan instructor
-                instructor_id, instructor_project_list = pair[0]
-                
-                # AI-BASED PROJECT ORDERING (Temperature based)
-                ordered_projects = self._order_projects_ai_based(instructor_project_list, self.temperature)
-                
-                # 🆕 ADAPTIVE CONSECUTIVE: Sınıf sayısına göre consecutive grouping
-                if use_consecutive:
-                    # Assign consecutively without jury
-                    for project in ordered_projects:
-                        if project['id'] in assigned_projects:
-                            continue
-                        
-                        assigned = False
-                        attempts = 0
-                        
-                        while not assigned and attempts < len(sorted_timeslots) * len(self.classrooms):
-                            classroom = self.classrooms[classroom_idx % len(self.classrooms)]
-                            timeslot = sorted_timeslots[timeslot_idx % len(sorted_timeslots)]
-                            
-                            slot_key = (classroom['id'], timeslot['id'])
-                            
-                            if (slot_key not in used_slots and 
-                                timeslot['id'] not in instructor_timeslot_usage[instructor_id]):
-                                
-                                assignments.append({
-                                    "project_id": project['id'],
-                                    "timeslot_id": timeslot['id'],
-                                    "classroom_id": classroom['id'],
-                                    "responsible_instructor_id": instructor_id,
-                                "is_makeup": project.get('is_makeup', False),
-                                "instructors": [instructor_id]
-                            })
-                            
-                            used_slots.add(slot_key)
-                            instructor_timeslot_usage[instructor_id].add(timeslot['id'])
-                            assigned_projects.add(project['id'])
-                            assigned = True
-                            timeslot_idx += 1
-                        else:
-                            timeslot_idx += 1
-                            if timeslot_idx % len(sorted_timeslots) == 0:
-                                classroom_idx += 1
-                        
-                        attempts += 1
+            used_count = len([c for c in range(state.class_count) if class_counts.get(c, 0) > 0])
+            if used_count == state.class_count:
+                break  # Tum siniflar kullaniliyor
+            
+            # Force fill unused classes - CRITICAL
+            unused = [c for c in range(state.class_count) if c not in class_counts]
+            if not unused:
+                break
+            
+            for unused_class in unused:
+                # Find assignment in most loaded class
+                if class_counts:
+                    max_class = max(class_counts.keys(), key=lambda c: class_counts[c])
+                    assignments_in_max = [
+                        a for a in state.assignments
+                        if a.class_id == max_class
+                    ]
+                    if assignments_in_max:
+                        assignment = assignments_in_max[-1]  # Take last
+                        assignment.class_id = unused_class
+                        assignment.order_in_class = 0
+                        class_counts[max_class] -= 1
+                        class_counts[unused_class] = 1
+                        self._repair_class_ordering(state)
                 else:
-                    # Non-consecutive: Esnek atama
-                    for project in ordered_projects:
-                        if project['id'] in assigned_projects:
-                            continue
-                        
-                        assigned = False
-                        attempts = 0
-                        
-                        while not assigned and attempts < len(sorted_timeslots) * len(self.classrooms):
-                            classroom = self.classrooms[classroom_idx % len(self.classrooms)]
-                            timeslot = sorted_timeslots[timeslot_idx % len(sorted_timeslots)]
-                            
-                            slot_key = (classroom['id'], timeslot['id'])
-                            
-                            if (slot_key not in used_slots and 
-                                timeslot['id'] not in instructor_timeslot_usage[instructor_id]):
-                                
-                                assignments.append({
-                                    "project_id": project['id'],
-                                    "timeslot_id": timeslot['id'],
-                                    "classroom_id": classroom['id'],
-                                    "responsible_instructor_id": instructor_id,
-                                    "is_makeup": project.get('is_makeup', False),
-                                    "instructors": [instructor_id]
-                                })
-                                
-                                used_slots.add(slot_key)
-                                instructor_timeslot_usage[instructor_id].add(timeslot['id'])
-                                assigned_projects.add(project['id'])
-                                assigned = True
-                            
-                            timeslot_idx += 1
-                            if timeslot_idx % len(sorted_timeslots) == 0:
-                                classroom_idx += 1
-                            
-                            attempts += 1
-                
-                classroom_idx += 1
-                timeslot_idx = 0
+                    # No assignments - distribute first one
+                    if state.assignments:
+                        state.assignments[0].class_id = unused_class
+                        state.assignments[0].order_in_class = 0
             
-            else:
-                # Eşleştirilmiş çift
-                instructor_x_id, instructor_x_projects = pair[0]
-                instructor_y_id, instructor_y_projects = pair[1]
-                
-                if self.current_iteration == 0:
-                    logger.info(f"👥 [SA] Çift {pair_idx + 1}: Instructor {instructor_x_id} ↔ {instructor_y_id}")
-                
-                # PHASE 1: X sorumlu -> Y jüri (consecutive)
-                ordered_x = self._order_projects_ai_based(instructor_x_projects, self.temperature)
-                for project in ordered_x:
-                    if project['id'] in assigned_projects:
-                        continue
-                    
-                    assigned = False
-                    attempts = 0
-                    
-                    while not assigned and attempts < len(sorted_timeslots) * len(self.classrooms):
-                        classroom = self.classrooms[classroom_idx % len(self.classrooms)]
-                        timeslot = sorted_timeslots[timeslot_idx % len(sorted_timeslots)]
-                        
-                        slot_key = (classroom['id'], timeslot['id'])
-                        
-                        if (slot_key not in used_slots and 
-                            timeslot['id'] not in instructor_timeslot_usage[instructor_x_id] and
-                            timeslot['id'] not in instructor_timeslot_usage[instructor_y_id]):
-                            
-                            instructors = [instructor_x_id]
-                            if project.get('type') == 'bitirme' or random.random() < 0.5:
-                                instructors.append(instructor_y_id)
-                            
-                            assignments.append({
-                                "project_id": project['id'],
-                                "timeslot_id": timeslot['id'],
-                                "classroom_id": classroom['id'],
-                                "responsible_instructor_id": instructor_x_id,
-                                "is_makeup": project.get('is_makeup', False),
-                                "instructors": instructors
-                            })
-                            
-                            used_slots.add(slot_key)
-                            instructor_timeslot_usage[instructor_x_id].add(timeslot['id'])
-                            if len(instructors) > 1:
-                                instructor_timeslot_usage[instructor_y_id].add(timeslot['id'])
-                            assigned_projects.add(project['id'])
-                            assigned = True
-                            timeslot_idx += 1
-                        else:
-                            timeslot_idx += 1
-                            if timeslot_idx % len(sorted_timeslots) == 0:
-                                classroom_idx += 1
-                        
-                        attempts += 1
-                
-                # PHASE 2: Y sorumlu -> X jüri (consecutive)
-                ordered_y = self._order_projects_ai_based(instructor_y_projects, self.temperature)
-                for project in ordered_y:
-                    if project['id'] in assigned_projects:
-                        continue
-                    
-                    assigned = False
-                    attempts = 0
-                    
-                    while not assigned and attempts < len(sorted_timeslots) * len(self.classrooms):
-                        classroom = self.classrooms[classroom_idx % len(self.classrooms)]
-                        timeslot = sorted_timeslots[timeslot_idx % len(sorted_timeslots)]
-                        
-                        slot_key = (classroom['id'], timeslot['id'])
-                        
-                        if (slot_key not in used_slots and 
-                            timeslot['id'] not in instructor_timeslot_usage[instructor_y_id] and
-                            timeslot['id'] not in instructor_timeslot_usage[instructor_x_id]):
-                            
-                            instructors = [instructor_y_id]
-                            if project.get('type') == 'bitirme' or random.random() < 0.5:
-                                instructors.append(instructor_x_id)
-                            
-                            assignments.append({
-                                "project_id": project['id'],
-                                "timeslot_id": timeslot['id'],
-                                "classroom_id": classroom['id'],
-                                "responsible_instructor_id": instructor_y_id,
-                                "is_makeup": project.get('is_makeup', False),
-                                "instructors": instructors
-                            })
-                            
-                            used_slots.add(slot_key)
-                            instructor_timeslot_usage[instructor_y_id].add(timeslot['id'])
-                            if len(instructors) > 1:
-                                instructor_timeslot_usage[instructor_x_id].add(timeslot['id'])
-                            assigned_projects.add(project['id'])
-                            assigned = True
-                            timeslot_idx += 1
-                        else:
-                            timeslot_idx += 1
-                            if timeslot_idx % len(sorted_timeslots) == 0:
-                                classroom_idx += 1
-                        
-                        attempts += 1
-                
-                classroom_idx += 1
-                timeslot_idx = 0
+            final_iterations += 1
         
-        logger.info(f"[SA] Pure Consecutive Grouping tamamlandı: {len(assignments)} atama yapıldı")
-        return assignments
+        return state
     
-    def _simulated_annealing_old_loop(self):
-        """OLD LOOP - DEPRECATED - Kept for reference"""
-        # Her instructor için projeleri ata (consecutive grouping korunur!)
-        for instructor_id, instructor_project_list in []:
-            if not instructor_project_list:
-                continue
+    def _repair_ps_assignments(self, state: SAState) -> None:
+        """Ensure PS matches project's advisor"""
+        for assignment in state.assignments:
+            project = self.projects.get(assignment.project_id)
+            if project and assignment.ps_id != project.responsible_id:
+                assignment.ps_id = project.responsible_id
+    
+    def _repair_j1_not_ps(self, state: SAState) -> None:
+        """Ensure J1 != PS for all assignments"""
+        for assignment in state.assignments:
+            if assignment.j1_id == assignment.ps_id:
+                # Find alternative J1
+                available = [
+                    i for i in self.faculty_ids 
+                    if i != assignment.ps_id
+                ]
+                if available:
+                    assignment.j1_id = random.choice(available)
+    
+    def _repair_missing_j1(self, state: SAState) -> None:
+        """Ensure all assignments have valid J1"""
+        for assignment in state.assignments:
+            if assignment.j1_id not in self.faculty_ids or assignment.j1_id == assignment.ps_id:
+                available = [
+                    i for i in self.faculty_ids 
+                    if i != assignment.ps_id
+                ]
+                if available:
+                    assignment.j1_id = random.choice(available)
+    
+    def _repair_class_ordering(self, state: SAState) -> None:
+        """Ensure back-to-back ordering within classes"""
+        for class_id in range(state.class_count):
+            class_assignments = [
+                a for a in state.assignments 
+                if a.class_id == class_id
+            ]
+            class_assignments.sort(key=lambda x: x.order_in_class)
             
-            # OPTIMIZATION: Only log in debug mode
-            if self.current_iteration == 0:  # Only log first iteration
-                logger.info(f"Instructor {instructor_id} için {len(instructor_project_list)} proje atanıyor...")
-            
-            # Bu instructor için en uygun sınıf ve başlangıç slotunu bul
-            best_classroom = None
-            best_start_slot_idx = None
-            
-            # ÖNCE: Tüm sınıflarda en erken boş slotu ara (consecutive olmasa bile)
-            earliest_available_slots = []
-            
-            for classroom in self.classrooms:
-                classroom_id = classroom.get("id")
-                
-                for start_idx in range(len(sorted_timeslots)):
-                    timeslot_id = sorted_timeslots[start_idx].get("id")
-                    slot_key = (classroom_id, timeslot_id)
-                    
-                    instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                    if not isinstance(instructor_slots, set):
-                        instructor_slots = set()
-                    
-                    if (slot_key not in used_slots and 
-                        timeslot_id not in instructor_slots):
-                        earliest_available_slots.append((start_idx, classroom_id))
-                        break
-            
-            # AI-BASED CLASSROOM SELECTION: Use temperature-based selection
-            if earliest_available_slots:
-                # Use AI-based classroom selection
-                selected = self._select_classroom_ai_based(earliest_available_slots, self.temperature)
-                if selected:
-                    best_start_slot_idx, best_classroom = selected
-                    # OPTIMIZATION: Reduce logging
-                    if self.current_iteration == 0:
-                        logger.info(f"   🎯 AI-BASED: Instructor {instructor_id} → Classroom {best_classroom}, Slot {best_start_slot_idx}")
-            else:
-                # Fallback: Tam ardışık slot arama (eski mantık)
-                for classroom in self.classrooms:
-                    classroom_id = classroom.get("id")
-                    
-                    for start_idx in range(len(sorted_timeslots)):
-                        available_consecutive_slots = 0
-                        
-                        for slot_idx in range(start_idx, len(sorted_timeslots)):
-                            timeslot_id = sorted_timeslots[slot_idx].get("id")
-                            slot_key = (classroom_id, timeslot_id)
-                            
-                            instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                            if not isinstance(instructor_slots, set):
-                                instructor_slots = set()
-                            
-                            if (slot_key not in used_slots and 
-                                timeslot_id not in instructor_slots):
-                                available_consecutive_slots += 1
-                            else:
-                                break
-                            
-                            if available_consecutive_slots >= len(instructor_project_list):
-                                break
-                        
-                        if available_consecutive_slots >= len(instructor_project_list):
-                            best_classroom = classroom_id
-                            best_start_slot_idx = start_idx
-                            break
-                    
-                    if best_classroom:
-                        break
-            
-            # Projeleri ata
-            if best_classroom and best_start_slot_idx is not None:
-                current_slot_idx = best_start_slot_idx
-                instructor_classroom_projects = []  # Bu instructor'ın bu sınıftaki projeleri
-                
-                # AI-BASED PROJECT ORDERING: Use temperature-based ordering
-                ordered_projects = self._order_projects_ai_based(instructor_project_list, self.temperature)
-                
-                for project in ordered_projects:
-                    project_id = project.get("id")
-                    
-                    # Bu proje zaten atanmış mı?
-                    if project_id in assigned_projects:
-                        logger.warning(f"UYARI: Proje {project_id} zaten atanmış, atlanıyor")
-                        continue
-                    
-                    # EN ERKEN BOŞ SLOT BUL - Tüm sınıflarda ara
-                    assigned = False
-                    
-                    # AI-BASED TIMESLOT SELECTION: Use temperature-based selection
-                    if self.ai_based_timeslot_selection:
-                        # Collect available timeslots for AI-based selection
-                        available_timeslots = []
-                        for slot_idx in range(current_slot_idx, len(sorted_timeslots)):
-                            timeslot = sorted_timeslots[slot_idx]
-                            timeslot_id = timeslot.get("id")
-                            slot_key = (best_classroom, timeslot_id)
-                            
-                            instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                            if not isinstance(instructor_slots, set):
-                                instructor_slots = set()
-                            
-                            if (slot_key not in used_slots and 
-                                timeslot_id not in instructor_slots):
-                                available_timeslots.append(timeslot)
-                        
-                        # Use AI-based timeslot selection
-                        selected_timeslot = self._select_timeslot_ai_based(available_timeslots, self.temperature)
-                        if selected_timeslot:
-                            timeslot_id = selected_timeslot.get("id")
-                            slot_key = (best_classroom, timeslot_id)
-                            
-                            assignment = {
-                                "project_id": project_id,
-                                "classroom_id": best_classroom,
-                                "timeslot_id": timeslot_id,
-                                "is_makeup": project.get("is_makeup", False),
-                                "instructors": [instructor_id]
-                            }
-                            
-                            assignments.append(assignment)
-                            used_slots.add(slot_key)
-                            instructor_timeslot_usage[instructor_id].add(timeslot_id)
-                            assigned_projects.add(project_id)
-                            assigned = True
-                            instructor_classroom_projects.append(project_id)  # Jüri eşleştirmesi için kaydet
-                            # OPTIMIZATION: Reduce logging
-                            if self.current_iteration == 0:
-                                logger.info(f"Proje {project_id} AI-BASED atandı: {best_classroom} - {timeslot_id}")
-                    else:
-                        # Original logic: Önce mevcut sınıfta boş slot ara
-                        for slot_idx in range(current_slot_idx, len(sorted_timeslots)):
-                            timeslot_id = sorted_timeslots[slot_idx].get("id")
-                            slot_key = (best_classroom, timeslot_id)
-                        
-                        instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                        if not isinstance(instructor_slots, set):
-                            instructor_slots = set()
-                        
-                        if (slot_key not in used_slots and 
-                            timeslot_id not in instructor_slots):
-                            
-                            assignment = {
-                                "project_id": project_id,
-                                "classroom_id": best_classroom,
-                                "timeslot_id": timeslot_id,
-                                "is_makeup": project.get("is_makeup", False),
-                                "instructors": [instructor_id]
-                            }
-                            
-                            assignments.append(assignment)
-                            used_slots.add(slot_key)
-                            instructor_timeslot_usage[instructor_id].add(timeslot_id)
-                            assigned_projects.add(project_id)
-                            assigned = True
-                            instructor_classroom_projects.append(project_id)  # Jüri eşleştirmesi için kaydet
-                            # OPTIMIZATION: Reduce logging
-                            if self.current_iteration == 0:
-                                logger.info(f"Proje {project_id} atandı: {best_classroom} - {timeslot_id}")
-                            break
-                    
-                    # Eğer mevcut sınıfta bulunamadıysa, tüm sınıflarda en erken boş slotu ara
-                    if not assigned:
-                        earliest_slot_found = None
-                        earliest_classroom = None
-                        earliest_slot_idx = float('inf')
-                        
-                        for classroom in self.classrooms:
-                            classroom_id = classroom.get("id")
-                            
-                            for slot_idx in range(len(sorted_timeslots)):
-                                timeslot_id = sorted_timeslots[slot_idx].get("id")
-                                slot_key = (classroom_id, timeslot_id)
-                                
-                                instructor_slots = instructor_timeslot_usage.get(instructor_id, set())
-                                if not isinstance(instructor_slots, set):
-                                    instructor_slots = set()
-                                
-                                if (slot_key not in used_slots and 
-                                    timeslot_id not in instructor_slots):
-                                    
-                                    if slot_idx < earliest_slot_idx:
-                                        earliest_slot_idx = slot_idx
-                                        earliest_slot_found = timeslot_id
-                                        earliest_classroom = classroom_id
-                                    break
-                        
-                        # En erken boş slotu kullan
-                        if earliest_slot_found:
-                            assignment = {
-                                "project_id": project_id,
-                                "classroom_id": earliest_classroom,
-                                "timeslot_id": earliest_slot_found,
-                                "is_makeup": project.get("is_makeup", False),
-                                "instructors": [instructor_id]
-                            }
-                            
-                            assignments.append(assignment)
-                            used_slots.add((earliest_classroom, earliest_slot_found))
-                            instructor_timeslot_usage[instructor_id].add(earliest_slot_found)
-                            assigned_projects.add(project_id)
-                            assigned = True
-                            instructor_classroom_projects.append(project_id)  # Jüri eşleştirmesi için kaydet
-                            # OPTIMIZATION: Reduce logging
-                            if self.current_iteration == 0:
-                                logger.info(f"Proje {project_id} en erken slot'a atandı: {earliest_classroom} - {earliest_slot_found}")
-                    
-                    if not assigned:
-                        logger.warning(f"UYARI: Proje {project_id} için hiçbir boş slot bulunamadı!")
-                
-                # Bu instructor'ı sınıf sequence'ine ekle (jüri eşleştirmesi için)
-                if instructor_classroom_projects:
-                    classroom_instructor_sequence[best_classroom].append({
-                        'instructor_id': instructor_id,
-                        'project_ids': instructor_classroom_projects
-                    })
-        
-        # ARDIŞIK JÜRİ EŞLEŞTİRMESİ: Aynı sınıfta ardışık atanan instructor'ları eşleştir
-        # OPTIMIZATION: Only log in first iteration
-        if self.current_iteration == 0:
-            logger.info("Ardışık jüri eşleştirmesi başlatılıyor...")
-        self._assign_consecutive_jury_members(assignments, classroom_instructor_sequence)
-        
-        if self.current_iteration == 0:
-            logger.info(f"Pure Consecutive Grouping tamamlandı: {len(assignments)} atama yapıldı")
-        return assignments
-
-    def _assign_consecutive_jury_members(self, assignments: List[Dict[str, Any]], 
-                                        classroom_instructor_sequence: Dict) -> None:
+            for i, assignment in enumerate(class_assignments):
+                assignment.order_in_class = i
+    
+    def _repair_timeslot_conflicts(self, state: SAState) -> None:
         """
-        Aynı sınıfta ardışık atanan instructor'ları tespit et ve birbirinin jürisi yap.
+        Resolve timeslot conflicts - CRITICAL HARD CONSTRAINT.
         
-        Mantık:
-        - Dr. Öğretim Görevlisi 14: D106'da consecutive (09:00-09:30)
-        - Dr. Öğretim Görevlisi 2: D106'da consecutive (09:30-10:00) 
-        
-        Sonuç:
-        - Öğretim Görevlisi 14 sorumlu → Öğretim Görevlisi 2 jüri
-        - Öğretim Görevlisi 2 sorumlu → Öğretim Görevlisi 14 jüri
+        An instructor cannot be in multiple places at the same time.
+        Same order_in_class across ANY classes means same timeslot!
         """
-        jury_assignments_made = 0
+        max_iterations = 200
         
-        for classroom_id, instructor_sequence in classroom_instructor_sequence.items():
-            if len(instructor_sequence) < 2:
-                continue
+        for iteration in range(max_iterations):
+            # Find conflicts
+            conflicts = self._find_timeslot_conflicts(state)
+            if not conflicts:
+                return  # No conflicts
             
-            # OPTIMIZATION: Reduce logging
-            if self.current_iteration == 0:
-                logger.info(f"Sınıf {classroom_id} için ardışık jüri eşleştirmesi yapılıyor...")
-            
-            for i in range(len(instructor_sequence) - 1):
-                instructor_a = instructor_sequence[i]
-                instructor_b = instructor_sequence[i + 1]
-                
-                instructor_a_id = instructor_a['instructor_id']
-                instructor_b_id = instructor_b['instructor_id']
-                
-                for assignment in assignments:
-                    if assignment['project_id'] in instructor_a['project_ids']:
-                        if instructor_b_id not in assignment['instructors']:
-                            assignment['instructors'].append(instructor_b_id)
-                            jury_assignments_made += 1
-                            # OPTIMIZATION: Reduce logging
-                
-                for assignment in assignments:
-                    if assignment['project_id'] in instructor_b['project_ids']:
-                        if instructor_a_id not in assignment['instructors']:
-                            assignment['instructors'].append(instructor_a_id)
-                            jury_assignments_made += 1
-                            # OPTIMIZATION: Reduce logging
-        
-        # FALLBACK: Tek instructor olan sınıflar için jüri ataması yap
-        fallback_jury_assignments = self._assign_fallback_jury_members(assignments, classroom_instructor_sequence)
-        
-        # OPTIMIZATION: Only log summary in first iteration
-        if self.current_iteration == 0:
-            logger.info(f"Ardışık jüri eşleştirmesi tamamlandı: {jury_assignments_made} jüri ataması yapıldı")
-            if fallback_jury_assignments > 0:
-                logger.info(f"Fallback jüri eşleştirmesi: {fallback_jury_assignments} jüri ataması yapıldı")
-
-    def _assign_fallback_jury_members(self, assignments: List[Dict[str, Any]], 
-                                     classroom_instructor_sequence: Dict) -> int:
+            # Resolve conflicts one by one
+            for conflict in conflicts:
+                self._resolve_timeslot_conflict(state, conflict)
+                break  # Re-check after each resolution
+    
+    def _find_timeslot_conflicts(self, state: SAState) -> List[Dict]:
         """
-        Fallback jury assignment for classrooms with single instructors.
-        Assigns jury members from other classrooms to ensure all projects have juries.
+        Find all timeslot conflicts.
+        
+        IMPORTANT: Same order_in_class across different classes = SAME TIMESLOT!
+        An instructor with assignments in different classes but same order
+        has a conflict (they can't be in two places at once).
         """
-        fallback_assignments = 0
-        
-        for classroom_id, instructor_sequence in classroom_instructor_sequence.items():
-            # 🤖 AI-BASED: Don't skip - include with low priority if multiple instructors
-            priority_score = 100.0
-            
-            if len(instructor_sequence) >= 2:
-                priority_score = 10.0  # Low priority (already handled by consecutive)
-                # But still process for completeness (AI-based soft constraint)
-            
-            # Single instructor case - need fallback jury assignment (high priority)
-            if len(instructor_sequence) == 1:
-                single_instructor = instructor_sequence[0]
-                single_instructor_id = single_instructor['instructor_id']
-                
-                # Find other instructors in the system to use as jury members
-                available_jury_members = []
-                for other_classroom_id, other_sequence in classroom_instructor_sequence.items():
-                    if other_classroom_id != classroom_id:  # Different classroom
-                        for other_instructor in other_sequence:
-                            other_instructor_id = other_instructor['instructor_id']
-                            if other_instructor_id not in available_jury_members:
-                                available_jury_members.append(other_instructor_id)
-                
-                # Assign jury members to projects of the single instructor
-                for assignment in assignments:
-                    if (assignment['classroom_id'] == classroom_id and 
-                        assignment['project_id'] in single_instructor['project_ids']):
-                        
-                        # Check if already has jury members
-                        current_jury_count = len([instructor for instructor in assignment['instructors'] 
-                                                if instructor != single_instructor_id])
-                        
-                        if current_jury_count == 0:  # No jury members assigned
-                            # 🔧 SORUN DÜZELTİLDİ: Flexible mode'da bile jüri ataması yapılmalı!
-                            # AI-BASED JURY ASSIGNMENT: Use temperature-based selection
-                            if self.ai_based_jury_assignment:
-                                selected_jury_members = self._assign_jury_ai_based(
-                                    single_instructor_id, available_jury_members, self.temperature)
-                                for jury_member_id in selected_jury_members:
-                                    if jury_member_id not in assignment['instructors']:
-                                        assignment['instructors'].append(jury_member_id)
-                                        fallback_assignments += 1
-                            else:
-                                # 🔧 SORUN DÜZELTİLDİ: Original logic - MUTLAKA jüri ata!
-                                assigned_jury_count = 0
-                                for jury_member_id in available_jury_members:
-                                    if assigned_jury_count >= 2:  # Max 2 jury members
-                                        break
-                                    if jury_member_id not in assignment['instructors']:
-                                        assignment['instructors'].append(jury_member_id)
-                                        fallback_assignments += 1
-                                        assigned_jury_count += 1
-                                
-                                # 🔧 SORUN DÜZELTİLDİ: Eğer hiç jüri atanamadıysa, en az 1 jüri ata!
-                                if assigned_jury_count == 0 and available_jury_members:
-                                    # En az 1 jüri ata - projelerin jüri ataması alması için
-                                    assignment['instructors'].append(available_jury_members[0])
-                                    fallback_assignments += 1
-                            
-                            # OPTIMIZATION: Only log in first iteration
-                            if self.current_iteration == 0:
-                                jury_members = [instructor for instructor in assignment['instructors'] 
-                                              if instructor != single_instructor_id]
-                                logger.info(f"  Fallback jüri ataması - Proje {assignment['project_id']}: "
-                                          f"Instructor {single_instructor_id} sorumlu → "
-                                          f"Jüri: {jury_members}")
-        
-        return fallback_assignments
-
-    def _detect_conflicts(self, assignments: List[Dict[str, Any]]) -> List[str]:
-        """Detect conflicts in assignments"""
         conflicts = []
-        instructor_timeslot_counts = defaultdict(int)
         
-        for assignment in assignments:
-            instructors_list = assignment.get('instructors', [])
-            timeslot_id = assignment.get('timeslot_id')
-            
-            for instructor_id in instructors_list:
-                key = f"instructor_{instructor_id}_timeslot_{timeslot_id}"
-                instructor_timeslot_counts[key] += 1
-                
-                if instructor_timeslot_counts[key] > 1:
-                    conflicts.append(key)
+        # Build instructor schedule: instructor_id -> order -> list of (assignment, class_id)
+        instructor_schedule = defaultdict(lambda: defaultdict(list))
+        
+        for assignment in state.assignments:
+            # PS role
+            instructor_schedule[assignment.ps_id][assignment.order_in_class].append({
+                'assignment': assignment,
+                'class_id': assignment.class_id,
+                'role': 'PS'
+            })
+            # J1 role
+            instructor_schedule[assignment.j1_id][assignment.order_in_class].append({
+                'assignment': assignment,
+                'class_id': assignment.class_id,
+                'role': 'J1'
+            })
+        
+        # Find conflicts: multiple assignments at same timeslot (order)
+        for instructor_id, orders in instructor_schedule.items():
+            for order, entries in orders.items():
+                if len(entries) > 1:
+                    # Check if they are in DIFFERENT classes (real conflict)
+                    classes_at_this_slot = set(e['class_id'] for e in entries)
+                    if len(classes_at_this_slot) > 1:
+                        # CONFLICT: Instructor in multiple classes at same time
+                        conflicts.append({
+                            'instructor_id': instructor_id,
+                            'order': order,
+                            'entries': entries,
+                            'classes': classes_at_this_slot
+                        })
         
         return conflicts
-
-    def _resolve_conflicts(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    
+    def _resolve_timeslot_conflict(self, state: SAState, conflict: Dict) -> None:
         """
-        AI-BASED CONFLICT RESOLUTION - Temperature-based intelligent conflict resolution.
+        Resolve a single timeslot conflict.
         
         Strategy:
-        - HIGH TEMP: Random reassignment (exploration)
-        - MEDIUM TEMP: Balanced reassignment (mixed)
-        - LOW TEMP: Smart reassignment (exploitation)
+        1. If instructor is J1, try to reassign to different instructor
+        2. If instructor is PS, try to move project to different timeslot
+        3. As last resort, move project to end of a different class
         """
-        if not self.ai_based_conflict_resolution:
-            # Fallback to simple resolution
-            conflicts = self._detect_conflicts(assignments)
-            if not conflicts:
-                return assignments
-            logger.warning(f"Conflict resolution: {len(conflicts)} conflicts detected but not resolved")
-            return assignments
+        instructor_id = conflict['instructor_id']
+        entries = conflict['entries']
         
-        conflicts = self._detect_conflicts(assignments)
-        if not conflicts:
-            return assignments
-        
-        logger.info(f"  AI-BASED Conflict Resolution: {len(conflicts)} conflicts detected")
-        
-        # ULTRA-AGGRESSIVE: Direct conflict resolution by finding and fixing all instructor conflicts
-        resolved_count = self._resolve_all_instructor_conflicts_aggressive(assignments)
-        
-        if resolved_count > 0:
-            logger.info(f"  AI-BASED Conflict Resolution: {resolved_count} conflicts resolved!")
+        # Keep first entry, fix others
+        for entry in entries[1:]:
+            assignment = entry['assignment']
+            role = entry['role']
             
-            # Re-check conflicts after resolution
-            remaining_conflicts = self._detect_conflicts(assignments)
-            if remaining_conflicts:
-                logger.warning(f"  WARNING: {len(remaining_conflicts)} conflicts still remain after resolution")
+            if role == 'J1':
+                # Try to find a different J1 who is NOT busy at this timeslot
+                available = self._find_available_j1_at_slot(
+                    state, assignment, assignment.order_in_class
+                )
+                if available:
+                    assignment.j1_id = random.choice(available)
+                    continue
+            
+            # Need to move the project to a different timeslot
+            # Find a slot where this instructor is free
+            new_slot = self._find_free_slot_for_instructor(state, instructor_id, assignment)
+            if new_slot:
+                old_class = assignment.class_id
+                assignment.class_id = new_slot['class_id']
+                assignment.order_in_class = new_slot['order']
+                self._repair_class_ordering(state)
             else:
-                logger.info(f"  SUCCESS: All conflicts resolved!")
-        else:
-            logger.warning(f"  Conflict resolution: {len(conflicts)} conflicts detected but not resolved")
-        
-        return assignments
+                # Last resort: move to end of least loaded class
+                class_loads = defaultdict(int)
+                for a in state.assignments:
+                    class_loads[a.class_id] += 1
+                
+                min_class = min(range(state.class_count), key=lambda c: class_loads.get(c, 0))
+                assignment.class_id = min_class
+                assignment.order_in_class = class_loads.get(min_class, 0)
+                
+                # Try to reassign J1 if still conflicting
+                if role == 'PS':
+                    available_j1 = [
+                        i for i in self.faculty_ids
+                        if i != assignment.ps_id and i != instructor_id
+                    ]
+                    if available_j1:
+                        assignment.j1_id = random.choice(available_j1)
+                
+                self._repair_class_ordering(state)
     
-    def _resolve_all_instructor_conflicts_aggressive(self, assignments: List[Dict[str, Any]]) -> int:
-        """
-        ULTRA-AGGRESSIVE: Resolve all instructor conflicts by finding and fixing them directly.
+    def _find_available_j1_at_slot(
+        self, 
+        state: SAState, 
+        assignment: ProjectAssignment, 
+        order: int
+    ) -> List[int]:
+        """Find J1 candidates who are free at the given timeslot"""
+        # Find all instructors busy at this timeslot
+        busy_at_slot = set()
+        for a in state.assignments:
+            if a.order_in_class == order:
+                busy_at_slot.add(a.ps_id)
+                busy_at_slot.add(a.j1_id)
         
-        Strategy:
-        1. Find all instructor-timeslot combinations with multiple assignments
-        2. For each conflict, move one assignment to a different timeslot
-        3. Use adaptive neighborhood search to find alternative slots
-        4. Repeat until all conflicts resolved or no more progress
+        # Find available instructors
+        available = [
+            i for i in self.faculty_ids
+            if i != assignment.ps_id and i not in busy_at_slot
+        ]
         
-        Returns:
-            Number of conflicts resolved
-        """
-        from collections import defaultdict
-        
-        resolved_count = 0
-        max_attempts = 5  # Multiple passes
-        
-        for attempt in range(max_attempts):
-            # Find all instructor conflicts
-            instructor_timeslot_map = defaultdict(list)
-            
-            for assignment in assignments:
-                instructors_list = assignment.get('instructors', [])
-                timeslot_id = assignment.get('timeslot_id')
-                
-                if timeslot_id:
-                    for instructor_id in instructors_list:
-                        instructor_timeslot_map[(instructor_id, timeslot_id)].append(assignment)
-            
-            # Find conflicts (instructor-timeslot with multiple assignments)
-            conflicts_found = 0
-            
-            for (instructor_id, timeslot_id), conflicting_assignments in instructor_timeslot_map.items():
-                if len(conflicting_assignments) <= 1:
-                    continue  # No conflict
-                
-                conflicts_found += 1
-                
-                # Resolve conflict: Try different strategies
-                # Strategy 1: Move conflicting assignment to different timeslot
-                for i in range(1, len(conflicting_assignments)):
-                    assignment_to_move = conflicting_assignments[i]
-                    
-                    # Try to find alternative slot for this assignment
-                    new_slot = self._find_any_available_slot_for_assignment(
-                        assignment_to_move, assignments
-                    )
-                    
-                    if new_slot:
-                        old_timeslot = assignment_to_move['timeslot_id']
-                        assignment_to_move['timeslot_id'] = new_slot
-                        resolved_count += 1
-                        logger.info(f"    Resolved conflict: Project {assignment_to_move['project_id']} "
-                                  f"moved from timeslot {old_timeslot} to {new_slot}")
-                        continue
-                    
-                    # Strategy 2: If can't move assignment, try removing instructor from jury
-                    # (Keep only responsible instructor, remove jury members causing conflict)
-                    if len(assignment_to_move.get('instructors', [])) > 1:
-                        # This assignment has jury members
-                        # Check if instructor causing conflict is a jury member (not responsible)
-                        project = next((p for p in self.projects if p['id'] == assignment_to_move['project_id']), None)
-                        if project:
-                            responsible_id = project.get('responsible_id')
-                            if responsible_id and instructor_id != responsible_id:
-                                # Instructor is a jury member, remove from this assignment
-                                if instructor_id in assignment_to_move['instructors']:
-                                    assignment_to_move['instructors'].remove(instructor_id)
-                                    resolved_count += 1
-                                    logger.info(f"    Resolved conflict: Removed jury member {instructor_id} "
-                                              f"from Project {assignment_to_move['project_id']}")
-            
-            if conflicts_found == 0:
-                break  # No more conflicts
-        
-        return resolved_count
+        return available
     
-    def _find_any_available_slot_for_assignment(self, assignment: Dict[str, Any], 
-                                                all_assignments: List[Dict[str, Any]]) -> int:
-        """
-        Find ANY available slot for an assignment (global search).
+    def _find_free_slot_for_instructor(
+        self, 
+        state: SAState, 
+        instructor_id: int, 
+        assignment: ProjectAssignment
+    ) -> Optional[Dict]:
+        """Find a timeslot where the instructor is free"""
+        # Build instructor's schedule
+        busy_orders = set()
+        for a in state.assignments:
+            if a.ps_id == instructor_id or a.j1_id == instructor_id:
+                busy_orders.add(a.order_in_class)
         
-        Args:
-            assignment: Assignment to find slot for
-            all_assignments: All current assignments
-            
-        Returns:
-            Available timeslot ID, or None if no slot available
-        """
-        classroom_id = assignment.get('classroom_id')
-        current_timeslot = assignment.get('timeslot_id')
-        instructor_id = assignment['instructors'][0] if assignment['instructors'] else None
+        # Find class counts
+        class_counts = defaultdict(int)
+        for a in state.assignments:
+            class_counts[a.class_id] += 1
         
-        if not instructor_id:
-            # 🤖 AI-BASED FALLBACK: Return current timeslot with penalty (not None!)
-            return {
-                'timeslot_id': current_timeslot,
-                'score': -900.0,
-                'quality': 'fallback',
-                'reason': 'no_instructor_id'
-            }
+        # Find first free slot
+        max_order = max(class_counts.values()) if class_counts else 0
         
-        # Try all timeslots in the same classroom first
-        for timeslot in self.timeslots:
-            timeslot_id = timeslot['id']
-            
-            if timeslot_id == current_timeslot:
-                continue
-            
-            # Check if slot is available
-            slot_available = not any(
-                a != assignment and
-                a['classroom_id'] == classroom_id and
-                a['timeslot_id'] == timeslot_id
-                for a in all_assignments
-            )
-            
-            instructor_available = not any(
-                a != assignment and
-                instructor_id in a['instructors'] and
-                a['timeslot_id'] == timeslot_id
-                for a in all_assignments
-            )
-            
-            if slot_available and instructor_available:
-                # ✅ OPTIMAL SLOT FOUND!
-                return {
-                    'timeslot_id': timeslot_id,
-                    'score': 100.0,
-                    'quality': 'optimal'
-                }
+        for order in range(max_order + 5):  # Check a few slots beyond current max
+            if order not in busy_orders:
+                # Find a class where we can add at this order
+                for class_id in range(state.class_count):
+                    current_count = class_counts.get(class_id, 0)
+                    if order <= current_count:  # Can fit here
+                        return {'class_id': class_id, 'order': order}
         
-        # If no slot in same classroom, try other classrooms
-        for classroom in self.classrooms:
-            other_classroom_id = classroom['id']
-            
-            if other_classroom_id == classroom_id:
-                continue
-            
-            for timeslot in self.timeslots:
-                timeslot_id = timeslot['id']
+        return None
+    
+    def _repair_missing_projects(self, state: SAState) -> None:
+        """Add any missing projects"""
+        assigned_ids = {a.project_id for a in state.assignments}
+        
+        for project in self.project_list:
+            if project.id not in assigned_ids:
+                # Find least loaded class
+                class_loads = defaultdict(int)
+                for a in state.assignments:
+                    class_loads[a.class_id] += 1
                 
-                # Check if slot is available
-                slot_available = not any(
-                    a != assignment and
-                    a['classroom_id'] == other_classroom_id and
-                    a['timeslot_id'] == timeslot_id
-                    for a in all_assignments
+                min_class = min(
+                    range(state.class_count),
+                    key=lambda c: class_loads.get(c, 0)
                 )
                 
-                instructor_available = not any(
-                    a != assignment and
-                    instructor_id in a['instructors'] and
-                    a['timeslot_id'] == timeslot_id
-                    for a in all_assignments
-                )
+                # Create assignment
+                order = class_loads.get(min_class, 0)
+                available_j1 = [
+                    i for i in self.faculty_ids 
+                    if i != project.responsible_id
+                ]
+                j1_id = random.choice(available_j1) if available_j1 else self.faculty_ids[0]
                 
-                if slot_available and instructor_available:
-                    # ✅ OPTIMAL SLOT FOUND (different classroom)
-                    assignment['classroom_id'] = other_classroom_id
-                    return {
-                        'timeslot_id': timeslot_id,
-                        'score': 80.0,  # Slightly lower than same classroom
-                        'quality': 'optimal_different_classroom'
-                    }
-        
-        # 🤖 AI-BASED FALLBACK: Return current timeslot with high penalty (not None!)
-        return {
-            'timeslot_id': current_timeslot,
-            'score': -700.0,
-            'quality': 'fallback',
-            'reason': 'no_alternative_timeslot_found'
-        }
+                assignment = ProjectAssignment(
+                    project_id=project.id,
+                    class_id=min_class,
+                    order_in_class=order,
+                    ps_id=project.responsible_id,
+                    j1_id=j1_id,
+                    j2_id=-1
+                )
+                state.assignments.append(assignment)
     
-    def _build_detailed_conflicts(self, conflict_strings: List[str], 
-                                  assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Build detailed conflict information from simple conflict strings.
+    def _repair_priority_order(self, state: SAState) -> None:
+        """Ensure priority order (ARA_ONCE / BITIRME_ONCE)"""
+        if self.config.priority_mode == PriorityMode.ESIT:
+            return
         
-        Args:
-            conflict_strings: List of conflict strings like "instructor_1_timeslot_5"
-            assignments: All current assignments
+        # Separate by type
+        interim = []
+        final = []
+        for a in state.assignments:
+            project = self.projects.get(a.project_id)
+            if project:
+                if project.type in ["INTERIM", "interim", "ARA"]:
+                    interim.append(a)
+                else:
+                    final.append(a)
+        
+        # Determine order
+        if self.config.priority_mode == PriorityMode.ARA_ONCE:
+            first_group = interim
+            second_group = final
+        else:  # BITIRME_ONCE
+            first_group = final
+            second_group = interim
+        
+        # Reassign to classes
+        all_sorted = first_group + second_group
+        projects_per_class = len(all_sorted) // state.class_count
+        remainder = len(all_sorted) % state.class_count
+        
+        idx = 0
+        for class_id in range(state.class_count):
+            count = projects_per_class + (1 if class_id < remainder else 0)
+            for order in range(count):
+                if idx < len(all_sorted):
+                    all_sorted[idx].class_id = class_id
+                    all_sorted[idx].order_in_class = order
+                    idx += 1
+    
+    def _repair_workload_hard_limit(self, state: SAState) -> None:
+        """Enforce hard workload limit B_max"""
+        max_iterations = 50
+        
+        for _ in range(max_iterations):
+            # Count workloads
+            workloads = defaultdict(int)
+            for a in state.assignments:
+                workloads[a.ps_id] += 1
+                workloads[a.j1_id] += 1
             
-        Returns:
-            List of detailed conflict dictionaries
+            # Find overloaded instructors
+            overloaded = [
+                i for i in self.faculty_ids
+                if abs(workloads.get(i, 0) - self.avg_workload) > self.config.workload_hard_limit
+            ]
+            
+            if not overloaded:
+                break
+            
+            # Try to balance
+            instructor_id = overloaded[0]
+            
+            # Find assignments where this instructor is J1
+            j1_assignments = [
+                a for a in state.assignments 
+                if a.j1_id == instructor_id
+            ]
+            
+            if j1_assignments:
+                # Reassign one J1
+                assignment = random.choice(j1_assignments)
+                
+                # Find underloaded instructor
+                underloaded = [
+                    i for i in self.faculty_ids
+                    if i != assignment.ps_id and 
+                    workloads.get(i, 0) < self.avg_workload
+                ]
+                
+                if underloaded:
+                    assignment.j1_id = random.choice(underloaded)
+    
+    def _repair_all_classes_used(self, state: SAState) -> None:
         """
-        detailed_conflicts = []
-        processed_conflicts = set()  # Avoid duplicates
+        Ensure ALL classes are used - CRITICAL HARD CONSTRAINT.
         
-        # Group conflicts by type
-        for conflict_str in conflict_strings:
-            # Parse conflict string: "instructor_1_timeslot_5"
-            try:
-                parts = conflict_str.split('_')
-                if len(parts) == 4 and parts[0] == 'instructor' and parts[2] == 'timeslot':
-                    instructor_id = int(parts[1])
-                    timeslot_id = int(parts[3])
+        Every single classroom MUST have at least one project assigned.
+        Bu metod TUM siniflarin kullanildigindan %100 emin olur.
+        Genetic Algorithm'deki gibi while dongusu ile cok agresif.
+        """
+        max_iterations = 200  # Genetic Algorithm'deki gibi
+        iteration = 0
+        
+        while iteration < max_iterations:
+            # Count projects per class
+            class_counts = defaultdict(int)
+            for a in state.assignments:
+                class_counts[a.class_id] += 1
+            
+            # Find unused classes
+            unused_classes = [
+                c for c in range(state.class_count)
+                if class_counts.get(c, 0) == 0
+            ]
+            
+            if not unused_classes:
+                # Tum siniflar kullaniliyor - kontrol et
+                used_count = len([c for c in range(state.class_count) if class_counts.get(c, 0) > 0])
+                if used_count == state.class_count:
+                    return  # Gercekten tum siniflar kullaniliyor
+                # Degilse devam et
+            
+            # En yuklu sinifi bul
+            if not class_counts:
+                # Hic sinif kullanilmiyor, projeleri dagit
+                for i, assignment in enumerate(state.assignments):
+                    class_id = i % state.class_count
+                    assignment.class_id = class_id
+                    assignment.order_in_class = i // state.class_count
+                self._repair_class_ordering(state)
+                return
+            
+            max_class = max(class_counts.keys(), key=lambda c: class_counts[c])
+            max_count = class_counts[max_class]
+            
+            # Eger en yuklu sinifta yeterli proje varsa, kullanilmayan siniflara dagit
+            if max_count > 1:
+                # En yuklu siniftaki projeleri al
+                projects_to_move = [
+                    a for a in state.assignments 
+                    if a.class_id == max_class
+                ]
+                
+                # Kullanilmayan siniflara dagit (en az yuklu siniftan basla)
+                for unused_class in unused_classes:
+                    if not projects_to_move:
+                        break
                     
-                    # Create unique key to avoid duplicates
-                    conflict_key = (instructor_id, timeslot_id)
-                    if conflict_key in processed_conflicts:
-                        continue
-                    processed_conflicts.add(conflict_key)
+                    # En sondan proje al (daha az kritik)
+                    project_to_move = projects_to_move.pop()
+                    old_class = project_to_move.class_id
+                    project_to_move.class_id = unused_class
                     
-                    # Find all assignments with this instructor at this timeslot
-                    conflicting_assignments = [
-                        a for a in assignments
-                        if instructor_id in a.get('instructors', []) and
-                        a.get('timeslot_id') == timeslot_id
+                    # Yeni sinifin sonuna ekle
+                    new_class_projects = [
+                        x for x in state.assignments
+                        if x.class_id == unused_class and x.project_id != project_to_move.project_id
+                    ]
+                    project_to_move.order_in_class = len(new_class_projects)
+                    
+                    # Siralari duzelt
+                    self._repair_class_ordering(state)
+            else:
+                # En yuklu sinifta sadece 1 proje var, baska siniftan al
+                # En az yuklu sinifi bul (ama en az 1 proje olmali)
+                classes_with_projects = [
+                    c for c in class_counts.keys() 
+                    if class_counts[c] > 1
+                ]
+                
+                if classes_with_projects:
+                    min_class = min(classes_with_projects, key=lambda c: class_counts[c])
+                    projects_in_min = [
+                        a for a in state.assignments 
+                        if a.class_id == min_class
                     ]
                     
-                    if len(conflicting_assignments) >= 2:
-                        # Create detailed conflict for each pair
-                        detailed_conflicts.append({
-                            'type': 'instructor_double_booking',
-                            'instructor_id': instructor_id,
-                            'timeslot_id': timeslot_id,
-                            'assignment1': conflicting_assignments[0],
-                            'assignment2': conflicting_assignments[1]
-                        })
-            except Exception as e:
-                logger.warning(f"  Error parsing conflict string '{conflict_str}': {e}")
-                continue
-        
-        return detailed_conflicts
-    
-    def _resolve_instructor_conflict_ai_based(self, assignment1: Dict[str, Any], 
-                                             assignment2: Dict[str, Any],
-                                             all_assignments: List[Dict[str, Any]]) -> bool:
-        """
-        AI-BASED resolution for instructor double booking.
-        
-        Strategy based on temperature:
-        - HIGH TEMP: Random selection of which assignment to move
-        - MEDIUM TEMP: Move assignment with more alternative slots
-        - LOW TEMP: Smart selection based on constraints
-        """
-        # For conflict resolution, use larger neighborhood (override temperature)
-        # We need to be more flexible when resolving conflicts at end
-        neighborhood_size = max(self.max_neighborhood_size, 8)  # Use large neighborhood for conflict resolution
-        
-        # Try to find alternative slot for one of the assignments
-        if self.temperature_based_resolution and self.temperature > 100:
-            # HIGH TEMP: Random selection
-            assignment_to_move = random.choice([assignment1, assignment2])
-        elif self.temperature > 50:
-            # MEDIUM TEMP: Choose assignment with more alternatives
-            alternatives1 = self._count_alternative_slots(assignment1, all_assignments, neighborhood_size)
-            alternatives2 = self._count_alternative_slots(assignment2, all_assignments, neighborhood_size)
-            assignment_to_move = assignment1 if alternatives1 > alternatives2 else assignment2
-        else:
-            # LOW TEMP: Smart selection based on constraints
-            assignment_to_move = self._select_assignment_to_move_smart(assignment1, assignment2, all_assignments)
-        
-        # Try to reassign
-        new_slot = self._find_alternative_slot_adaptive(assignment_to_move, all_assignments, neighborhood_size)
-        if new_slot and isinstance(new_slot, dict):
-            # 🤖 AI-BASED: Use scored result
-            assignment_to_move['timeslot_id'] = new_slot.get('timeslot_id', assignment_to_move.get('timeslot_id'))
-            success = new_slot.get('score', 0) > 0  # Success if score positive
-            return success
-        
-        # 🤖 AI-BASED: No alternative found but return True anyway (soft constraint!)
-        # The penalty is already in the score, don't hard block
-        return True  # Proceed anyway (soft constraint philosophy!)
-    
-    def _resolve_classroom_conflict_ai_based(self, assignment1: Dict[str, Any], 
-                                            assignment2: Dict[str, Any],
-                                            all_assignments: List[Dict[str, Any]]) -> bool:
-        """AI-BASED resolution for classroom double booking."""
-        # For conflict resolution, use larger neighborhood (override temperature)
-        neighborhood_size = max(self.max_neighborhood_size, 8)  # Use large neighborhood for conflict resolution
-        
-        # Try to find alternative classroom for one of the assignments
-        if self.temperature_based_resolution and self.temperature > 100:
-            assignment_to_move = random.choice([assignment1, assignment2])
-        else:
-            # Smart selection
-            assignment_to_move = self._select_assignment_to_move_smart(assignment1, assignment2, all_assignments)
-        
-        # Try to find alternative classroom
-        new_classroom = self._find_alternative_classroom_adaptive(assignment_to_move, all_assignments)
-        if new_classroom and isinstance(new_classroom, dict):
-            # 🤖 AI-BASED: Use scored result
-            assignment_to_move['classroom_id'] = new_classroom.get('classroom_id', assignment_to_move.get('classroom_id'))
-            success = new_classroom.get('score', 0) > 0  # Success if score positive
-            return success
-        
-        # 🤖 AI-BASED: No alternative found but return True anyway (soft constraint!)
-        # The penalty is already in the score, don't hard block
-        return True  # Proceed anyway (soft constraint philosophy!)
-    
-    def _calculate_adaptive_neighborhood_size(self) -> int:
-        """
-        ADAPTIVE NEIGHBORHOOD SEARCH - Calculate neighborhood size based on temperature.
-        
-        Higher temperature = larger neighborhood (more exploration)
-        Lower temperature = smaller neighborhood (more exploitation)
-        """
-        if not self.adaptive_neighborhood_search:
-            return self.max_neighborhood_size
-        
-        # Linear interpolation between min and max based on temperature
-        temp_ratio = self.temperature / self.initial_temperature
-        neighborhood_size = int(self.min_neighborhood_size + 
-                               (self.max_neighborhood_size - self.min_neighborhood_size) * temp_ratio)
-        
-        return max(self.min_neighborhood_size, min(self.max_neighborhood_size, neighborhood_size))
-    
-    def _count_alternative_slots(self, assignment: Dict[str, Any], 
-                                 all_assignments: List[Dict[str, Any]], 
-                                 neighborhood_size: int) -> int:
-        """Count alternative slots within neighborhood."""
-        current_timeslot = assignment.get('timeslot_id')
-        classroom_id = assignment.get('classroom_id')
-        instructor_id = assignment['instructors'][0] if assignment['instructors'] else None
-        
-        if not instructor_id or not current_timeslot:
-            return 0
-        
-        alternatives = 0
-        
-        # Check slots within neighborhood
-        for offset in range(-neighborhood_size, neighborhood_size + 1):
-            if offset == 0:
-                continue
+                    if projects_in_min:
+                        project_to_move = projects_in_min[-1]  # En sondan al
+                        unused_class = unused_classes[0]
+                        
+                        old_class = project_to_move.class_id
+                        project_to_move.class_id = unused_class
+                        
+                        # Yeni sinifin sonuna ekle
+                        new_class_projects = [
+                            x for x in state.assignments
+                            if x.class_id == unused_class and x.project_id != project_to_move.project_id
+                        ]
+                        project_to_move.order_in_class = len(new_class_projects)
+                        
+                        # Siralari duzelt
+                        self._repair_class_ordering(state)
+                else:
+                    # Her sinifta sadece 1 proje var, dagit
+                    all_projects = list(state.assignments)
+                    for i, unused_class in enumerate(unused_classes):
+                        if i < len(all_projects):
+                            project_to_move = all_projects[i]
+                            old_class = project_to_move.class_id
+                            project_to_move.class_id = unused_class
+                            project_to_move.order_in_class = 0
+                            self._repair_class_ordering(state)
             
-            candidate_slot = current_timeslot + offset
-            if candidate_slot < 1 or candidate_slot > len(self.timeslots):
-                continue
+            iteration += 1
+        
+        # Final forced distribution if still unused classes
+        class_counts = defaultdict(int)
+        for a in state.assignments:
+            class_counts[a.class_id] += 1
+        
+        unused_classes = [
+            c for c in range(state.class_count)
+            if class_counts.get(c, 0) == 0
+        ]
+        
+        if unused_classes:
+            # AGGRESSIVE: Take projects from overloaded classes and distribute
+            # Sort all assignments by class load
+            assignments_by_class = defaultdict(list)
+            for a in state.assignments:
+                assignments_by_class[a.class_id].append(a)
             
-            # Check if slot is available
-            slot_available = not any(
-                a != assignment and
-                a['classroom_id'] == classroom_id and
-                a['timeslot_id'] == candidate_slot
-                for a in all_assignments
+            # Sort classes by load (most loaded first)
+            sorted_classes = sorted(
+                assignments_by_class.keys(),
+                key=lambda c: len(assignments_by_class[c]),
+                reverse=True
             )
             
-            instructor_available = not any(
-                a != assignment and
-                instructor_id in a['instructors'] and
-                a['timeslot_id'] == candidate_slot
-                for a in all_assignments
-            )
+            for unused_class in unused_classes:
+                moved = False
+                
+                # Try to move from most loaded classes
+                for max_class in sorted_classes:
+                    if max_class == unused_class:
+                        continue
+                    
+                    projects_in_max = assignments_by_class[max_class]
+                    if len(projects_in_max) > 1:
+                        # Move last project
+                        project = projects_in_max[-1]
+                        project.class_id = unused_class
+                        project.order_in_class = 0
+                        assignments_by_class[max_class].remove(project)
+                        assignments_by_class[unused_class].append(project)
+                        class_counts[max_class] -= 1
+                        class_counts[unused_class] = 1
+                        moved = True
+                        break
+                
+                if not moved:
+                    # Force move even from single-project classes
+                    for max_class in sorted_classes:
+                        if max_class == unused_class:
+                            continue
+                        projects_in_max = assignments_by_class[max_class]
+                        if projects_in_max:
+                            project = projects_in_max[-1]
+                            project.class_id = unused_class
+                            project.order_in_class = 0
+                            assignments_by_class[max_class].remove(project)
+                            assignments_by_class[unused_class].append(project)
+                            class_counts[max_class] -= 1
+                            class_counts[unused_class] = 1
+                            break
             
-            if slot_available and instructor_available:
-                alternatives += 1
+            self._repair_class_ordering(state)
         
-        return alternatives
-    
-    def _select_assignment_to_move_smart(self, assignment1: Dict[str, Any], 
-                                        assignment2: Dict[str, Any],
-                                        all_assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Smart selection of which assignment to move (low temperature strategy)."""
-        # Prefer moving assignment with fewer constraints
-        # For now, random selection (can be enhanced)
-        return random.choice([assignment1, assignment2])
-    
-    def _find_alternative_slot_adaptive(self, assignment: Dict[str, Any], 
-                                       all_assignments: List[Dict[str, Any]], 
-                                       neighborhood_size: int) -> int:
-        """Find alternative slot within adaptive neighborhood (or globally if needed)."""
-        current_timeslot = assignment.get('timeslot_id')
-        classroom_id = assignment.get('classroom_id')
-        instructor_id = assignment['instructors'][0] if assignment['instructors'] else None
+        # ABSOLUTE FINAL CHECK - redistribute if still unused
+        class_counts = defaultdict(int)
+        for a in state.assignments:
+            class_counts[a.class_id] += 1
         
-        if not instructor_id or not current_timeslot:
-            # 🤖 AI-BASED FALLBACK: Return first available slot with penalty (not None!)
-            fallback_slot = self.timeslots[0]['id'] if self.timeslots else 1
-            return {
-                'timeslot_id': fallback_slot,
-                'score': -900.0,
-                'quality': 'fallback',
-                'reason': 'no_instructor_or_timeslot'
-            }
+        unused_classes = [
+            c for c in range(state.class_count)
+            if class_counts.get(c, 0) == 0
+        ]
         
-        # First try: Search within neighborhood
-        for offset in range(-neighborhood_size, neighborhood_size + 1):
-            if offset == 0:
-                continue
+        if unused_classes:
+            # LAST RESORT: Redistribute ALL projects evenly
+            all_assignments = list(state.assignments)
+            for i, assignment in enumerate(all_assignments):
+                target_class = i % state.class_count
+                assignment.class_id = target_class
+                assignment.order_in_class = i // state.class_count
             
-            candidate_slot = current_timeslot + offset
-            if candidate_slot < 1 or candidate_slot > len(self.timeslots):
-                continue
-            
-            # Check if slot is available
-            slot_available = not any(
-                a != assignment and
-                a['classroom_id'] == classroom_id and
-                a['timeslot_id'] == candidate_slot
-                for a in all_assignments
-            )
-            
-            instructor_available = not any(
-                a != assignment and
-                instructor_id in a['instructors'] and
-                a['timeslot_id'] == candidate_slot
-                for a in all_assignments
-            )
-            
-            if slot_available and instructor_available:
-                # ✅ OPTIMAL SLOT FOUND (within neighborhood)!
-                return {
-                    'timeslot_id': candidate_slot,
-                    'score': 100.0,
-                    'quality': 'optimal_neighborhood'
-                }
-        
-        # Second try: If neighborhood search failed, try ALL timeslots (for conflict resolution)
-        for timeslot in self.timeslots:
-            candidate_slot = timeslot['id']
-            
-            if candidate_slot == current_timeslot:
-                continue
-            
-            # Check if slot is available
-            slot_available = not any(
-                a != assignment and
-                a['classroom_id'] == classroom_id and
-                a['timeslot_id'] == candidate_slot
-                for a in all_assignments
-            )
-            
-            instructor_available = not any(
-                a != assignment and
-                instructor_id in a['instructors'] and
-                a['timeslot_id'] == candidate_slot
-                for a in all_assignments
-            )
-            
-            if slot_available and instructor_available:
-                # ✅ OPTIMAL SLOT FOUND (all timeslots search)!
-                return {
-                    'timeslot_id': candidate_slot,
-                    'score': 90.0,  # Slightly lower than neighborhood
-                    'quality': 'optimal_global'
-                }
-        
-        # 🤖 AI-BASED FALLBACK: Return current slot with high penalty (not None!)
-        return {
-            'timeslot_id': current_timeslot,
-            'score': -800.0,
-            'quality': 'fallback',
-            'reason': 'no_adaptive_slot_found'
-        }
-    
-    def _find_alternative_classroom_adaptive(self, assignment: Dict[str, Any], 
-                                            all_assignments: List[Dict[str, Any]]) -> int:
-        """Find alternative classroom for assignment."""
-        timeslot_id = assignment.get('timeslot_id')
-        current_classroom = assignment.get('classroom_id')
-        instructor_id = assignment['instructors'][0] if assignment['instructors'] else None
-        
-        if not instructor_id or not timeslot_id:
-            # 🤖 AI-BASED FALLBACK: Return current classroom with penalty (not None!)
-            return {
-                'classroom_id': current_classroom,
-                'score': -900.0,
-                'quality': 'fallback',
-                'reason': 'no_instructor_or_timeslot'
-            }
-        
-        # Try all classrooms
-        for classroom in self.classrooms:
-            classroom_id = classroom['id']
-            
-            if classroom_id == current_classroom:
-                continue
-            
-            # Check if classroom is available
-            classroom_available = not any(
-                a != assignment and
-                a['classroom_id'] == classroom_id and
-                a['timeslot_id'] == timeslot_id
-                for a in all_assignments
-            )
-            
-            if classroom_available:
-                # ✅ OPTIMAL CLASSROOM FOUND!
-                return {
-                    'classroom_id': classroom_id,
-                    'score': 100.0,
-                    'quality': 'optimal'
-                }
-        
-        # 🤖 AI-BASED FALLBACK: Return current classroom with penalty (not None!)
-        return {
-            'classroom_id': current_classroom,
-            'score': -600.0,
-            'quality': 'fallback',
-            'reason': 'no_alternative_classroom_found'
-        }
+            self._repair_class_ordering(state)
 
-    def _parse_time(self, time_str: str) -> dt_time:
-        """Parse time string to datetime.time object"""
-        try:
-            if isinstance(time_str, dt_time):
-                return time_str
-            return dt_time.fromisoformat(time_str)
-        except:
-            return dt_time(9, 0)  # Default to 09:00
+
+# =============================================================================
+# NEIGHBOURHOOD GENERATOR
+# =============================================================================
+
+class SANeighbourGenerator:
+    """
+    Generate neighbour states for SA.
     
-    def _select_classroom_ai_based(self, available_classrooms: List[tuple], temperature: float) -> tuple:
+    Moves:
+    1. J1 Swap - swap J1 between two projects
+    2. J1 Reassign - assign different J1 to a project
+    3. Class Move - move project to different class
+    4. Class Swap - swap two projects between classes
+    5. Order Swap - swap order of two projects in same class
+    """
+    
+    def __init__(
+        self, 
+        projects: List[Project], 
+        instructors: List[Instructor], 
+        config: SAConfig
+    ):
+        self.projects = {p.id: p for p in projects}
+        self.instructors = {i.id: i for i in instructors}
+        self.config = config
+        
+        self.faculty_ids = [
+            i.id for i in instructors 
+            if i.type == "instructor"
+        ]
+    
+    def generate_neighbour(self, state: SAState) -> SAState:
+        """Generate a random neighbour state"""
+        new_state = state.copy()
+        
+        # Select move type based on probabilities
+        r = random.random()
+        cumulative = 0.0
+        
+        moves = [
+            (self.config.prob_j1_swap, self._j1_swap),
+            (self.config.prob_j1_reassign, self._j1_reassign),
+            (self.config.prob_class_move, self._class_move),
+            (self.config.prob_class_swap, self._class_swap),
+            (self.config.prob_order_swap, self._order_swap),
+            (self.config.prob_fill_unused_class, self._fill_unused_class),
+        ]
+        
+        for prob, move_func in moves:
+            cumulative += prob
+            if r < cumulative:
+                move_func(new_state)
+                break
+        
+        return new_state
+    
+    def _j1_swap(self, state: SAState) -> None:
+        """Swap J1 between two projects"""
+        if len(state.assignments) < 2:
+            return
+        
+        a1, a2 = random.sample(state.assignments, 2)
+        
+        # Only swap if valid (J1 != PS for both)
+        if a1.j1_id != a2.ps_id and a2.j1_id != a1.ps_id:
+            a1.j1_id, a2.j1_id = a2.j1_id, a1.j1_id
+    
+    def _j1_reassign(self, state: SAState) -> None:
+        """Reassign J1 of a random project"""
+        if not state.assignments:
+            return
+        
+        assignment = random.choice(state.assignments)
+        
+        available = [
+            i for i in self.faculty_ids 
+            if i != assignment.ps_id and i != assignment.j1_id
+        ]
+        
+        if available:
+            assignment.j1_id = random.choice(available)
+    
+    def _class_move(self, state: SAState) -> None:
         """
-        AI-BASED CLASSROOM SELECTION - Temperature-based intelligent selection.
+        Move a project to a different class.
         
-        Strategy:
-        - HIGH TEMP (T > 100): Random exploration of all classrooms
-        - MEDIUM TEMP (50 < T < 100): 70% earliest, 30% random (balanced)
-        - LOW TEMP (T < 50): Always earliest (greedy exploitation)
-        
-        Args:
-            available_classrooms: List of (slot_idx, classroom_id) tuples
-            temperature: Current temperature
-            
-        Returns:
-            Selected (slot_idx, classroom_id) tuple
+        PRIORITIZES unused classes to ensure all classes are used.
         """
-        if not available_classrooms:
-            # 🤖 AI-BASED FALLBACK: Return first classroom with penalty (not None!)
-            fallback_classroom = self.classrooms[0]['id'] if self.classrooms else None
-            if fallback_classroom:
-                return (0, fallback_classroom)  # (slot_idx, classroom_id) tuple with penalty context
+        if not state.assignments or state.class_count < 2:
+            return
+        
+        assignment = random.choice(state.assignments)
+        old_class = assignment.class_id
+        
+        # Find unused classes first (PRIORITY)
+        used_classes = set()
+        for a in state.assignments:
+            used_classes.add(a.class_id)
+        
+        unused_classes = [
+            c for c in range(state.class_count)
+            if c != old_class and c not in used_classes
+        ]
+        
+        if unused_classes:
+            # PRIORITIZE unused classes - 80% chance to move to unused
+            if random.random() < 0.8:
+                new_class = random.choice(unused_classes)
             else:
-                return (0, -1)  # Emergency fallback
-        
-        # OPTIMIZATION: Reduce logging overhead
-        if temperature > 100:
-            # HIGH TEMP: Pure random exploration
-            return random.choice(available_classrooms)
-        
-        elif temperature > 50:
-            # MEDIUM TEMP: 70% earliest, 30% random
-            if random.random() < 0.7:
-                return min(available_classrooms, key=lambda x: x[0])  # Earliest
-            else:
-                return random.choice(available_classrooms)
-        
+                available_classes = [c for c in range(state.class_count) if c != old_class]
+                new_class = random.choice(available_classes) if available_classes else unused_classes[0]
         else:
-            # LOW TEMP: Always earliest (greedy)
-            return min(available_classrooms, key=lambda x: x[0])
+            # All classes used, choose any different class
+            available_classes = [c for c in range(state.class_count) if c != old_class]
+            if not available_classes:
+                return
+            new_class = random.choice(available_classes)
+        
+        # Get order in new class
+        new_class_projects = [a for a in state.assignments if a.class_id == new_class]
+        assignment.class_id = new_class
+        assignment.order_in_class = len(new_class_projects)
     
-    def _order_projects_ai_based(self, projects: List[Dict[str, Any]], temperature: float) -> List[Dict[str, Any]]:
+    def _class_swap(self, state: SAState) -> None:
         """
-        AI-BASED PROJECT ORDERING - Temperature-based intelligent ordering.
+        Swap two projects between different classes.
         
-        Strategy:
-        - HIGH TEMP (T > 100): Completely random order (exploration)
-        - MEDIUM TEMP (50 < T < 100): Shuffle with probability = T/100 (balanced)
-        - LOW TEMP (T < 50): Keep original order (exploitation)
+        If there are unused classes, prefer swapping to fill them.
+        """
+        if len(state.assignments) < 2:
+            return
         
-        Args:
-            projects: List of project dictionaries
-            temperature: Current temperature
+        # Find projects in different classes
+        class_projects = defaultdict(list)
+        for a in state.assignments:
+            class_projects[a.class_id].append(a)
+        
+        # Find unused classes
+        used_classes = set(class_projects.keys())
+        unused_classes = [
+            c for c in range(state.class_count)
+            if c not in used_classes
+        ]
+        
+        if len(class_projects) < 2:
+            # Only one class used - move one to unused if available
+            if unused_classes and class_projects:
+                c1 = list(class_projects.keys())[0]
+                if class_projects[c1]:
+                    a1 = random.choice(class_projects[c1])
+                    a1.class_id = unused_classes[0]
+                    a1.order_in_class = 0
+            return
+        
+        # Select two different classes
+        classes = list(class_projects.keys())
+        
+        # If unused classes exist, prefer swapping to fill them
+        if unused_classes and random.random() < 0.7:
+            # Swap: move from used class to unused class
+            c1 = random.choice(classes)
+            c2 = unused_classes[0]
             
-        Returns:
-            Ordered list of projects
-        """
-        if not projects:
-            return projects
-        
-        # OPTIMIZATION: Reduce logging overhead
-        if temperature > 100:
-            # HIGH TEMP: Completely random
-            shuffled = projects.copy()
-            random.shuffle(shuffled)
-            return shuffled
-        
-        elif temperature > 50:
-            # MEDIUM TEMP: Shuffle with probability
-            shuffle_probability = temperature / 100.0
-            if random.random() < shuffle_probability:
-                shuffled = projects.copy()
-                random.shuffle(shuffled)
-                return shuffled
-            else:
-                return projects
-        
+            if class_projects[c1]:
+                a1 = random.choice(class_projects[c1])
+                a1.class_id = c2
+                a1.order_in_class = 0
         else:
-            # LOW TEMP: Keep original order
-            return projects
-    
-    def _select_timeslot_ai_based(self, available_timeslots: List[Dict[str, Any]], 
-                                 temperature: float) -> Dict[str, Any]:
-        """
-        AI-BASED TIMESLOT SELECTION - Temperature-based intelligent timeslot selection.
-        
-        Strategy:
-        - HIGH TEMPERATURE: Random timeslot selection (exploration)
-        - MEDIUM TEMPERATURE: Balanced early preference + random
-        - LOW TEMPERATURE: Strong early timeslot preference (exploitation)
-        
-        Args:
-            available_timeslots: List of available timeslot dictionaries
-            temperature: Current temperature for AI decision making
+            # Normal swap between two used classes
+            c1, c2 = random.sample(classes, 2)
             
-        Returns:
-            Selected timeslot dictionary
-        """
-        if not available_timeslots:
-            # 🤖 AI-BASED FALLBACK: Return first timeslot with penalty (not None!)
-            fallback_timeslot = self.timeslots[0] if self.timeslots else {'id': 1, 'start_time': '09:00'}
-            return fallback_timeslot
-        
-        # OPTIMIZATION: Reduce logging overhead
-        if temperature > 100:
-            # HIGH TEMP: Pure random exploration
-            return random.choice(available_timeslots)
-        
-        elif temperature > 50:
-            # MEDIUM TEMP: 70% early preference, 30% random
-            early_timeslots = [ts for ts in available_timeslots if ts.get('id', 999) <= len(self.timeslots) // 2]
-            if early_timeslots and random.random() < 0.7:
-                return random.choice(early_timeslots)  # Early preference
-            else:
-                return random.choice(available_timeslots)  # Random exploration
-        
-        else:
-            # LOW TEMP: Strong early preference (greedy)
-            early_timeslots = [ts for ts in available_timeslots if ts.get('id', 999) <= len(self.timeslots) // 2]
-            if early_timeslots:
-                return random.choice(early_timeslots)  # Early timeslot preference
-            else:
-                return min(available_timeslots, key=lambda x: x.get('id', 999))  # Earliest available
-    
-    def _assign_jury_ai_based(self, responsible_instructor_id: int, 
-                             available_instructors: List[int], 
-                             temperature: float) -> List[int]:
-        """
-        AI-BASED JURY ASSIGNMENT - Temperature-based intelligent jury selection.
-        
-        Strategy:
-        - HIGH TEMPERATURE: Random jury selection (exploration)
-        - MEDIUM TEMPERATURE: Balanced selection + random
-        - LOW TEMPERATURE: Strategic jury selection (exploitation)
-        
-        Args:
-            responsible_instructor_id: ID of the instructor responsible for the project
-            available_instructors: List of available instructor IDs for jury
-            temperature: Current temperature for AI decision making
-            
-        Returns:
-            List of selected jury member IDs (max 2)
-        """
-        if not available_instructors:
-            return []
-        
-        # Remove responsible instructor from available jury members
-        jury_candidates = [inst_id for inst_id in available_instructors 
-                          if inst_id != responsible_instructor_id]
-        
-        if not jury_candidates:
-            return []
-        
-        # OPTIMIZATION: Reduce logging overhead
-        if temperature > 100:
-            # HIGH TEMP: Random jury selection (exploration)
-            num_jury = min(2, len(jury_candidates))
-            return random.sample(jury_candidates, num_jury)
-        
-        elif temperature > 50:
-            # MEDIUM TEMP: 70% strategic, 30% random
-            if random.random() < 0.7:
-                # Strategic selection: prefer instructors with different project loads
-                return self._select_strategic_jury(jury_candidates, responsible_instructor_id)
-            else:
-                # Random selection
-                num_jury = min(2, len(jury_candidates))
-                return random.sample(jury_candidates, num_jury)
-        
-        else:
-            # LOW TEMP: Strategic jury selection (exploitation)
-            return self._select_strategic_jury(jury_candidates, responsible_instructor_id)
-    
-    def _select_strategic_jury(self, jury_candidates: List[int], 
-                              responsible_instructor_id: int) -> List[int]:
-        """
-        Strategic jury selection based on instructor characteristics.
-        
-        Args:
-            jury_candidates: List of available jury candidate IDs
-            responsible_instructor_id: ID of responsible instructor
-            
-        Returns:
-            List of strategically selected jury member IDs
-        """
-        if not jury_candidates:
-            return []
-        
-        # Count projects per instructor for load balancing
-        instructor_project_counts = {}
-        for instructor in self.instructors:
-            instructor_id = instructor['id']
-            project_count = len([p for p in self.projects if p.get('responsible_id') == instructor_id])
-            instructor_project_counts[instructor_id] = project_count
-        
-        # Sort candidates by strategic criteria
-        strategic_candidates = []
-        for candidate_id in jury_candidates:
-            # Prefer instructors with balanced project loads
-            candidate_load = instructor_project_counts.get(candidate_id, 0)
-            strategic_score = 1.0 / (candidate_load + 1)  # Lower load = higher score
-            strategic_candidates.append((candidate_id, strategic_score))
-        
-        # Sort by strategic score (higher is better)
-        strategic_candidates.sort(key=lambda x: x[1], reverse=True)
-        
-        # Select top 2 candidates
-        num_jury = min(2, len(strategic_candidates))
-        return [candidate[0] for candidate in strategic_candidates[:num_jury]]
-    
-    def _ultra_aggressive_gap_minimization(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        ULTRA-AGGRESSIVE GAP MINIMIZATION: Minimize gaps by compacting assignments.
-        
-        Strategy:
-        1. Identify all gaps in the schedule
-        2. Move assignments to fill gaps (compact the schedule)
-        3. Prioritize early timeslots and consecutive assignments
-        4. Minimize total gaps by optimizing assignment positions
-        
-        Args:
-            assignments: Current list of project assignments
-            
-        Returns:
-            Updated assignments with minimized gaps
-        """
-        if not self.force_gap_filling:
-            return assignments
-        
-        # Find all gaps in the schedule
-        gaps = self._identify_all_gaps(assignments)
-        if not gaps:
-            return assignments
-        
-        # ULTRA-AGGRESSIVE: Try to move assignments to fill gaps
-        moved_assignments = 0
-        
-        # Sort gaps by priority (early timeslots first, then by classroom)
-        gaps.sort(key=lambda x: (x['timeslot_id'], x['classroom_id']))
-        
-        # Try to move assignments to fill early gaps
-        for gap in gaps[:10]:  # Focus on first 10 gaps (most important)
-            classroom_id = gap['classroom_id']
-            timeslot_id = gap['timeslot_id']
-            
-            # Find assignments that can be moved to fill this gap
-            best_assignment = self._find_best_assignment_to_move(gap, assignments)
-            if best_assignment:
-                # Move assignment to fill gap
-                old_timeslot = best_assignment['timeslot_id']
-                best_assignment['timeslot_id'] = timeslot_id
-                moved_assignments += 1
+            if class_projects[c1] and class_projects[c2]:
+                a1 = random.choice(class_projects[c1])
+                a2 = random.choice(class_projects[c2])
                 
-                # OPTIMIZATION: Reduce logging
-                if self.current_iteration == 0:
-                    logger.info(f"ULTRA-AGGRESSIVE: Moved Project {best_assignment['project_id']} from {old_timeslot} to {timeslot_id} to fill gap")
-        
-        if moved_assignments > 0 and self.current_iteration == 0:
-            logger.info(f"ULTRA-AGGRESSIVE GAP MINIMIZATION: {moved_assignments} assignments moved!")
-        
-        return assignments
+                # Swap classes
+                a1.class_id, a2.class_id = a2.class_id, a1.class_id
+                a1.order_in_class, a2.order_in_class = a2.order_in_class, a1.order_in_class
     
-    def _identify_all_gaps(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Identify all gaps in the current schedule.
+    def _order_swap(self, state: SAState) -> None:
+        """Swap order of two projects in same class"""
+        # Group by class
+        class_projects = defaultdict(list)
+        for a in state.assignments:
+            class_projects[a.class_id].append(a)
         
-        Args:
-            assignments: Current list of project assignments
-            
-        Returns:
-            List of gap dictionaries with classroom_id and timeslot_id
-        """
-        # Create a set of all occupied slots
-        occupied_slots = set()
-        for assignment in assignments:
-            classroom_id = assignment['classroom_id']
-            timeslot_id = assignment['timeslot_id']
-            occupied_slots.add((classroom_id, timeslot_id))
+        # Find class with multiple projects
+        eligible_classes = [c for c, projs in class_projects.items() if len(projs) >= 2]
         
-        # Find all gaps
-        gaps = []
-        for classroom in self.classrooms:
-            classroom_id = classroom['id']
-            for timeslot in self.timeslots:
-                timeslot_id = timeslot['id']
-                if (classroom_id, timeslot_id) not in occupied_slots:
-                    gaps.append({
-                        'classroom_id': classroom_id,
-                        'timeslot_id': timeslot_id,
-                        'gap_size': 1  # Single slot gap
-                    })
+        if not eligible_classes:
+            return
         
-        # Sort gaps by priority (early timeslots first)
-        gaps.sort(key=lambda x: (x['timeslot_id'], x['classroom_id']))
-        return gaps
+        class_id = random.choice(eligible_classes)
+        a1, a2 = random.sample(class_projects[class_id], 2)
+        
+        # Swap orders
+        a1.order_in_class, a2.order_in_class = a2.order_in_class, a1.order_in_class
     
-    def _find_best_project_for_gap(self, gap: Dict[str, Any], available_projects: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _fill_unused_class(self, state: SAState) -> None:
         """
-        Find the best project to fill a specific gap.
-        
-        Args:
-            gap: Gap dictionary with classroom_id and timeslot_id
-            available_projects: List of unassigned projects
-            
-        Returns:
-            Best project to fill the gap, or None if no suitable project
+        Move a project to an unused class - CRITICAL for ensuring all classes are used.
         """
-        if not available_projects:
-            # 🤖 AI-BASED FALLBACK: Return first project with penalty (not None!)
-            fallback_project = self.projects[0] if self.projects else None
-            return fallback_project
+        if not state.assignments:
+            return
         
-        classroom_id = gap['classroom_id']
-        timeslot_id = gap['timeslot_id']
+        # Find unused classes
+        used_classes = set()
+        class_counts = defaultdict(int)
+        for a in state.assignments:
+            used_classes.add(a.class_id)
+            class_counts[a.class_id] += 1
         
-        # Prioritize projects based on:
-        # 1. Early timeslot preference
-        # 2. Instructor availability
-        # 3. Project type (prefer FINAL projects)
+        unused_classes = [
+            c for c in range(state.class_count)
+            if c not in used_classes
+        ]
         
-        best_project = None
-        best_score = -float('inf')
+        if not unused_classes:
+            return  # All classes used
         
-        for project in available_projects:
-            score = 0
+        # Find most loaded class
+        if not class_counts:
+            return
+        
+        max_class = max(class_counts.keys(), key=lambda c: class_counts[c])
+        
+        # Move a project from most loaded class to unused class
+        projects_in_max = [
+            a for a in state.assignments
+            if a.class_id == max_class
+        ]
+        
+        if projects_in_max:
+            project = random.choice(projects_in_max)
+            unused_class = random.choice(unused_classes)
             
-            # Early timeslot bonus
-            early_threshold = len(self.timeslots) // 2
-            if timeslot_id <= early_threshold:
-                score += 100  # Huge bonus for early timeslots
-            
-            # Project type preference
-            if project.get('type') == 'FINAL':
-                score += 50  # Prefer FINAL projects
-            
-            # Instructor availability (simple check)
-            responsible_id = project.get('responsible_id')
-            if responsible_id:
-                score += 25  # Bonus for having responsible instructor
-            
-            if score > best_score:
-                best_score = score
-                best_project = project
-        
-        return best_project
+            project.class_id = unused_class
+            project.order_in_class = 0  # Will be reordered by repair
+
+
+# =============================================================================
+# INITIAL SOLUTION BUILDER
+# =============================================================================
+
+class SAInitialSolutionBuilder:
+    """
+    Build initial solution for SA.
     
-    def _find_best_assignment_to_move(self, gap: Dict[str, Any], assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Find the best assignment to move to fill a specific gap.
-        
-        Args:
-            gap: Gap dictionary with classroom_id and timeslot_id
-            assignments: List of current assignments
-            
-        Returns:
-            Best assignment to move, or None if no suitable assignment
-        """
-        classroom_id = gap['classroom_id']
-        timeslot_id = gap['timeslot_id']
-        
-        # Find assignments that can be moved to fill this gap
-        candidates = []
-        
-        for assignment in assignments:
-            current_classroom = assignment['classroom_id']
-            current_timeslot = assignment['timeslot_id']
-            
-            # 🤖 AI-BASED: Don't skip - apply heavy penalty if already in target position
-            # Calculate score for moving this assignment
-            score = 0
-            
-            # 🤖 AI-BASED SOFT CONSTRAINT: Penalize if already in target (instead of skip!)
-            if current_classroom == classroom_id and current_timeslot == timeslot_id:
-                score -= 10000  # Huge penalty - don't move what's already there
-            
-            # Prefer assignments from the same classroom (easier to move)
-            if current_classroom == classroom_id:
-                score += 100  # Same classroom bonus
-            
-            # Prefer assignments from later timeslots (moving forward in time)
-            if current_timeslot > timeslot_id:
-                score += 50  # Moving forward bonus
-            
-            # Prefer assignments from different classrooms (spread out)
-            if current_classroom != classroom_id:
-                score += 25  # Different classroom bonus
-            
-            # 🤖 AI-BASED SOFT CONSTRAINT: Calculate conflict penalty (not blocking!)
-            conflict_score = self._calculate_move_conflict_score(assignment, classroom_id, timeslot_id, assignments)
-            score -= conflict_score  # Apply penalty to score
-            
-            # Include ALL candidates (even with conflicts - soft constraint!)
-            candidates.append((assignment, score))
-        
-        if not candidates:
-            # 🤖 AI-BASED FALLBACK: Return random assignment with penalty (not None!)
-            fallback_assignment = random.choice(assignments) if assignments else None
-            return fallback_assignment
-        
-        # Sort by score (higher is better)
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        
-        # Return the best candidate
-        return candidates[0][0]
+    Strategy:
+    1. Group projects by PS
+    2. Fill classrooms in balanced manner
+    3. Build PS-based blocks for continuity
+    4. J1 assigned by round-robin / least loaded
+    5. Handle priority mode (ARA_ONCE / BITIRME_ONCE)
+    """
     
-    def _calculate_move_conflict_score(self, assignment: Dict[str, Any], target_classroom: int, 
-                                       target_timeslot: int, all_assignments: List[Dict[str, Any]]) -> float:
-        """
-        🤖 AI-BASED SOFT CONSTRAINT: Calculate conflict score for a move (NO HARD BLOCKING!)
+    def __init__(
+        self, 
+        projects: List[Project], 
+        instructors: List[Instructor], 
+        config: SAConfig
+    ):
+        self.projects = projects
+        self.instructors = {i.id: i for i in instructors}
+        self.config = config
         
-        Instead of returning True/False (hard constraint), calculate a conflict penalty score.
-        Higher score = more conflicts, but moves are NEVER blocked.
-        
-        Args:
-            assignment: Assignment to move
-            target_classroom: Target classroom ID
-            target_timeslot: Target timeslot ID
-            all_assignments: List of all current assignments
-            
-        Returns:
-            Conflict score (0 = no conflict, 100+ = high conflict)
-        """
-        conflict_score = 0.0
-        
-        # SOFT CHECK: Target slot occupied?
-        for other_assignment in all_assignments:
-            if (other_assignment != assignment and 
-                other_assignment['classroom_id'] == target_classroom and 
-                other_assignment['timeslot_id'] == target_timeslot):
-                conflict_score += 50.0  # Penalty, not blocking!
-        
-        # SOFT CHECK: Instructor availability
-        instructor_id = assignment['instructors'][0] if assignment['instructors'] else None
-        if instructor_id:
-            # Check if instructor is already busy in target timeslot
-            for other_assignment in all_assignments:
-                if (other_assignment != assignment and 
-                    instructor_id in other_assignment['instructors'] and 
-                    other_assignment['timeslot_id'] == target_timeslot):
-                    conflict_score += 100.0  # High penalty for instructor conflict
-        
-        return conflict_score
+        self.faculty_ids = [
+            i.id for i in instructors 
+            if i.type == "instructor"
+        ]
     
-    def _compact_into_fewer_classrooms(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        SUPER AGGRESSIVE COMPACT: Move all assignments into minimum number of classrooms.
+    def build_initial_solution(self) -> SAState:
+        """Build a good initial solution"""
+        # CRITICAL: Ensure class_count matches config
+        state = SAState(class_count=self.config.class_count)
+        logger.info(f"SAInitialSolutionBuilder: Building initial solution with {self.config.class_count} classes")
         
-        Strategy:
-        1. Count assignments per classroom
-        2. Identify classrooms with few assignments
-        3. Move all assignments from sparse classrooms to denser ones
-        4. Fill classrooms completely before using next classroom
+        # Sort projects by priority mode
+        sorted_projects = self._sort_by_priority()
         
-        Args:
-            assignments: Current list of project assignments
+        # Group by PS for continuity
+        ps_groups = defaultdict(list)
+        for project in sorted_projects:
+            ps_groups[project.responsible_id].append(project)
+        
+        # Build class assignments
+        class_assignments = [[] for _ in range(self.config.class_count)]
+        class_loads = [0] * self.config.class_count
+        
+        # Track used classes to ensure all are used
+        used_classes = set()
+        ps_to_class = {}
+        
+        # First pass: CRITICAL - assign at least one project per class
+        all_projects = list(sorted_projects)
+        
+        # PHASE 1: Force at least one project per class (MANDATORY)
+        if len(all_projects) >= self.config.class_count:
+            # We have enough projects - assign one to each class
+            for class_id in range(self.config.class_count):
+                project = all_projects[class_id]
+                class_assignments[class_id].append(project)
+                class_loads[class_id] += 1
+                used_classes.add(class_id)
+                ps_to_class[project.responsible_id] = class_id
+        else:
+            # Not enough projects - distribute evenly
+            for i, project in enumerate(all_projects):
+                class_id = i % self.config.class_count
+                class_assignments[class_id].append(project)
+                class_loads[class_id] += 1
+                used_classes.add(class_id)
+                if project.responsible_id not in ps_to_class:
+                    ps_to_class[project.responsible_id] = class_id
+        
+        # Remaining projects
+        remaining_projects = all_projects[self.config.class_count:] if len(all_projects) > self.config.class_count else []
+        
+        # Track instructor schedules to avoid timeslot conflicts
+        instructor_schedule = defaultdict(lambda: defaultdict(set))  # instructor_id -> order -> set of class_ids
+        
+        for project in remaining_projects:
+            ps_id = project.responsible_id
             
-        Returns:
-            Compacted assignments with fewer classrooms used
-        """
-        if not assignments:
-            return assignments
-        
-        # Count assignments per classroom
-        classroom_counts = {}
-        for assignment in assignments:
-            cid = assignment['classroom_id']
-            classroom_counts[cid] = classroom_counts.get(cid, 0) + 1
-        
-        # Sort classrooms by assignment count (most to least)
-        sorted_classrooms = sorted(classroom_counts.items(), key=lambda x: x[1], reverse=True)
-        
-        # Identify target classrooms (those with most assignments)
-        # We want to fill as few classrooms as possible
-        total_assignments = len(assignments)
-        slots_per_classroom = len(self.timeslots)
-        min_classrooms_needed = (total_assignments + slots_per_classroom - 1) // slots_per_classroom  # Ceiling division
-        
-        target_classrooms = [cid for cid, count in sorted_classrooms[:min_classrooms_needed]]
-        sparse_classrooms = [cid for cid, count in sorted_classrooms[min_classrooms_needed:]]
-        
-        if not sparse_classrooms:
-            return assignments  # Already compact
-        
-        # Move assignments from sparse classrooms to target classrooms
-        moved_count = 0
-        for sparse_classroom in sparse_classrooms:
-            # Get all assignments from sparse classroom
-            sparse_assignments = [a for a in assignments if a['classroom_id'] == sparse_classroom]
+            # Try to keep same PS projects together
+            if ps_id in ps_to_class:
+                preferred_class = ps_to_class[ps_id]
+                # Check if PS is free at this class's next order
+                next_order = class_loads[preferred_class]
+                if preferred_class not in instructor_schedule[ps_id][next_order]:
+                    class_id = preferred_class
+                else:
+                    # PS busy, find alternative
+                    class_id = self._find_free_class_for_instructor(
+                        ps_id, class_loads, instructor_schedule, used_classes
+                    )
+            else:
+                # Prefer unused classes first
+                unused = [c for c in range(self.config.class_count) if c not in used_classes]
+                if unused:
+                    class_id = min(unused, key=lambda c: class_loads[c])
+                else:
+                    class_id = min(range(self.config.class_count), key=lambda c: class_loads[c])
+                ps_to_class[ps_id] = class_id
             
-            for sparse_assignment in sparse_assignments:
-                # Find available slot in target classrooms
-                for target_classroom in target_classrooms:
-                    # Find first available timeslot in target classroom
-                    occupied_timeslots = {a['timeslot_id'] for a in assignments 
-                                         if a['classroom_id'] == target_classroom}
-                    
-                    for timeslot in self.timeslots:
-                        timeslot_id = timeslot['id']
-                        if timeslot_id not in occupied_timeslots:
-                            # 🤖 AI-BASED SOFT CONSTRAINT: Calculate conflict score (not blocking!)
-                            conflict_score = self._calculate_move_conflict_score(sparse_assignment, target_classroom, timeslot_id, assignments)
-                            
-                            # Prefer moves with low conflict (but allow high conflict with penalty)
-                            if conflict_score < 150.0:  # Soft threshold, not hard block
-                                # Move assignment
-                                sparse_assignment['classroom_id'] = target_classroom
-                                sparse_assignment['timeslot_id'] = timeslot_id
-                                moved_count += 1
-                                
-                                if self.current_iteration == 0:
-                                    conflict_status = "clean" if conflict_score == 0 else f"conflict_score={conflict_score:.1f}"
-                                    logger.info(f"COMPACT: Moved Project {sparse_assignment['project_id']} from Classroom {sparse_classroom} to {target_classroom} ({conflict_status})")
-                                break
-                            else:
-                                # High conflict but still possible - try next timeslot
-                                if self.current_iteration == 0:
-                                    logger.info(f"COMPACT: Skipping high-conflict slot (score={conflict_score:.1f}) for Project {sparse_assignment['project_id']}, trying next...")
-                    
-                    if sparse_assignment['classroom_id'] == target_classroom:
-                        break  # Successfully moved
-        
-        if moved_count > 0 and self.current_iteration == 0:
-            logger.info(f"SUPER AGGRESSIVE COMPACT: {moved_count} assignments compacted!")
-            logger.info(f"Reduced from {len(sorted_classrooms)} to {len(target_classrooms)} classrooms!")
-        
-        return assignments
-    
-    def _post_optimization_compact(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        POST-OPTIMIZATION COMPACTION: Automatic upward shift to fill early slots and minimize gaps.
-        
-        Strategy (PER CLASSROOM):
-        1. Sort assignments by timeslot (late to early)
-        2. For each assignment, try to move it to the earliest available slot
-        3. Check conflicts (instructor availability, slot availability)
-        4. Shift upward if feasible
-        5. Repeat until no more shifts possible
-        
-        Args:
-            assignments: Final optimized assignments
+            class_assignments[class_id].append(project)
+            order = class_loads[class_id]
+            class_loads[class_id] += 1
+            used_classes.add(class_id)
             
-        Returns:
-            Compacted assignments with minimized gaps and maximized early slot usage
-        """
-        if not assignments:
-            return assignments
+            # Track PS schedule
+            instructor_schedule[ps_id][order].add(class_id)
         
-        logger.info("  📊 Başlangıç durumu:")
-        initial_gaps = self._count_total_gaps(assignments)
-        initial_early_usage = self._calculate_early_slot_percentage(assignments)
-        logger.info(f"    Toplam gaps: {initial_gaps}")
-        logger.info(f"    Erken slot kullanımı: {initial_early_usage:.1f}%")
+        # FINAL CHECK: Ensure ALL classes are used - MANDATORY
+        unused_classes = [c for c in range(self.config.class_count) if c not in used_classes]
         
-        total_shifts = 0
-        
-        # Process each classroom separately
-        for classroom in self.classrooms:
-            classroom_id = classroom['id']
-            
-            # Get assignments for this classroom
-            classroom_assignments = [a for a in assignments if a['classroom_id'] == classroom_id]
-            
-            if not classroom_assignments:
-                continue
-            
-            # Sort by timeslot (latest first)
-            classroom_assignments.sort(key=lambda x: x.get('timeslot_id', 0), reverse=True)
-            
-            # Try to shift each assignment upward
-            for assignment in classroom_assignments:
-                current_timeslot = assignment.get('timeslot_id')
-                
-                # Find earliest available slot for this assignment
-                earliest_slot = self._find_earliest_available_slot(
-                    assignment, classroom_id, current_timeslot, assignments
-                )
-                
-                if earliest_slot and earliest_slot < current_timeslot:
-                    # Shift upward!
-                    old_timeslot = assignment['timeslot_id']
-                    assignment['timeslot_id'] = earliest_slot
-                    total_shifts += 1
-                    
-                    logger.info(f"    ⬆️  Shifted Project {assignment['project_id']}: Classroom {classroom_id}, Timeslot {old_timeslot} → {earliest_slot}")
-        
-        logger.info("")
-        logger.info(f"  🎯 POST-COMPACTION sonuçları:")
-        final_gaps = self._count_total_gaps(assignments)
-        final_early_usage = self._calculate_early_slot_percentage(assignments)
-        logger.info(f"    Toplam shifts: {total_shifts}")
-        logger.info(f"    Toplam gaps: {final_gaps} (başlangıç: {initial_gaps}, azalma: {initial_gaps - final_gaps})")
-        logger.info(f"    Erken slot kullanımı: {final_early_usage:.1f}% (başlangıç: {initial_early_usage:.1f}%, artış: {final_early_usage - initial_early_usage:.1f}%)")
-        
-        return assignments
-    
-    def _find_earliest_available_slot(self, assignment: Dict[str, Any], classroom_id: int, 
-                                     current_timeslot: int, all_assignments: List[Dict[str, Any]]) -> int:
-        """
-        Find the earliest available timeslot for an assignment in a specific classroom.
-        
-        Args:
-            assignment: Assignment to find slot for
-            classroom_id: Target classroom ID
-            current_timeslot: Current timeslot of the assignment
-            all_assignments: All current assignments
-            
-        Returns:
-            Earliest available timeslot ID, or None if no earlier slot available
-        """
-        instructor_id = assignment['instructors'][0] if assignment['instructors'] else None
-        
-        if not instructor_id:
-            # 🤖 AI-BASED FALLBACK: Return current timeslot with penalty (not None!)
-            return current_timeslot
-        
-        # Check each timeslot from 1 to current_timeslot
-        for timeslot in self.timeslots:
-            timeslot_id = timeslot['id']
-            
-            # Only check earlier slots
-            if timeslot_id >= current_timeslot:
-                continue
-            
-            # Check if slot is available in this classroom
-            slot_occupied = any(
-                a != assignment and 
-                a['classroom_id'] == classroom_id and 
-                a['timeslot_id'] == timeslot_id
-                for a in all_assignments
+        if unused_classes:
+            # CRITICAL: Force distribution to unused classes
+            # Sort classes by load (most loaded first)
+            loaded_classes = sorted(
+                range(self.config.class_count),
+                key=lambda c: class_loads[c],
+                reverse=True
             )
             
-            if slot_occupied:
-                continue
-            
-            # Check if instructor is available at this timeslot
-            instructor_busy = any(
-                a != assignment and 
-                instructor_id in a['instructors'] and 
-                a['timeslot_id'] == timeslot_id
-                for a in all_assignments
-            )
-            
-            if instructor_busy:
-                continue
-            
-            # This slot is available!
-            return timeslot_id
-        
-        # 🤖 AI-BASED FALLBACK: Return current timeslot if no earlier slot (not None!)
-        return current_timeslot  # Keep current position (neutral, not None!)
-    
-    def _count_total_gaps(self, assignments: List[Dict[str, Any]]) -> int:
-        """Count total gaps in the schedule."""
-        if not assignments or not self.classrooms or not self.timeslots:
-            return 0
-        
-        total_slots = len(self.classrooms) * len(self.timeslots)
-        used_slots = len(assignments)
-        return total_slots - used_slots
-    
-    def _calculate_early_slot_percentage(self, assignments: List[Dict[str, Any]]) -> float:
-        """Calculate percentage of assignments in early timeslots."""
-        if not assignments or not self.timeslots:
-            return 0.0
-        
-        early_threshold = len(self.timeslots) // 2
-        early_count = sum(1 for a in assignments if a.get('timeslot_id', 999) <= early_threshold)
-        
-        return (early_count / len(assignments) * 100) if assignments else 0.0
-    
-    def _balance_classroom_timeslots(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        CLASSROOM TIMESLOT BALANCING: Balance timeslot usage ranges across classrooms.
-        
-        Strategy:
-        1. Calculate timeslot range for each classroom (min-max)
-        2. Identify outlier classrooms (too early or too late)
-        3. Move assignments to balance ranges across classrooms
-        4. Target: All classrooms should use similar timeslot ranges
-        
-        Args:
-            assignments: Post-compacted assignments
-            
-        Returns:
-            Balanced assignments with similar timeslot ranges per classroom
-        """
-        if not assignments:
-            return assignments
-        
-        logger.info("  📊 Başlangıç durumu:")
-        
-        # Calculate timeslot ranges per classroom
-        classroom_ranges = {}
-        for classroom in self.classrooms:
-            classroom_id = classroom['id']
-            classroom_assignments = [a for a in assignments if a['classroom_id'] == classroom_id]
-            
-            if not classroom_assignments:
-                continue
-            
-            timeslots = [a['timeslot_id'] for a in classroom_assignments]
-            min_slot = min(timeslots)
-            max_slot = max(timeslots)
-            range_size = max_slot - min_slot + 1
-            
-            classroom_ranges[classroom_id] = {
-                'min': min_slot,
-                'max': max_slot,
-                'range': range_size,
-                'count': len(classroom_assignments)
-            }
-            
-            logger.info(f"    Classroom {classroom_id}: Timeslots {min_slot}-{max_slot} (range: {range_size}, count: {len(classroom_assignments)})")
-        
-        if not classroom_ranges:
-            return assignments
-        
-        # Calculate target range (average)
-        total_min = sum(r['min'] for r in classroom_ranges.values())
-        total_max = sum(r['max'] for r in classroom_ranges.values())
-        num_classrooms = len(classroom_ranges)
-        
-        target_min = total_min // num_classrooms
-        target_max = total_max // num_classrooms
-        
-        logger.info(f"\n  🎯 Target range: Timeslots {target_min}-{target_max}")
-        
-        total_moves = 0
-        
-        # Balance each classroom to target range
-        for classroom_id, range_info in classroom_ranges.items():
-            current_min = range_info['min']
-            current_max = range_info['max']
-            
-            # Check if this classroom needs balancing
-            if abs(current_min - target_min) <= self.balance_target_range and \
-               abs(current_max - target_max) <= self.balance_target_range:
-                continue  # Already balanced
-            
-            classroom_assignments = [a for a in assignments if a['classroom_id'] == classroom_id]
-            
-            # Shift assignments to target range
-            for assignment in classroom_assignments:
-                current_timeslot = assignment['timeslot_id']
+            for unused_class in unused_classes:
+                moved = False
                 
-                # Calculate target timeslot
-                if current_timeslot < target_min:
-                    # Shift down (to later slots)
-                    target_timeslot = target_min
-                elif current_timeslot > target_max:
-                    # Shift up (to earlier slots)
-                    target_timeslot = target_max
-                else:
-                    continue  # Already in target range
-                
-                # Try to find available slot in target range
-                new_slot = self._find_balanced_slot(
-                    assignment, classroom_id, target_timeslot, assignments
-                )
-                
-                if new_slot and new_slot != current_timeslot:
-                    old_timeslot = assignment['timeslot_id']
-                    assignment['timeslot_id'] = new_slot
-                    total_moves += 1
+                # Try to move from most loaded classes
+                for max_class in loaded_classes:
+                    if max_class == unused_class:
+                        continue
                     
-                    logger.info(f"    ⚖️  Balanced Project {assignment['project_id']}: Classroom {classroom_id}, Timeslot {old_timeslot} → {new_slot}")
-        
-        logger.info("")
-        logger.info(f"  🎯 BALANCING sonuçları:")
-        logger.info(f"    Toplam moves: {total_moves}")
-        
-        # Show final ranges
-        logger.info(f"\n  📊 Final timeslot ranges:")
-        for classroom in self.classrooms:
-            classroom_id = classroom['id']
-            classroom_assignments = [a for a in assignments if a['classroom_id'] == classroom_id]
-            
-            if not classroom_assignments:
-                continue
-            
-            timeslots = [a['timeslot_id'] for a in classroom_assignments]
-            min_slot = min(timeslots)
-            max_slot = max(timeslots)
-            range_size = max_slot - min_slot + 1
-            
-            logger.info(f"    Classroom {classroom_id}: Timeslots {min_slot}-{max_slot} (range: {range_size})")
-        
-        return assignments
-    
-    def _find_balanced_slot(self, assignment: Dict[str, Any], classroom_id: int, 
-                           target_timeslot: int, all_assignments: List[Dict[str, Any]]) -> int:
-        """
-        Find a balanced timeslot near the target timeslot.
-        
-        Args:
-            assignment: Assignment to find slot for
-            classroom_id: Target classroom ID
-            target_timeslot: Target timeslot ID
-            all_assignments: All current assignments
-            
-        Returns:
-            Balanced timeslot ID, or None if no suitable slot available
-        """
-        instructor_id = assignment['instructors'][0] if assignment['instructors'] else None
-        
-        if not instructor_id:
-            # 🤖 AI-BASED FALLBACK: Return first timeslot (not None!)
-            fallback_timeslot = self.timeslots[0]['id'] if self.timeslots else 1
-            return fallback_timeslot
-        
-        # Try target timeslot first, then expand search radius
-        for radius in range(0, len(self.timeslots)):
-            # Try slots around target
-            for offset in [0, -radius, radius]:
-                # 🤖 AI-BASED: Don't skip offset=0, just handle it appropriately
-                # offset=0 on first iteration (radius=0) is valid, after that it's redundant
-                if offset == 0 and radius > 0:
-                    # Redundant search - but don't skip, just mark as low priority
-                    pass  # Will be handled by availability check below
+                    if class_loads[max_class] > 1 and class_assignments[max_class]:
+                        # Move last project from max_class to unused_class
+                        project = class_assignments[max_class].pop()
+                        class_assignments[unused_class].append(project)
+                        class_loads[max_class] -= 1
+                        class_loads[unused_class] += 1
+                        used_classes.add(unused_class)
+                        moved = True
+                        break
                 
-                candidate_timeslot = target_timeslot + offset
+                if not moved:
+                    # Force move even if only 1 project in class
+                    for max_class in loaded_classes:
+                        if max_class == unused_class:
+                            continue
+                        if class_assignments[max_class]:
+                            project = class_assignments[max_class].pop()
+                            class_assignments[unused_class].append(project)
+                            class_loads[max_class] -= 1
+                            class_loads[unused_class] += 1
+                            used_classes.add(unused_class)
+                            break
+        
+        # VERIFY: All classes must be used - ABSOLUTE MANDATORY
+        final_used = set()
+        for class_id, projects in enumerate(class_assignments):
+            if projects:
+                final_used.add(class_id)
+        
+        if len(final_used) < self.config.class_count:
+            # CRITICAL: Last resort - redistribute all projects evenly
+            all_projects_flat = []
+            for projects in class_assignments:
+                all_projects_flat.extend(projects)
+            
+            # Clear and redistribute
+            class_assignments = [[] for _ in range(self.config.class_count)]
+            class_loads = [0] * self.config.class_count
+            used_classes = set()
+            
+            # Round-robin distribution to ensure ALL classes get at least one
+            for i, project in enumerate(all_projects_flat):
+                class_id = i % self.config.class_count
+                class_assignments[class_id].append(project)
+                class_loads[class_id] += 1
+                used_classes.add(class_id)
+            
+            # Final verification - should be all classes now
+            if len(used_classes) < self.config.class_count:
+                # This should never happen, but force it
+                unused = [c for c in range(self.config.class_count) if c not in used_classes]
+                for unused_class in unused:
+                    # Take from any class
+                    for class_id in range(self.config.class_count):
+                        if class_assignments[class_id]:
+                            project = class_assignments[class_id].pop()
+                            class_assignments[unused_class].append(project)
+                            class_loads[class_id] -= 1
+                            class_loads[unused_class] += 1
+                            break
+        
+        # Build assignments with J1 - AVOID TIMESLOT CONFLICTS
+        workloads = defaultdict(int)
+        j1_index = 0
+        j1_schedule = defaultdict(lambda: defaultdict(set))  # j1_id -> order -> set of class_ids
+        
+        for class_id, projects in enumerate(class_assignments):
+            for order, project in enumerate(projects):
+                # Select J1 - must be free at this timeslot (order)
+                available_j1 = [
+                    i for i in self.faculty_ids 
+                    if i != project.responsible_id and
+                    class_id not in j1_schedule[i][order]  # Not busy at this timeslot
+                ]
                 
-                # Check if candidate is valid
-                if candidate_timeslot < 1 or candidate_timeslot > len(self.timeslots):
-                    continue
+                if not available_j1:
+                    # No free J1 at this slot, find any available
+                    available_j1 = [
+                        i for i in self.faculty_ids 
+                        if i != project.responsible_id
+                    ]
                 
-                # Check if slot is available in this classroom
-                slot_occupied = any(
-                    a != assignment and 
-                    a['classroom_id'] == classroom_id and 
-                    a['timeslot_id'] == candidate_timeslot
-                    for a in all_assignments
-                )
-                
-                if slot_occupied:
-                    continue
-                
-                # Check if instructor is available at this timeslot
-                instructor_busy = any(
-                    a != assignment and 
-                    instructor_id in a['instructors'] and 
-                    a['timeslot_id'] == candidate_timeslot
-                    for a in all_assignments
-                )
-                
-                if instructor_busy:
-                    continue
-                
-                # This slot is available!
-                return candidate_timeslot
-        
-        # 🤖 AI-BASED FALLBACK: Return first timeslot if no suitable slot (not None!)
-        fallback_timeslot = self.timeslots[0]['id'] if self.timeslots else 1
-        return fallback_timeslot  # Fallback (not None!)
-    
-    def _calculate_large_gap_penalty_score(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        Calculate penalty score for large gaps in the schedule.
-        Larger gaps = higher penalty.
-        
-        Args:
-            solution: List of project assignments
-            
-        Returns:
-            Large gap penalty score (positive = penalty)
-        """
-        # Find consecutive gaps (large gaps)
-        classroom_gaps = {}
-        
-        for classroom in self.classrooms:
-            classroom_id = classroom['id']
-            occupied_timeslots = set()
-            
-            for assignment in solution:
-                if assignment['classroom_id'] == classroom_id:
-                    occupied_timeslots.add(assignment['timeslot_id'])
-            
-            # Find consecutive gaps
-            consecutive_gaps = []
-            current_gap_size = 0
-            
-            for timeslot in self.timeslots:
-                timeslot_id = timeslot['id']
-                if timeslot_id not in occupied_timeslots:
-                    current_gap_size += 1
-                else:
-                    if current_gap_size > 0:
-                        consecutive_gaps.append(current_gap_size)
-                        current_gap_size = 0
-            
-            # Don't forget the last gap
-            if current_gap_size > 0:
-                consecutive_gaps.append(current_gap_size)
-            
-            classroom_gaps[classroom_id] = consecutive_gaps
-        
-        # Calculate penalty based on gap sizes
-        total_penalty = 0.0
-        for classroom_id, gaps in classroom_gaps.items():
-            for gap_size in gaps:
-                # Exponential penalty for larger gaps
-                if gap_size >= 3:  # Large gaps (3+ consecutive slots)
-                    penalty = gap_size ** 2  # Quadratic penalty
-                    total_penalty += penalty
-        
-        return total_penalty
-    
-    def _calculate_gap_filled_reward_score(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        Calculate reward score for filled gaps.
-        More filled slots = higher reward.
-        
-        Args:
-            solution: List of project assignments
-            
-        Returns:
-            Gap filled reward score (positive = reward)
-        """
-        total_slots = len(self.classrooms) * len(self.timeslots)
-        filled_slots = len(solution)
-        
-        # Calculate utilization rate
-        utilization_rate = filled_slots / total_slots if total_slots > 0 else 0
-        
-        # Reward based on utilization rate
-        if utilization_rate >= 0.9:  # 90%+ utilization
-            reward = 100.0  # Maximum reward
-        elif utilization_rate >= 0.8:  # 80%+ utilization
-            reward = 80.0
-        elif utilization_rate >= 0.7:  # 70%+ utilization
-            reward = 60.0
-        elif utilization_rate >= 0.6:  # 60%+ utilization
-            reward = 40.0
-        else:
-            reward = 20.0  # Minimum reward
-        
-        return reward
-    
-    def _calculate_compact_classrooms_score(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        Calculate reward score for compact classroom usage.
-        Fully filled classrooms = higher reward.
-        
-        Args:
-            solution: List of project assignments
-            
-        Returns:
-            Compact classrooms reward score (positive = reward)
-        """
-        if not solution or not self.classrooms or not self.timeslots:
-            return 0.0
-        
-        # Count assignments per classroom
-        classroom_counts = {}
-        for assignment in solution:
-            cid = assignment['classroom_id']
-            classroom_counts[cid] = classroom_counts.get(cid, 0) + 1
-        
-        # Calculate reward based on classroom fullness
-        total_reward = 0.0
-        slots_per_classroom = len(self.timeslots)
-        
-        for classroom in self.classrooms:
-            cid = classroom['id']
-            count = classroom_counts.get(cid, 0)
-            
-            if count == 0:
-                continue  # Empty classroom, no reward
-            
-            # Calculate fullness ratio
-            fullness_ratio = count / slots_per_classroom
-            
-            # Reward based on fullness
-            if fullness_ratio == 1.0:  # 100% full
-                total_reward += 100.0  # Maximum reward
-            elif fullness_ratio >= 0.8:  # 80%+ full
-                total_reward += 80.0
-            elif fullness_ratio >= 0.6:  # 60%+ full
-                total_reward += 60.0
-            elif fullness_ratio >= 0.4:  # 40%+ full
-                total_reward += 40.0
-            else:
-                total_reward += 20.0  # Minimum reward
-        
-        return total_reward
-    
-    def _calculate_empty_classroom_penalty_score(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        Calculate penalty score for empty or nearly empty classrooms.
-        More empty classrooms = higher penalty.
-        
-        Args:
-            solution: List of project assignments
-            
-        Returns:
-            Empty classroom penalty score (positive = penalty)
-        """
-        if not solution or not self.classrooms or not self.timeslots:
-            return 0.0
-        
-        # Count assignments per classroom
-        classroom_counts = {}
-        for assignment in solution:
-            cid = assignment['classroom_id']
-            classroom_counts[cid] = classroom_counts.get(cid, 0) + 1
-        
-        # Calculate penalty for empty/sparse classrooms
-        total_penalty = 0.0
-        slots_per_classroom = len(self.timeslots)
-        
-        for classroom in self.classrooms:
-            cid = classroom['id']
-            count = classroom_counts.get(cid, 0)
-            
-            # Calculate emptiness ratio
-            emptiness_ratio = 1.0 - (count / slots_per_classroom)
-            
-            # Penalty based on emptiness
-            if count == 0:  # Completely empty
-                total_penalty += 50.0  # Heavy penalty
-            elif emptiness_ratio >= 0.8:  # 80%+ empty (< 20% full)
-                total_penalty += 40.0
-            elif emptiness_ratio >= 0.6:  # 60%+ empty (< 40% full)
-                total_penalty += 30.0
-            elif emptiness_ratio >= 0.4:  # 40%+ empty (< 60% full)
-                total_penalty += 20.0
-        
-        return total_penalty
-    
-    def _cool_temperature(self):
-        """
-        AI-Based Temperature Cooling Strategies.
-        
-        Strategies:
-        1. Exponential: T = T * cooling_rate (fast cooling)
-        2. Linear: T = T - constant (slow cooling)
-        3. Adaptive: Cooling rate adapts based on acceptance rate
-        """
-        # OPTIMIZATION: Reduce logging overhead
-        if self.cooling_strategy == "exponential":
-            # Exponential cooling (fast)
-            self.temperature *= self.cooling_rate
-        
-        elif self.cooling_strategy == "linear":
-            # Linear cooling (slow)
-            cooling_step = (self.initial_temperature - self.final_temperature) / self.max_iterations
-            self.temperature -= cooling_step
-        
-        elif self.cooling_strategy == "adaptive":
-            # Adaptive cooling based on stuck count
-            if self.stuck_count > 10:
-                # Cool slower if stuck (more exploration needed)
-                self.temperature *= 0.98
-            else:
-                # Cool faster if progressing well
-                self.temperature *= 0.92
-        
-        else:
-            # Default: exponential
-            self.temperature *= self.cooling_rate
-        
-        # OPTIMIZATION: Only log every 5 iterations
-        if self.current_iteration % 5 == 0:
-            logger.info(f"   🌡️  Temperature: {self.temperature:.1f}°C ({self.cooling_strategy})")
-    
-    def _calculate_energy(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        Calculate energy (fitness) of a solution.
-        Lower energy = better solution.
-        
-        Energy Components:
-        1. Classroom changes penalty
-        2. Time gaps penalty
-        3. Conflicts penalty
-        4. Load imbalance penalty
-        """
-        if not solution:
-            return float('inf')
-        
-        energy = 0.0
-        
-        # 1. Classroom changes penalty
-        classroom_changes = self._calculate_classroom_changes_score(solution)
-        energy += classroom_changes * 10.0  # Weight: 10.0
-        
-        # 2. Time gaps penalty
-        time_gaps = self._calculate_time_efficiency_score(solution)
-        energy += time_gaps * 5.0  # Weight: 5.0
-        
-        # 3. Conflicts penalty
-        conflicts = len(self._detect_conflicts(solution))
-        energy += conflicts * 100.0  # Weight: 100.0 (heavy penalty)
-        
-        # 4. Load imbalance penalty
-        load_variance = self._calculate_load_balance_score(solution)
-        energy += load_variance * 2.0  # Weight: 2.0
-        
-        # 5. Assignment count bonus (more assignments = lower energy)
-        assignment_bonus = (len(self.projects) - len(solution)) * 50.0
-        energy += assignment_bonus
-        
-        # 6. AI-BASED: Early timeslot usage (reward early slots)
-        early_timeslot_score = self._calculate_early_timeslot_usage_score(solution)
-        energy -= early_timeslot_score * self.reward_early_timeslot  # Subtract for reward
-        
-        # 7. AI-BASED: ULTRA-AGGRESSIVE Gap penalty (penalize empty slots heavily!)
-        gap_score = self._calculate_gap_penalty_score(solution)
-        energy += gap_score * abs(self.penalty_gap)  # ULTRA-AGGRESSIVE penalty!
-        
-        # 7.1. ULTRA-AGGRESSIVE: Large gap penalty (massive penalty for large gaps!)
-        large_gap_penalty = self._calculate_large_gap_penalty_score(solution)
-        energy += large_gap_penalty * abs(self.penalty_large_gap)  # MASSIVE penalty!
-        
-        # 7.2. ULTRA-AGGRESSIVE: Gap filling reward (huge reward for filled gaps!)
-        gap_filled_reward = self._calculate_gap_filled_reward_score(solution)
-        energy -= gap_filled_reward * self.reward_gap_filled  # HUGE reward!
-        
-        # 8. SINIFLARARASI: Classroom-wise early slot optimization (NEW)
-        classroom_early_score = self._calculate_classroom_early_slot_score(solution)
-        energy -= classroom_early_score * self.reward_classroom_early_slot  # Subtract for reward
-        
-        # 9. SINIFLARARASI: Classroom gap penalty (NEW)
-        classroom_gap_score = self._calculate_classroom_gap_penalty_score(solution)
-        energy += classroom_gap_score * abs(self.penalty_classroom_gap)  # Add penalty
-        
-        # 10. SINIFLARARASI: Balanced classroom usage (NEW)
-        balanced_usage_score = self._calculate_balanced_classroom_usage_score(solution)
-        energy -= balanced_usage_score * self.reward_balanced_classroom_usage  # Subtract for reward
-        
-        # 11. ULTRA-AGGRESSIVE: Perfect uniform distribution (NEW!)
-        perfect_uniform_score = self._calculate_perfect_uniform_distribution_score(solution)
-        energy -= perfect_uniform_score * self.reward_perfect_uniform  # Subtract for reward
-        
-        # 12. ULTRA-AGGRESSIVE: Uniform imbalance penalty (NEW!)
-        uniform_imbalance_score = self._calculate_uniform_imbalance_penalty_score(solution)
-        energy += uniform_imbalance_score * abs(self.penalty_uniform_imbalance)  # Add penalty
-        
-        # 13. SUPER AGGRESSIVE: Compact classrooms score (NEW!)
-        if self.compact_classrooms:
-            compact_score = self._calculate_compact_classrooms_score(solution)
-            energy -= compact_score * self.reward_full_classroom  # Subtract for reward
-            
-            empty_classroom_penalty = self._calculate_empty_classroom_penalty_score(solution)
-            energy += empty_classroom_penalty * abs(self.penalty_empty_classroom)  # Add penalty
-        
-        return energy
-    
-    def _calculate_early_timeslot_usage_score(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        AI-BASED: Calculate early timeslot usage score.
-        Higher score = more early timeslots used.
-        """
-        if not solution or not self.timeslots:
-            return 0.0
-        
-        total_timeslots = len(self.timeslots)
-        early_threshold = total_timeslots // 2  # First half = early
-        
-        early_count = 0
-        late_count = 0
-        
-        for assignment in solution:
-            timeslot_id = assignment.get('timeslot_id')
-            if timeslot_id and timeslot_id <= early_threshold:
-                early_count += 1
-            else:
-                late_count += 1
-        
-        total_assignments = len(solution)
-        if total_assignments == 0:
-            return 0.0
-        
-        # Score based on early vs late ratio
-        early_ratio = early_count / total_assignments
-        late_ratio = late_count / total_assignments
-        
-        # Reward early usage, penalize late usage when early slots available
-        if early_ratio >= 0.8:  # 80%+ early usage
-            return 1.0  # Maximum reward
-        elif early_ratio >= 0.6:  # 60-80% early usage
-            return 0.7
-        elif early_ratio >= 0.4:  # 40-60% early usage
-            return 0.4
-        else:  # <40% early usage
-            return 0.1
-    
-    def _calculate_gap_penalty_score(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        AI-BASED: Calculate gap penalty score.
-        Higher penalty = more gaps (empty slots).
-        """
-        if not solution or not self.classrooms or not self.timeslots:
-            return 0.0
-        
-        total_slots = len(self.classrooms) * len(self.timeslots)
-        used_slots = len(solution)
-        gaps = total_slots - used_slots
-        
-        if total_slots == 0:
-            return 0.0
-        
-        # Normalize gap ratio (0.0 = no gaps, 1.0 = all gaps)
-        gap_ratio = gaps / total_slots
-        
-        # Return penalty score (positive = penalty)
-        return gap_ratio
-    
-    def _calculate_classroom_early_slot_score(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        SINIFLARARASI: Calculate classroom-wise early slot optimization score.
-        Rewards filling early gaps in each classroom individually.
-        Higher score = better early slot distribution across classrooms.
-        """
-        if not solution or not self.classrooms or not self.timeslots:
-            return 0.0
-        
-        total_timeslots = len(self.timeslots)
-        early_threshold = total_timeslots // 2  # First half = early
-        
-        classroom_scores = []
-        
-        # Analyze each classroom individually
-        for classroom in self.classrooms:
-            classroom_id = classroom['id']
-            
-            # Get assignments for this classroom
-            classroom_assignments = [a for a in solution if a.get('classroom_id') == classroom_id]
-            
-            if not classroom_assignments:
-                # Empty classroom gets low score
-                classroom_scores.append(0.1)
-                continue
-            
-            # Count early vs late usage in this classroom
-            early_count = 0
-            late_count = 0
-            
-            for assignment in classroom_assignments:
-                timeslot_id = assignment.get('timeslot_id')
-                if timeslot_id:
-                    if timeslot_id <= early_threshold:
-                        early_count += 1
+                if available_j1:
+                    # Least loaded AND free at this slot
+                    free_j1 = [
+                        i for i in available_j1
+                        if class_id not in j1_schedule[i][order]
+                    ]
+                    if free_j1:
+                        j1_id = min(free_j1, key=lambda x: workloads.get(x, 0))
                     else:
-                        late_count += 1
-            
-            total_classroom_assignments = len(classroom_assignments)
-            if total_classroom_assignments == 0:
-                classroom_scores.append(0.1)
-                continue
-            
-            # Calculate early usage ratio for this classroom
-            early_ratio = early_count / total_classroom_assignments
-            
-            # Calculate gap ratio in early slots for this classroom
-            max_possible_early = early_threshold  # Max early slots per classroom
-            early_gaps = max_possible_early - early_count
-            early_gap_ratio = early_gaps / max_possible_early if max_possible_early > 0 else 1.0
-            
-            # Score this classroom based on early usage and gap minimization
-            if early_ratio >= 0.9 and early_gap_ratio <= 0.1:  # 90%+ early, 10%- gaps
-                classroom_score = 2.0  # Excellent
-            elif early_ratio >= 0.8 and early_gap_ratio <= 0.2:  # 80%+ early, 20%- gaps
-                classroom_score = 1.5  # Very good
-            elif early_ratio >= 0.7 and early_gap_ratio <= 0.3:  # 70%+ early, 30%- gaps
-                classroom_score = 1.2  # Good
-            elif early_ratio >= 0.6 and early_gap_ratio <= 0.4:  # 60%+ early, 40%- gaps
-                classroom_score = 1.0  # Moderate
-            elif early_ratio >= 0.5:  # 50%+ early
-                classroom_score = 0.7  # Fair
-            else:  # <50% early
-                classroom_score = 0.3  # Poor
-            
-            classroom_scores.append(classroom_score)
-        
-        # Return average score across all classrooms
-        return sum(classroom_scores) / len(classroom_scores) if classroom_scores else 0.0
-    
-    def _calculate_classroom_gap_penalty_score(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        SINIFLARARASI: Calculate classroom-wise gap penalty score.
-        Penalizes gaps in each classroom individually.
-        Higher penalty = more gaps per classroom.
-        """
-        if not solution or not self.classrooms or not self.timeslots:
-            return 0.0
-        
-        total_timeslots = len(self.timeslots)
-        classroom_gap_scores = []
-        
-        # Analyze each classroom individually
-        for classroom in self.classrooms:
-            classroom_id = classroom['id']
-            
-            # Get assignments for this classroom
-            classroom_assignments = [a for a in solution if a.get('classroom_id') == classroom_id]
-            
-            # Calculate gaps in this classroom
-            used_slots_in_classroom = len(classroom_assignments)
-            total_slots_in_classroom = total_timeslots
-            gaps_in_classroom = total_slots_in_classroom - used_slots_in_classroom
-            
-            # Normalize gap ratio for this classroom (0.0 = no gaps, 1.0 = all gaps)
-            gap_ratio = gaps_in_classroom / total_slots_in_classroom if total_slots_in_classroom > 0 else 1.0
-            classroom_gap_scores.append(gap_ratio)
-        
-        # Return average gap penalty across all classrooms
-        return sum(classroom_gap_scores) / len(classroom_gap_scores) if classroom_gap_scores else 0.0
-    
-    def _calculate_balanced_classroom_usage_score(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        SINIFLARARASI: Calculate balanced classroom usage score.
-        Rewards balanced distribution of assignments across classrooms.
-        Higher score = more balanced usage.
-        """
-        if not solution or not self.classrooms:
-            return 0.0
-        
-        # Count assignments per classroom
-        classroom_counts = {}
-        for classroom in self.classrooms:
-            classroom_id = classroom['id']
-            classroom_counts[classroom_id] = 0
-        
-        for assignment in solution:
-            classroom_id = assignment.get('classroom_id')
-            if classroom_id in classroom_counts:
-                classroom_counts[classroom_id] += 1
-        
-        # Calculate variance in classroom usage
-        counts = list(classroom_counts.values())
-        if not counts:
-            return 0.0
-        
-        mean_count = sum(counts) / len(counts)
-        if mean_count == 0:
-            return 0.0
-        
-        # Calculate coefficient of variation (lower = more balanced)
-        variance = sum((count - mean_count) ** 2 for count in counts) / len(counts)
-        std_dev = variance ** 0.5
-        coefficient_of_variation = std_dev / mean_count if mean_count > 0 else 1.0
-        
-        # Convert to score (lower coefficient = higher score)
-        # 0.0 = perfectly balanced, 1.0+ = very imbalanced
-        if coefficient_of_variation <= 0.1:  # Very balanced
-            return 1.0
-        elif coefficient_of_variation <= 0.2:  # Balanced
-            return 0.8
-        elif coefficient_of_variation <= 0.3:  # Fairly balanced
-            return 0.6
-        elif coefficient_of_variation <= 0.5:  # Somewhat imbalanced
-            return 0.4
-        else:  # Very imbalanced
-            return 0.2
-    
-    def _calculate_perfect_uniform_distribution_score(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        ULTRA-AGGRESSIVE: Calculate perfect uniform distribution score.
-        Rewards perfect uniform distribution (same number of projects per classroom).
-        Higher score = more uniform distribution.
-        """
-        if not solution or not self.classrooms:
-            return 0.0
-        
-        # Count assignments per classroom
-        classroom_counts = {}
-        for classroom in self.classrooms:
-            classroom_id = classroom['id']
-            classroom_counts[classroom_id] = 0
-        
-        for assignment in solution:
-            classroom_id = assignment.get('classroom_id')
-            if classroom_id in classroom_counts:
-                classroom_counts[classroom_id] += 1
-        
-        # Calculate uniform distribution score
-        counts = list(classroom_counts.values())
-        if not counts:
-            return 0.0
-        
-        # Check if all classrooms have the same number of assignments
-        if len(set(counts)) == 1:  # All counts are identical
-            return 3.0  # Perfect uniform - maximum reward!
-        
-        # Calculate how close we are to perfect uniform
-        mean_count = sum(counts) / len(counts)
-        if mean_count == 0:
-            return 0.0
-        
-        # Calculate variance from perfect uniform
-        variance = sum((count - mean_count) ** 2 for count in counts) / len(counts)
-        std_dev = variance ** 0.5
-        
-        # Convert to score (lower variance = higher score)
-        if std_dev <= 0.1:  # Nearly perfect uniform
-            return 2.5
-        elif std_dev <= 0.5:  # Very uniform
-            return 2.0
-        elif std_dev <= 1.0:  # Fairly uniform
-            return 1.5
-        elif std_dev <= 2.0:  # Somewhat uniform
-            return 1.0
-        else:  # Not uniform at all
-            return 0.5
-    
-    def _calculate_uniform_imbalance_penalty_score(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        ULTRA-AGGRESSIVE: Calculate uniform imbalance penalty score.
-        Heavily penalizes non-uniform distribution.
-        Higher penalty = more imbalanced distribution.
-        """
-        if not solution or not self.classrooms:
-            return 0.0
-        
-        # Count assignments per classroom
-        classroom_counts = {}
-        for classroom in self.classrooms:
-            classroom_id = classroom['id']
-            classroom_counts[classroom_id] = 0
-        
-        for assignment in solution:
-            classroom_id = assignment.get('classroom_id')
-            if classroom_id in classroom_counts:
-                classroom_counts[classroom_id] += 1
-        
-        # Calculate imbalance penalty
-        counts = list(classroom_counts.values())
-        if not counts:
-            return 0.0
-        
-        mean_count = sum(counts) / len(counts)
-        if mean_count == 0:
-            return 0.0
-        
-        # Calculate coefficient of variation (higher = more imbalanced)
-        variance = sum((count - mean_count) ** 2 for count in counts) / len(counts)
-        std_dev = variance ** 0.5
-        coefficient_of_variation = std_dev / mean_count if mean_count > 0 else 1.0
-        
-        # Return penalty score (higher coefficient = higher penalty)
-        # 0.0 = perfectly uniform, 1.0+ = very imbalanced
-        if coefficient_of_variation <= 0.05:  # Nearly perfect uniform
-            return 0.0  # No penalty
-        elif coefficient_of_variation <= 0.1:  # Very uniform
-            return 0.1
-        elif coefficient_of_variation <= 0.2:  # Fairly uniform
-            return 0.3
-        elif coefficient_of_variation <= 0.3:  # Somewhat imbalanced
-            return 0.6
-        elif coefficient_of_variation <= 0.5:  # Imbalanced
-            return 0.8
-        else:  # Very imbalanced
-            return 1.0
-    
-    # 🔧 CONFLICT RESOLUTION METHODS
-    
-    def _detect_all_conflicts(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Tüm çakışma türlerini tespit eder
-        
-        Görsellerde tespit edilen çakışmalar:
-        - Dr. Öğretim Üyesi 3: 14:30-15:00'da 2 farklı görev
-        - Dr. Öğretim Üyesi 21: 15:00-15:30'da 2 jüri görevi  
-        - Dr. Öğretim Üyesi 11: 16:00-16:30'da 2 farklı görev
-        """
-        all_conflicts = []
-        
-        logger.info("🔍 [SA] CONFLICT DETECTION STARTED")
-        
-        # 1. Instructor çakışmaları
-        instructor_conflicts = self._detect_instructor_conflicts(assignments)
-        all_conflicts.extend(instructor_conflicts)
-        
-        # 2. Classroom çakışmaları
-        classroom_conflicts = self._detect_classroom_conflicts(assignments)
-        all_conflicts.extend(classroom_conflicts)
-        
-        # 3. Timeslot çakışmaları
-        timeslot_conflicts = self._detect_timeslot_conflicts(assignments)
-        all_conflicts.extend(timeslot_conflicts)
-        
-        logger.info(f"🔍 [SA] CONFLICT DETECTION COMPLETED: {len(all_conflicts)} conflicts found")
-        
-        return all_conflicts
-    
-    def _detect_instructor_conflicts(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Instructor çakışmalarını tespit eder"""
-        conflicts = []
-        
-        # Instructor -> Timeslot -> Assignments mapping
-        instructor_timeslot_assignments = defaultdict(lambda: defaultdict(list))
-        
-        for assignment in assignments:
-            instructor_id = assignment.get('responsible_instructor_id')
-            timeslot_id = assignment.get('timeslot_id')
-            instructors_list = assignment.get('instructors', [])
-            project_id = assignment.get('project_id')
-            
-            if not instructor_id or not timeslot_id:
-                continue
-            
-            # Responsible instructor
-            instructor_timeslot_assignments[instructor_id][timeslot_id].append({
-                'project_id': project_id,
-                'role': 'responsible',
-                'assignment': assignment
-            })
-            
-            # Jury instructors
-            for jury_instructor_id in instructors_list:
-                if jury_instructor_id != instructor_id:  # Kendi projesinde jüri olamaz
-                    instructor_timeslot_assignments[jury_instructor_id][timeslot_id].append({
-                        'project_id': project_id,
-                        'role': 'jury',
-                        'assignment': assignment
-                    })
-        
-        # Çakışmaları tespit et
-        for instructor_id, timeslot_assignments in instructor_timeslot_assignments.items():
-            for timeslot_id, assignments_list in timeslot_assignments.items():
-                if len(assignments_list) > 1:
-                    # Çakışma tespit edildi!
-                    conflict_type = self._determine_instructor_conflict_type(assignments_list)
-                    
-                    conflicts.append({
-                        'type': conflict_type,
-                        'instructor_id': instructor_id,
-                        'timeslot_id': timeslot_id,
-                        'conflicting_assignments': assignments_list,
-                        'conflict_count': len(assignments_list),
-                        'severity': self._calculate_conflict_severity(assignments_list),
-                        'description': f"Instructor {instructor_id} has {len(assignments_list)} assignments in timeslot {timeslot_id}",
-                        'resolution_strategy': self._get_resolution_strategy(conflict_type)
-                    })
-        
-        logger.info(f"[SA] Instructor conflicts detected: {len(conflicts)}")
-        return conflicts
-    
-    def _detect_classroom_conflicts(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Sınıf çakışmalarını tespit eder"""
-        conflicts = []
-        
-        # Classroom -> Timeslot -> Assignments mapping
-        classroom_timeslot_assignments = defaultdict(lambda: defaultdict(list))
-        
-        for assignment in assignments:
-            classroom_id = assignment.get('classroom_id')
-            timeslot_id = assignment.get('timeslot_id')
-            project_id = assignment.get('project_id')
-            
-            if not classroom_id or not timeslot_id:
-                continue
-            
-            classroom_timeslot_assignments[classroom_id][timeslot_id].append({
-                'project_id': project_id,
-                'assignment': assignment
-            })
-        
-        # Çakışmaları tespit et
-        for classroom_id, timeslot_assignments in classroom_timeslot_assignments.items():
-            for timeslot_id, assignments_list in timeslot_assignments.items():
-                if len(assignments_list) > 1:
-                    conflicts.append({
-                        'type': 'classroom_double_booking',
-                        'classroom_id': classroom_id,
-                        'timeslot_id': timeslot_id,
-                        'conflicting_assignments': assignments_list,
-                        'conflict_count': len(assignments_list),
-                        'severity': 'HIGH',
-                        'description': f"Classroom {classroom_id} has {len(assignments_list)} projects in timeslot {timeslot_id}",
-                        'resolution_strategy': 'relocate_to_available_classroom'
-                    })
-        
-        logger.info(f"[SA] Classroom conflicts detected: {len(conflicts)}")
-        return conflicts
-    
-    def _detect_timeslot_conflicts(self, assignments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Zaman dilimi çakışmalarını tespit eder"""
-        conflicts = []
-        
-        # Timeslot capacity analysis
-        timeslot_usage = defaultdict(list)
-        
-        for assignment in assignments:
-            timeslot_id = assignment.get('timeslot_id')
-            project_id = assignment.get('project_id')
-            
-            if timeslot_id:
-                timeslot_usage[timeslot_id].append(project_id)
-        
-        # Her zaman diliminin kapasitesini kontrol et
-        for timeslot in self.timeslots:
-            timeslot_id = timeslot.get('id')
-            capacity = timeslot.get('capacity', 10)  # Default capacity
-            used_count = len(timeslot_usage.get(timeslot_id, []))
-            
-            if used_count > capacity:
-                conflicts.append({
-                    'type': 'timeslot_overflow',
-                    'timeslot_id': timeslot_id,
-                    'capacity': capacity,
-                    'used_count': used_count,
-                    'overflow': used_count - capacity,
-                    'severity': 'HIGH',
-                    'description': f"Timeslot {timeslot_id} overflow: {used_count}/{capacity}",
-                    'resolution_strategy': 'redistribute_to_other_timeslots'
-                })
-        
-        logger.info(f"[SA] Timeslot conflicts detected: {len(conflicts)}")
-        return conflicts
-    
-    def _determine_instructor_conflict_type(self, assignments_list: List[Dict[str, Any]]) -> str:
-        """Instructor çakışma türünü belirler"""
-        roles = [assignment['role'] for assignment in assignments_list]
-        
-        if 'responsible' in roles and 'jury' in roles:
-            return 'instructor_supervisor_jury_conflict'
-        elif roles.count('responsible') > 1:
-            return 'instructor_double_assignment'
-        elif roles.count('jury') > 1:
-            return 'instructor_double_jury'
-        else:
-            return 'instructor_multiple_roles'
-    
-    def _calculate_conflict_severity(self, assignments_list: List[Dict[str, Any]]) -> str:
-        """Çakışma şiddetini hesaplar"""
-        if len(assignments_list) > 2:
-            return 'CRITICAL'
-        elif len(assignments_list) == 2:
-            return 'HIGH'
-        else:
-            return 'MEDIUM'
-    
-    def _get_resolution_strategy(self, conflict_type: str) -> str:
-        """Çakışma türüne göre çözüm stratejisi belirler"""
-        strategies = {
-            'instructor_supervisor_jury_conflict': 'reschedule_one_assignment',
-            'instructor_double_assignment': 'reschedule_duplicate_assignment',
-            'instructor_double_jury': 'replace_jury_member',
-            'classroom_double_booking': 'relocate_to_available_classroom',
-            'timeslot_overflow': 'redistribute_to_other_timeslots'
-        }
-        return strategies.get(conflict_type, 'manual_resolution')
-    
-    def _resolve_conflicts(self, assignments: List[Dict[str, Any]], 
-                          conflicts: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-        """
-        Çakışmaları çözer - Temperature-based resolution strategy
-        
-        Returns:
-            Tuple[List[Dict], List[Dict]]: (resolved_assignments, resolution_log)
-        """
-        logger.info(f"🔧 [SA] CONFLICT RESOLUTION STARTED: {len(conflicts)} conflicts to resolve")
-        
-        resolved_assignments = assignments.copy()
-        resolution_log = []
-        
-        # Temperature-based conflict resolution strategy
-        # HIGH TEMP: More aggressive resolution (exploration)
-        # LOW TEMP: Conservative resolution (exploitation)
-        resolution_aggressiveness = min(1.0, self.temperature / self.initial_temperature)
-        
-        # Çakışmaları şiddete göre sırala (CRITICAL -> HIGH -> MEDIUM)
-        severity_order = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3}
-        sorted_conflicts = sorted(conflicts, key=lambda x: severity_order.get(x.get('severity', 'LOW'), 3))
-        
-        for conflict in sorted_conflicts:
-            try:
-                resolution_result = self._resolve_single_conflict(conflict, resolved_assignments, resolution_aggressiveness)
-                
-                if resolution_result['success']:
-                    resolved_assignments = resolution_result['assignments']
-                    resolution_log.append({
-                        'conflict_id': conflict.get('type', 'unknown'),
-                        'resolution_strategy': conflict.get('resolution_strategy', 'unknown'),
-                        'success': True,
-                        'changes_made': resolution_result.get('changes_made', []),
-                        'description': f"Successfully resolved {conflict['type']}",
-                        'temperature': self.temperature
-                    })
-                    logger.info(f"✅ [SA] RESOLVED: {conflict['description']} (T={self.temperature:.2f})")
+                        # All busy, pick least loaded (will be repaired later)
+                        j1_id = min(available_j1, key=lambda x: workloads.get(x, 0))
                 else:
-                    resolution_log.append({
-                        'conflict_id': conflict.get('type', 'unknown'),
-                        'resolution_strategy': conflict.get('resolution_strategy', 'unknown'),
-                        'success': False,
-                        'error': resolution_result.get('error', 'Unknown error'),
-                        'description': f"Failed to resolve {conflict['type']}",
-                        'temperature': self.temperature
-                    })
-                    logger.warning(f"❌ [SA] FAILED: {conflict['description']}")
-                    
-            except Exception as e:
-                logger.error(f"[SA] Error resolving conflict {conflict.get('type', 'unknown')}: {e}")
-                resolution_log.append({
-                    'conflict_id': conflict.get('type', 'unknown'),
-                    'success': False,
-                    'error': str(e),
-                    'description': f"Exception during resolution: {conflict['type']}",
-                    'temperature': self.temperature
-                })
-        
-        logger.info(f"🔧 [SA] CONFLICT RESOLUTION COMPLETED")
-        logger.info(f"   - Conflicts resolved: {len([r for r in resolution_log if r['success']])}")
-        logger.info(f"   - Conflicts failed: {len([r for r in resolution_log if not r['success']])}")
-        logger.info(f"   - Temperature: {self.temperature:.2f}")
-        
-        return resolved_assignments, resolution_log
-    
-    def _resolve_single_conflict(self, conflict: Dict[str, Any], 
-                                assignments: List[Dict[str, Any]],
-                                aggressiveness: float = 1.0) -> Dict[str, Any]:
-        """Tek bir çakışmayı çözer - Temperature-based resolution"""
-        
-        conflict_type = conflict.get('type')
-        strategy = conflict.get('resolution_strategy')
-        
-        try:
-            if strategy == 'reschedule_one_assignment':
-                return self._reschedule_one_assignment(conflict, assignments, aggressiveness)
-            elif strategy == 'reschedule_duplicate_assignment':
-                return self._reschedule_duplicate_assignment(conflict, assignments, aggressiveness)
-            elif strategy == 'replace_jury_member':
-                return self._replace_jury_member(conflict, assignments, aggressiveness)
-            elif strategy == 'relocate_to_available_classroom':
-                return self._relocate_to_available_classroom(conflict, assignments, aggressiveness)
-            elif strategy == 'redistribute_to_other_timeslots':
-                return self._redistribute_to_other_timeslots(conflict, assignments, aggressiveness)
-            else:
-                return {'success': False, 'error': f'Unknown strategy: {strategy}'}
+                    j1_id = self.faculty_ids[j1_index % len(self.faculty_ids)]
                 
-        except Exception as e:
-            return {'success': False, 'error': str(e)}
+                workloads[j1_id] += 1
+                workloads[project.responsible_id] += 1
+                j1_index += 1
+                
+                # Track J1 schedule
+                j1_schedule[j1_id][order].add(class_id)
+                
+                assignment = ProjectAssignment(
+                    project_id=project.id,
+                    class_id=class_id,
+                    order_in_class=order,
+                    ps_id=project.responsible_id,
+                    j1_id=j1_id,
+                    j2_id=-1  # Placeholder
+                )
+                state.assignments.append(assignment)
+        
+        # FINAL VERIFICATION: All classes must be used - ABSOLUTE MANDATORY
+        final_class_counts = defaultdict(int)
+        for a in state.assignments:
+            final_class_counts[a.class_id] += 1
+        
+        # Find unused classes
+        unused_classes = [
+            c for c in range(self.config.class_count)
+            if final_class_counts.get(c, 0) == 0
+        ]
+        
+        if unused_classes:
+            # CRITICAL: Force fill unused classes - REDISTRIBUTE NOW
+            assignments_by_class = defaultdict(list)
+            for a in state.assignments:
+                assignments_by_class[a.class_id].append(a)
+            
+            # Sort by load
+            sorted_classes = sorted(
+                assignments_by_class.keys(),
+                key=lambda c: len(assignments_by_class[c]),
+                reverse=True
+            )
+            
+            for unused_class in unused_classes:
+                moved = False
+                
+                # Move from most loaded classes
+                for max_class in sorted_classes:
+                    if max_class == unused_class:
+                        continue
+                    
+                    assignments_in_max = assignments_by_class[max_class]
+                    if len(assignments_in_max) > 0:
+                        # Move last assignment
+                        assignment = assignments_in_max[-1]
+                        assignment.class_id = unused_class
+                        assignment.order_in_class = 0
+                        assignments_by_class[max_class].remove(assignment)
+                        assignments_by_class[unused_class].append(assignment)
+                        moved = True
+                        break
+                
+                if not moved and state.assignments:
+                    # Last resort: move first assignment
+                    state.assignments[0].class_id = unused_class
+                    state.assignments[0].order_in_class = 0
+            
+            # Reorder all classes
+            for class_id in range(self.config.class_count):
+                class_assignments = [
+                    a for a in state.assignments if a.class_id == class_id
+                ]
+                class_assignments.sort(key=lambda x: x.order_in_class)
+                for i, a in enumerate(class_assignments):
+                    a.order_in_class = i
+        
+        # Verify again
+        final_class_counts = defaultdict(int)
+        for a in state.assignments:
+            final_class_counts[a.class_id] += 1
+        
+        if len(final_class_counts) < self.config.class_count:
+            # CRITICAL: Force distribution to unused classes
+            unused = [c for c in range(self.config.class_count) if c not in final_class_counts]
+            
+            # Sort assignments by class load
+            assignments_by_class = defaultdict(list)
+            for a in state.assignments:
+                assignments_by_class[a.class_id].append(a)
+            
+            # Sort classes by load (most loaded first)
+            sorted_classes = sorted(
+                assignments_by_class.keys(),
+                key=lambda c: len(assignments_by_class[c]),
+                reverse=True
+            )
+            
+            for unused_class in unused:
+                moved = False
+                
+                # Try to move from most loaded classes
+                for max_class in sorted_classes:
+                    if max_class == unused_class:
+                        continue
+                    
+                    assignments_in_max = assignments_by_class[max_class]
+                    if len(assignments_in_max) > 1:
+                        # Move last assignment
+                        assignment = assignments_in_max[-1]
+                        assignment.class_id = unused_class
+                        assignment.order_in_class = 0
+                        assignments_by_class[max_class].remove(assignment)
+                        assignments_by_class[unused_class].append(assignment)
+                        final_class_counts[max_class] -= 1
+                        final_class_counts[unused_class] = 1
+                        moved = True
+                        break
+                
+                if not moved:
+                    # Force move even from single-assignment classes
+                    for max_class in sorted_classes:
+                        if max_class == unused_class:
+                            continue
+                        assignments_in_max = assignments_by_class[max_class]
+                        if assignments_in_max:
+                            assignment = assignments_in_max[-1]
+                            assignment.class_id = unused_class
+                            assignment.order_in_class = 0
+                            assignments_by_class[max_class].remove(assignment)
+                            assignments_by_class[unused_class].append(assignment)
+                            final_class_counts[max_class] -= 1
+                            final_class_counts[unused_class] = 1
+                            break
+            
+            # Reorder all classes after moves
+            for class_id in range(self.config.class_count):
+                class_assignments_list = [
+                    a for a in state.assignments if a.class_id == class_id
+                ]
+                class_assignments_list.sort(key=lambda x: x.order_in_class)
+                for i, a in enumerate(class_assignments_list):
+                    a.order_in_class = i
+        
+        # ABSOLUTE FINAL CHECK: Use round-robin if still not all classes used
+        final_class_counts = defaultdict(int)
+        for a in state.assignments:
+            final_class_counts[a.class_id] += 1
+        
+        used_count = len([c for c in range(self.config.class_count) if final_class_counts.get(c, 0) > 0])
+        if used_count < self.config.class_count:
+            # CRITICAL: Force round-robin distribution to ensure ALL classes used
+            logger.warning(f"CRITICAL: Only {used_count} classes used in initial solution, forcing round-robin distribution")
+            for i, assignment in enumerate(state.assignments):
+                target_class = i % self.config.class_count
+                assignment.class_id = target_class
+                assignment.order_in_class = i // self.config.class_count
+            
+            # Final reorder
+            for class_id in range(self.config.class_count):
+                class_assignments_list = [
+                    a for a in state.assignments if a.class_id == class_id
+                ]
+                class_assignments_list.sort(key=lambda x: x.order_in_class)
+                for i, a in enumerate(class_assignments_list):
+                    a.order_in_class = i
+        
+        # ABSOLUTE FINAL VERIFICATION: Ensure all classes are used before returning
+        final_verification = defaultdict(int)
+        for a in state.assignments:
+            final_verification[a.class_id] += 1
+        
+        used_classes_count = len([c for c in range(self.config.class_count) if final_verification.get(c, 0) > 0])
+        if used_classes_count < self.config.class_count:
+            # CRITICAL: Last resort - force round-robin
+            logger.warning(f"CRITICAL: build_initial_solution - Only {used_classes_count}/{self.config.class_count} classes used, forcing round-robin")
+            for i, assignment in enumerate(state.assignments):
+                target_class = i % self.config.class_count
+                assignment.class_id = target_class
+                assignment.order_in_class = i // self.config.class_count
+            
+            # Reorder
+            for class_id in range(self.config.class_count):
+                class_assignments_list = [
+                    a for a in state.assignments if a.class_id == class_id
+                ]
+                class_assignments_list.sort(key=lambda x: x.order_in_class)
+                for i, a in enumerate(class_assignments_list):
+                    a.order_in_class = i
+        
+        return state
     
-    def _reschedule_one_assignment(self, conflict: Dict[str, Any], 
-                                  assignments: List[Dict[str, Any]], 
-                                  aggressiveness: float = 1.0) -> Dict[str, Any]:
-        """Bir atamayı yeniden zamanla - Temperature-based selection"""
-        changes_made = []
-        
-        conflicting_assignments = conflict.get('conflicting_assignments', [])
-        if len(conflicting_assignments) < 2:
-            return {'success': False, 'error': 'Not enough conflicting assignments'}
-        
-        # Temperature-based assignment selection
-        # HIGH TEMP: Random selection (exploration)
-        # LOW TEMP: Select assignment with lower fitness (exploitation)
-        if aggressiveness > 0.5:
-            # High temperature: Random selection
-            assignment_to_move = random.choice(conflicting_assignments[1:])['assignment']
+    def _find_free_class_for_instructor(
+        self,
+        instructor_id: int,
+        class_loads: List[int],
+        instructor_schedule: Dict,
+        used_classes: Set
+    ) -> int:
+        """Find a class where instructor is free"""
+        # Prefer unused classes
+        unused = [c for c in range(self.config.class_count) if c not in used_classes]
+        if unused:
+            # Check if instructor is free in unused classes
+            for class_id in unused:
+                next_order = class_loads[class_id]
+                if class_id not in instructor_schedule[instructor_id][next_order]:
+                    return class_id
+            # All unused classes have conflict, pick least loaded
+            return min(unused, key=lambda c: class_loads[c])
         else:
-            # Low temperature: Select assignment with lowest fitness
-            assignment_to_move = conflicting_assignments[1]['assignment']
+            # All classes used, find where instructor is free
+            for class_id in range(self.config.class_count):
+                next_order = class_loads[class_id]
+                if class_id not in instructor_schedule[instructor_id][next_order]:
+                    return class_id
+            # All have conflicts, pick least loaded
+            return min(range(self.config.class_count), key=lambda c: class_loads[c])
+    
+    def _sort_by_priority(self) -> List[Project]:
+        """Sort projects by priority mode"""
+        interim = [p for p in self.projects if p.type in ["INTERIM", "interim", "ARA"]]
+        final = [p for p in self.projects if p.type in ["FINAL", "final", "BITIRME"]]
         
-        # Temperature-based timeslot selection
-        used_timeslots = {a.get('timeslot_id') for a in assignments if a.get('timeslot_id')}
-        available_timeslots = [ts for ts in self.timeslots if ts.get('id') not in used_timeslots]
-        
-        if not available_timeslots:
-            available_timeslots = self.timeslots
-        
-        # Temperature-based timeslot selection strategy
-        if aggressiveness > 0.5:
-            # High temperature: Random timeslot selection
-            new_timeslot = random.choice(available_timeslots)
+        if self.config.priority_mode == PriorityMode.ARA_ONCE:
+            return interim + final
+        elif self.config.priority_mode == PriorityMode.BITIRME_ONCE:
+            return final + interim
         else:
-            # Low temperature: Prefer earlier timeslots
-            available_timeslots.sort(key=lambda ts: ts.get('id', 0))
-            new_timeslot = available_timeslots[0]
+            # ESIT - random shuffle
+            all_projects = interim + final
+            random.shuffle(all_projects)
+            return all_projects
+
+
+# =============================================================================
+# SIMULATED ANNEALING ENGINE
+# =============================================================================
+
+class SimulatedAnnealingScheduler:
+    """
+    Main Simulated Annealing optimizer.
+    
+    Features:
+    - Multiple cooling schedules
+    - Adaptive mechanisms
+    - Reheating on stagnation
+    - Memory-based restarts
+    - Full constraint handling
+    """
+    
+    def __init__(self, config: SAConfig = None):
+        self.config = config or SAConfig()
         
-        old_timeslot_id = assignment_to_move.get('timeslot_id')
+        # Components
+        self.penalty_calculator: Optional[SAPenaltyCalculator] = None
+        self.repair_mechanism: Optional[SARepairMechanism] = None
+        self.neighbour_generator: Optional[SANeighbourGenerator] = None
+        self.solution_builder: Optional[SAInitialSolutionBuilder] = None
         
-        # Atamayı güncelle
-        for assignment in assignments:
-            if assignment.get('project_id') == assignment_to_move.get('project_id'):
-                assignment['timeslot_id'] = new_timeslot.get('id')
-                changes_made.append({
-                    'project_id': assignment.get('project_id'),
-                    'old_timeslot': old_timeslot_id,
-                    'new_timeslot': new_timeslot.get('id'),
-                    'action': 'rescheduled',
-                    'temperature': self.temperature
-                })
+        # State
+        self.current_state: Optional[SAState] = None
+        self.best_state: Optional[SAState] = None
+        self.best_cost: float = float('inf')
+        
+        # Memory
+        self.memory_pool: List[Tuple[SAState, float]] = []
+        self.global_best_state: Optional[SAState] = None
+        self.global_best_cost: float = float('inf')
+        
+        # Data
+        self.projects: List[Project] = []
+        self.instructors: List[Instructor] = []
+        self.classrooms: List[Dict] = []
+        self.timeslots: List[Dict] = []
+        
+        # Statistics
+        self.iterations = 0
+        self.accepted_moves = 0
+        self.rejected_moves = 0
+        self.restarts = 0
+    
+    def initialize(self, data: Dict[str, Any]) -> None:
+        """Initialize with input data"""
+        self._load_data(data)
+        
+        # Create components
+        self.penalty_calculator = SAPenaltyCalculator(
+            self.projects, self.instructors, self.config
+        )
+        self.repair_mechanism = SARepairMechanism(
+            self.projects, self.instructors, self.config
+        )
+        self.neighbour_generator = SANeighbourGenerator(
+            self.projects, self.instructors, self.config
+        )
+        self.solution_builder = SAInitialSolutionBuilder(
+            self.projects, self.instructors, self.config
+        )
+        
+        # Update class count if classrooms provided - CRITICAL: Use ALL available classrooms
+        # Genetic Algorithm'deki mantık: Mevcut tüm sınıfları kullan
+        if self.classrooms:
+            available_class_count = len(self.classrooms)
+            # Eğer config'de class_count mevcut sınıf sayısından farklıysa, mevcut sınıf sayısını kullan
+            if self.config.class_count != available_class_count:
+                # Eğer auto_class_count aktifse veya default değerse, mevcut sınıf sayısını kullan
+                if self.config.auto_class_count or self.config.class_count == 6:  # Default 6
+                    self.config.class_count = available_class_count
+                    logger.info(f"Simulated Annealing: Sınıf sayısı otomatik olarak {available_class_count} olarak ayarlandı (mevcut sınıf sayısı)")
+                else:
+                    # Manuel ayarlanmışsa, ama mevcut sınıf sayısından fazlaysa, mevcut sınıf sayısını kullan
+                    if self.config.class_count > available_class_count:
+                        logger.warning(f"Simulated Annealing: İstenen sınıf sayısı ({self.config.class_count}) mevcut sınıf sayısından ({available_class_count}) fazla. Tüm sınıflar kullanılacak.")
+                        self.config.class_count = available_class_count
+            else:
+                # Zaten doğru, ama yine de log
+                logger.info(f"Simulated Annealing: {self.config.class_count} sınıf kullanılacak")
+        
+        # CRITICAL: Ensure all components use the correct class_count
+        # Update all components with correct class_count
+        if self.penalty_calculator:
+            self.penalty_calculator.config.class_count = self.config.class_count
+        if self.repair_mechanism:
+            self.repair_mechanism.config.class_count = self.config.class_count
+        if self.neighbour_generator:
+            self.neighbour_generator.config.class_count = self.config.class_count
+        if self.solution_builder:
+            self.solution_builder.config.class_count = self.config.class_count
+    
+    def _load_data(self, data: Dict[str, Any]) -> None:
+        """Load and parse input data"""
+        # Load projects
+        raw_projects = data.get("projects", [])
+        self.projects = []
+        for p in raw_projects:
+            if isinstance(p, dict):
+                self.projects.append(Project(
+                    id=p.get("id", 0),
+                    name=p.get("name", f"Project_{p.get('id', 0)}"),
+                    type=p.get("type", "INTERIM"),
+                    responsible_id=p.get("responsible_instructor_id") or p.get("advisor_id") or 0
+                ))
+            elif hasattr(p, 'id'):
+                self.projects.append(Project(
+                    id=p.id,
+                    name=getattr(p, 'name', f"Project_{p.id}"),
+                    type=getattr(p, 'type', "INTERIM"),
+                    responsible_id=getattr(p, 'responsible_instructor_id', None) or 
+                                   getattr(p, 'advisor_id', 0)
+                ))
+        
+        # Load instructors
+        raw_instructors = data.get("instructors", [])
+        self.instructors = []
+        for i in raw_instructors:
+            if isinstance(i, dict):
+                self.instructors.append(Instructor(
+                    id=i.get("id", 0),
+                    name=i.get("name", i.get("full_name", f"Instructor_{i.get('id', 0)}")),
+                    type=i.get("type", "instructor")
+                ))
+            elif hasattr(i, 'id'):
+                self.instructors.append(Instructor(
+                    id=i.id,
+                    name=getattr(i, 'full_name', getattr(i, 'name', f"Instructor_{i.id}")),
+                    type=getattr(i, 'type', "instructor")
+                ))
+        
+        # Load classrooms and timeslots
+        self.classrooms = data.get("classrooms", [])
+        self.timeslots = data.get("timeslots", [])
+    
+    def build_initial_solution(self) -> SAState:
+        """Build initial solution"""
+        # CRITICAL: Ensure state uses correct class_count
+        state = self.solution_builder.build_initial_solution()
+        # Ensure state.class_count matches config.class_count
+        state.class_count = self.config.class_count
+        logger.info(f"SimulatedAnnealingScheduler.build_initial_solution: Using {state.class_count} classes")
+        
+        self.repair_mechanism.repair(state)
+        self._force_all_classes_used(state)  # CRITICAL: Ensure all classes used
+        
+        # ABSOLUTE FINAL CHECK: Verify all classes are used
+        class_counts = defaultdict(int)
+        for a in state.assignments:
+            class_counts[a.class_id] += 1
+        
+        used_count = len([c for c in range(state.class_count) if class_counts.get(c, 0) > 0])
+        if used_count < state.class_count:
+            logger.warning(f"CRITICAL: build_initial_solution - Only {used_count}/{state.class_count} classes used, forcing round-robin")
+            # Force round-robin
+            for i, assignment in enumerate(state.assignments):
+                target_class = i % state.class_count
+                assignment.class_id = target_class
+                assignment.order_in_class = i // state.class_count
+            
+            # Reorder
+            for class_id in range(state.class_count):
+                class_assignments = [
+                    a for a in state.assignments if a.class_id == class_id
+                ]
+                class_assignments.sort(key=lambda x: x.order_in_class)
+                for i, a in enumerate(class_assignments):
+                    a.order_in_class = i
+        
+        state.cost = self.compute_cost(state)
+        return state
+    
+    def compute_cost(self, state: SAState) -> float:
+        """Compute total cost of a state"""
+        return self.penalty_calculator.calculate_total_cost(state)
+    
+    def generate_neighbor(self, state: SAState) -> SAState:
+        """
+        Generate neighbour and repair.
+        
+        CRITICAL: After repair, verify all classes are used.
+        """
+        neighbour = self.neighbour_generator.generate_neighbour(state)
+        self.repair_mechanism.repair(neighbour)
+        
+        # CRITICAL: Verify all classes are used after repair
+        self._force_all_classes_used(neighbour)
+        
+        neighbour.cost = self.compute_cost(neighbour)
+        return neighbour
+    
+    def _force_all_classes_used(self, state: SAState) -> None:
+        """
+        ABSOLUTE MANDATORY: Force all classes to be used.
+        
+        This is called after every repair to ensure no class is left unused.
+        CRITICAL: ALL classes from 0 to class_count-1 MUST have at least one assignment.
+        """
+        # CRITICAL: Ensure state.class_count matches config.class_count
+        state.class_count = self.config.class_count
+        
+        max_iterations = 1000  # Increased iterations for aggressive enforcement
+        
+        for iteration in range(max_iterations):
+            class_counts = defaultdict(int)
+            for a in state.assignments:
+                class_counts[a.class_id] += 1
+            
+            unused_classes = [
+                c for c in range(state.class_count)
+                if class_counts.get(c, 0) == 0
+            ]
+            
+            if not unused_classes:
+                # Verify all classes are really used
+                used_count = len([c for c in range(state.class_count) if class_counts.get(c, 0) > 0])
+                if used_count == state.class_count:
+                    # All classes used - reorder and return
+                    for class_id in range(state.class_count):
+                        class_assignments = [
+                            a for a in state.assignments if a.class_id == class_id
+                        ]
+                        class_assignments.sort(key=lambda x: x.order_in_class)
+                        for i, a in enumerate(class_assignments):
+                            a.order_in_class = i
+                    return
+            
+            # CRITICAL: Force fill unused classes - AGGRESSIVE APPROACH
+            assignments_by_class = defaultdict(list)
+            for a in state.assignments:
+                assignments_by_class[a.class_id].append(a)
+            
+            # Sort by load (most loaded first)
+            sorted_classes = sorted(
+                assignments_by_class.keys(),
+                key=lambda c: len(assignments_by_class[c]),
+                reverse=True
+            )
+            
+            for unused_class in unused_classes:
+                moved = False
+                
+                # Try to move from most loaded classes first
+                for max_class in sorted_classes:
+                    if max_class == unused_class:
+                        continue
+                    
+                    assignments_in_max = assignments_by_class[max_class]
+                    if len(assignments_in_max) > 0:
+                        # Move last assignment (least priority)
+                        assignment = assignments_in_max[-1]
+                        assignment.class_id = unused_class
+                        assignment.order_in_class = 0
+                        assignments_by_class[max_class].remove(assignment)
+                        assignments_by_class[unused_class].append(assignment)
+                        moved = True
+                        break
+                
+                if not moved:
+                    # Last resort: move ANY assignment from ANY class
+                    if state.assignments:
+                        # Find any assignment from a used class
+                        for assignment in state.assignments:
+                            if assignment.class_id != unused_class:
+                                old_class = assignment.class_id
+                                assignment.class_id = unused_class
+                                assignment.order_in_class = 0
+                                # Update tracking
+                                if old_class in assignments_by_class:
+                                    if assignment in assignments_by_class[old_class]:
+                                        assignments_by_class[old_class].remove(assignment)
+                                assignments_by_class[unused_class].append(assignment)
+                                moved = True
+                                break
+                
+                if not moved and state.assignments:
+                    # Absolute last resort: force first assignment
+                    state.assignments[0].class_id = unused_class
+                    state.assignments[0].order_in_class = 0
+            
+            # Reorder all classes after moves
+            for class_id in range(state.class_count):
+                class_assignments = [
+                    a for a in state.assignments if a.class_id == class_id
+                ]
+                class_assignments.sort(key=lambda x: x.order_in_class)
+                for i, a in enumerate(class_assignments):
+                    a.order_in_class = i
+        
+        # Final verification - if still not all classes used, force round-robin
+        class_counts = defaultdict(int)
+        for a in state.assignments:
+            class_counts[a.class_id] += 1
+        
+        unused_classes = [
+            c for c in range(state.class_count)
+            if class_counts.get(c, 0) == 0
+        ]
+        
+        if unused_classes:
+            # CRITICAL: Force round-robin distribution
+            for i, assignment in enumerate(state.assignments):
+                target_class = i % state.class_count
+                assignment.class_id = target_class
+                assignment.order_in_class = i // state.class_count
+            
+            # Final reorder
+            for class_id in range(state.class_count):
+                class_assignments = [
+                    a for a in state.assignments if a.class_id == class_id
+                ]
+                class_assignments.sort(key=lambda x: x.order_in_class)
+                for i, a in enumerate(class_assignments):
+                    a.order_in_class = i
+    
+    def acceptance_probability(self, current_cost: float, new_cost: float, temperature: float, state: SAState = None) -> float:
+        """
+        Calculate acceptance probability.
+        
+        CRITICAL: If state has unused classes, NEVER accept it (HARD CONSTRAINT).
+        """
+        # HARD CONSTRAINT: If state has unused classes, reject immediately
+        if state and self.penalty_calculator:
+            if self.penalty_calculator.has_unused_classes(state):
+                return 0.0  # NEVER accept solutions with unused classes
+        
+        if new_cost < current_cost:
+            return 1.0
+        
+        if temperature <= 0:
+            return 0.0
+        
+        delta = new_cost - current_cost
+        return math.exp(-delta / temperature)
+    
+    def get_temperature(self, iteration: int, initial_temp: float, current_temp: float) -> float:
+        """Get temperature based on cooling schedule"""
+        schedule = self.config.cooling_schedule
+        
+        if schedule == CoolingSchedule.GEOMETRIC:
+            return current_temp * self.config.cooling_rate
+        
+        elif schedule == CoolingSchedule.LINEAR:
+            delta = (initial_temp - self.config.final_temperature) / self.config.max_iterations
+            return max(self.config.final_temperature, current_temp - delta)
+        
+        elif schedule == CoolingSchedule.EXPONENTIAL:
+            alpha = -math.log(self.config.final_temperature / initial_temp) / self.config.max_iterations
+            return initial_temp * math.exp(-alpha * iteration)
+        
+        elif schedule == CoolingSchedule.ADAPTIVE:
+            # Adaptive based on acceptance rate
+            acceptance_rate = self.accepted_moves / max(1, self.accepted_moves + self.rejected_moves)
+            if acceptance_rate > 0.5:
+                # Too many accepts - cool faster
+                return current_temp * 0.99
+            elif acceptance_rate < 0.2:
+                # Too few accepts - cool slower
+                return current_temp * 0.999
+            else:
+                return current_temp * self.config.cooling_rate
+        
+        elif schedule == CoolingSchedule.REHEATING:
+            # Standard geometric with periodic reheating
+            return current_temp * self.config.cooling_rate
+        
+        return current_temp * self.config.cooling_rate
+    
+    def should_reheat(self, no_improve_count: int) -> bool:
+        """Check if reheating is needed"""
+        return (
+            self.config.cooling_schedule == CoolingSchedule.REHEATING and
+            no_improve_count >= self.config.reheat_threshold
+        )
+    
+    def reheat(self, current_temp: float) -> float:
+        """Perform reheating"""
+        new_temp = current_temp * self.config.reheat_factor
+        return min(new_temp, self.config.initial_temperature)
+    
+    def _add_to_memory(self, state: SAState, cost: float) -> None:
+        """Add state to memory pool"""
+        if not self.config.use_memory:
+            return
+        
+        # HARD CONSTRAINT: Never add states with unused classes to memory
+        if self.penalty_calculator and self.penalty_calculator.has_unused_classes(state):
+            logger.warning("Attempted to add state with unused classes to memory - rejected")
+            return
+        
+        # Check if similar state exists
+        for mem_state, mem_cost in self.memory_pool:
+            if self._states_similar(state, mem_state):
+                if cost < mem_cost:
+                    self.memory_pool.remove((mem_state, mem_cost))
+                    self.memory_pool.append((state.copy(), cost))
+                    self.memory_pool.sort(key=lambda x: x[1])
+                return
+        
+        # Add new state
+        self.memory_pool.append((state.copy(), cost))
+        self.memory_pool.sort(key=lambda x: x[1])
+        
+        # Keep only best states
+        if len(self.memory_pool) > self.config.memory_size:
+            self.memory_pool = self.memory_pool[:self.config.memory_size]
+    
+    def _states_similar(self, s1: SAState, s2: SAState) -> bool:
+        """Check if two states are similar"""
+        if len(s1.assignments) != len(s2.assignments):
+            return False
+        
+        # Compare assignments
+        a1_dict = {a.project_id: (a.class_id, a.j1_id) for a in s1.assignments}
+        a2_dict = {a.project_id: (a.class_id, a.j1_id) for a in s2.assignments}
+        
+        return a1_dict == a2_dict
+    
+    def _get_restart_state(self) -> SAState:
+        """
+        Get state for restart - USES MEMORY INTELLIGENTLY.
+        
+        Strategy:
+        1. If memory has solutions, use best with smart mutations
+        2. Mix best memory solutions to create new starting point
+        3. If no memory, create new solution
+        """
+        if self.config.use_memory and self.memory_pool:
+            # Strategy selection
+            strategy = random.choice(['best_mutate', 'crossover', 'diverse'])
+            
+            if strategy == 'best_mutate':
+                # Use best from memory with mutations
+                best_mem, _ = self.memory_pool[0]
+                state = best_mem.copy()
+                
+                # Apply random mutations (more aggressive)
+                num_mutations = random.randint(3, 10)
+                for _ in range(num_mutations):
+                    state = self.neighbour_generator.generate_neighbour(state)
+                
+            elif strategy == 'crossover' and len(self.memory_pool) >= 2:
+                # Crossover two memory solutions
+                state1, _ = self.memory_pool[0]
+                state2_idx = random.randint(1, min(3, len(self.memory_pool) - 1))
+                state2, _ = self.memory_pool[state2_idx]
+                
+                state = self._crossover_states(state1, state2)
+                
+            else:
+                # Pick diverse solution from memory
+                idx = random.randint(0, min(len(self.memory_pool) - 1, 4))
+                mem_state, _ = self.memory_pool[idx]
+                state = mem_state.copy()
+                
+                # Heavy mutation for diversity
+                for _ in range(random.randint(5, 15)):
+                    state = self.neighbour_generator.generate_neighbour(state)
+            
+            self.repair_mechanism.repair(state)
+            self._force_all_classes_used(state)
+            state.cost = self.compute_cost(state)
+            return state
+        else:
+            return self.build_initial_solution()
+    
+    def _crossover_states(self, state1: SAState, state2: SAState) -> SAState:
+        """Crossover two states to create a new one"""
+        new_state = SAState(class_count=state1.class_count)
+        
+        # Build lookup for state2
+        state2_lookup = {a.project_id: a for a in state2.assignments}
+        
+        for a1 in state1.assignments:
+            a2 = state2_lookup.get(a1.project_id)
+            
+            # Randomly pick from either parent
+            if a2 and random.random() < 0.5:
+                new_assignment = ProjectAssignment(
+                    project_id=a1.project_id,
+                    class_id=a2.class_id,
+                    order_in_class=a2.order_in_class,
+                    ps_id=a1.ps_id,  # PS is always fixed
+                    j1_id=a2.j1_id,
+                    j2_id=-1
+                )
+            else:
+                new_assignment = ProjectAssignment(
+                    project_id=a1.project_id,
+                    class_id=a1.class_id,
+                    order_in_class=a1.order_in_class,
+                    ps_id=a1.ps_id,
+                    j1_id=a1.j1_id,
+                    j2_id=-1
+                )
+            
+            new_state.assignments.append(new_assignment)
+        
+        return new_state
+    
+    def _build_initial_from_memory(self) -> SAState:
+        """Build initial solution using memory if available"""
+        if self.config.use_memory and self.memory_pool:
+            # 30% from memory, 70% new (first run)
+            if random.random() < 0.3:
+                return self._get_restart_state()
+        
+        return self.build_initial_solution()
+    
+    def anneal(self) -> SAState:
+        """
+        Run single SA annealing process - MEMORY ENHANCED.
+        
+        Uses memory to:
+        1. Seed initial solution
+        2. Guide search during stagnation
+        3. Store and reuse best solutions
+        """
+        # Initialize - use memory if available
+        if self.memory_pool and self.config.use_memory:
+            self.current_state = self._build_initial_from_memory()
+        else:
+            self.current_state = self.build_initial_solution()
+        
+        self.best_state = self.current_state.copy()
+        self.best_cost = self.current_state.cost
+        
+        # Check if memory has better solution
+        if self.global_best_state and self.global_best_cost < self.best_cost:
+            # Start from global best with mutations
+            self.current_state = self.global_best_state.copy()
+            for _ in range(3):
+                self.current_state = self.neighbour_generator.generate_neighbour(self.current_state)
+            self.repair_mechanism.repair(self.current_state)
+            self._force_all_classes_used(self.current_state)  # CRITICAL
+            self.current_state.cost = self.compute_cost(self.current_state)
+            
+            if self.current_state.cost < self.best_cost:
+                self.best_state = self.current_state.copy()
+                self.best_cost = self.current_state.cost
+        
+        temperature = self.config.initial_temperature
+        no_improve_count = 0
+        total_iterations = 0
+        
+        logger.info(f"SA Start: Initial cost = {self.best_cost:.2f}, T = {temperature:.2f}, "
+                   f"Global best = {self.global_best_cost:.2f}")
+        
+        for iteration in range(self.config.max_iterations):
+            self.iterations = iteration
+            total_iterations += 1
+            
+            # Generate neighbour
+            neighbour = self.generate_neighbor(self.current_state)
+            
+            # Acceptance decision
+            # CRITICAL: Pass state to check for unused classes (HARD CONSTRAINT)
+            prob = self.acceptance_probability(
+                self.current_state.cost, 
+                neighbour.cost, 
+                temperature,
+                neighbour  # Pass state to check unused classes
+            )
+            
+            if random.random() < prob:
+                # Accept
+                self.current_state = neighbour
+                self.accepted_moves += 1
+                
+                # CRITICAL: Verify all classes used after acceptance
+                self._force_all_classes_used(self.current_state)
+                
+                # HARD CONSTRAINT CHECK: Never accept as best if unused classes exist
+                if self.penalty_calculator and self.penalty_calculator.has_unused_classes(self.current_state):
+                    # Force fix unused classes before accepting as best
+                    logger.warning(f"Iteration {iteration}: Unused classes detected, forcing fix before accepting")
+                    self._force_all_classes_used(self.current_state)
+                    self.current_state.cost = self.compute_cost(self.current_state)
+                
+                # Update best - ONLY if no unused classes
+                if (neighbour.cost < self.best_cost and 
+                    (not self.penalty_calculator or not self.penalty_calculator.has_unused_classes(neighbour))):
+                    self.best_state = neighbour.copy()
+                    self.best_cost = neighbour.cost
+                    no_improve_count = 0
+                    
+                    # Update global best - ONLY if no unused classes (HARD CONSTRAINT)
+                    if (self.best_cost < self.global_best_cost and
+                        (not self.penalty_calculator or not self.penalty_calculator.has_unused_classes(self.best_state))):
+                        self.global_best_state = self.best_state.copy()
+                        self.global_best_cost = self.best_cost
+                        logger.info(f"Iteration {iteration}: NEW GLOBAL BEST = {self.best_cost:.2f}")
+                    
+                    # Add to memory - ONLY if no unused classes
+                    if (not self.penalty_calculator or not self.penalty_calculator.has_unused_classes(self.best_state)):
+                        self._add_to_memory(self.best_state, self.best_cost)
+                    
+                    logger.info(f"Iteration {iteration}: New best cost = {self.best_cost:.2f}")
+                else:
+                    no_improve_count += 1
+            else:
+                self.rejected_moves += 1
+                no_improve_count += 1
+            
+            # Update temperature
+            if iteration % self.config.iterations_per_temperature == 0:
+                temperature = self.get_temperature(
+                    iteration, 
+                    self.config.initial_temperature, 
+                    temperature
+                )
+            
+            # Memory-guided restart on stagnation
+            if no_improve_count >= self.config.stagnation_threshold and self.memory_pool:
+                # Use memory to escape local minimum
+                restart_state = self._get_restart_state()
+                if restart_state.cost < self.current_state.cost * 1.1:  # Accept if not too bad
+                    self.current_state = restart_state
+                    no_improve_count = 0
+                    logger.info(f"Memory-guided restart at iteration {iteration}")
+            
+            # Reheating check
+            if self.should_reheat(no_improve_count):
+                temperature = self.reheat(temperature)
+                no_improve_count = 0
+                logger.info(f"Reheating to T = {temperature:.2f}")
+            
+            # Termination checks
+            if temperature < self.config.final_temperature:
+                break
+            
+            if no_improve_count >= self.config.max_no_improve:
                 break
         
+        # Final: use global best if better - BUT check for unused classes (HARD CONSTRAINT)
+        if self.global_best_state and self.global_best_cost < self.best_cost:
+            # HARD CONSTRAINT: Never use global best if it has unused classes
+            if (not self.penalty_calculator or 
+                not self.penalty_calculator.has_unused_classes(self.global_best_state)):
+                self.best_state = self.global_best_state.copy()
+                self.best_cost = self.global_best_cost
+            else:
+                logger.warning("Global best has unused classes, forcing fix before using")
+                self._force_all_classes_used(self.global_best_state)
+                self.global_best_state.cost = self.compute_cost(self.global_best_state)
+                if self.global_best_state.cost < self.best_cost:
+                    self.best_state = self.global_best_state.copy()
+                    self.best_cost = self.global_best_state.cost
+        
+        return self.best_state
+    
+    def run(self) -> Dict[str, Any]:
+        """Run SA with restarts"""
+        start_time = time.time()
+        
+        best_overall_state = None
+        best_overall_cost = float('inf')
+        
+        for restart in range(self.config.num_restarts + 1):
+            self.restarts = restart
+            
+            # Reset statistics
+            self.accepted_moves = 0
+            self.rejected_moves = 0
+            
+            # Run annealing
+            if restart == 0:
+                result = self.anneal()
+            else:
+                # Restart from memory or new
+                self.current_state = self._get_restart_state()
+                result = self.anneal()
+            
+            # Update best
+            if result.cost < best_overall_cost:
+                best_overall_state = result.copy()
+                best_overall_cost = result.cost
+            
+            logger.info(f"Restart {restart}: Best cost = {result.cost:.2f}")
+        
+        # Use global best if better - BUT check for unused classes first (HARD CONSTRAINT)
+        if self.global_best_state and self.global_best_cost < best_overall_cost:
+            # HARD CONSTRAINT: Never use global best if it has unused classes
+            if (not self.penalty_calculator or 
+                not self.penalty_calculator.has_unused_classes(self.global_best_state)):
+                best_overall_state = self.global_best_state.copy()
+                best_overall_cost = self.global_best_cost
+            else:
+                logger.warning("Global best has unused classes, forcing fix before using")
+                self._force_all_classes_used(self.global_best_state)
+                self.global_best_state.cost = self.compute_cost(self.global_best_state)
+                if self.global_best_state.cost < best_overall_cost:
+                    best_overall_state = self.global_best_state.copy()
+                    best_overall_cost = self.global_best_state.cost
+        
+        # CRITICAL: Final verification - ensure all classes are used
+        # Multiple passes to ensure absolute compliance
+        for _ in range(3):  # Try 3 times to ensure all classes used
+            self._force_all_classes_used(best_overall_state)
+            self.repair_mechanism.repair(best_overall_state)
+            
+            # Verify all classes are used
+            class_counts = defaultdict(int)
+            for a in best_overall_state.assignments:
+                class_counts[a.class_id] += 1
+            
+            used_count = len([c for c in range(best_overall_state.class_count) if class_counts.get(c, 0) > 0])
+            if used_count == best_overall_state.class_count:
+                break  # All classes used, exit loop
+        
+        best_overall_state.cost = self.compute_cost(best_overall_state)
+        
+        end_time = time.time()
+        
+        # CRITICAL: Ensure best_overall_state.class_count matches config.class_count
+        best_overall_state.class_count = self.config.class_count
+        logger.info(f"Final state class_count: {best_overall_state.class_count}, config class_count: {self.config.class_count}")
+        
+        # Convert to schedule
+        schedule = self._convert_to_schedule(best_overall_state)
+        
+        # FINAL CHECK: Verify all classes in schedule - ABSOLUTE MANDATORY
+        classes_in_schedule = set()
+        for item in schedule:
+            classes_in_schedule.add(item.get('class_id'))
+        
+        if len(classes_in_schedule) < self.config.class_count:
+            logger.warning(f"WARNING: Only {len(classes_in_schedule)} classes used, expected {self.config.class_count}")
+            logger.warning(f"Missing classes: {[c for c in range(self.config.class_count) if c not in classes_in_schedule]}")
+            
+            # AGGRESSIVE: Force redistribution with round-robin
+            # Redistribute all assignments evenly across all classes
+            all_assignments = list(best_overall_state.assignments)
+            for i, assignment in enumerate(all_assignments):
+                target_class = i % self.config.class_count
+                assignment.class_id = target_class
+                assignment.order_in_class = i // self.config.class_count
+            
+            # Reorder all classes
+            for class_id in range(self.config.class_count):
+                class_assignments = [
+                    a for a in best_overall_state.assignments if a.class_id == class_id
+                ]
+                class_assignments.sort(key=lambda x: x.order_in_class)
+                for i, a in enumerate(class_assignments):
+                    a.order_in_class = i
+            
+            # Recompute cost
+            best_overall_state.cost = self.compute_cost(best_overall_state)
+            
+            # Convert again
+            schedule = self._convert_to_schedule(best_overall_state)
+            
+            # Final verification
+            classes_in_schedule = set()
+            for item in schedule:
+                classes_in_schedule.add(item.get('class_id'))
+            
+            if len(classes_in_schedule) < self.config.class_count:
+                logger.error(f"CRITICAL ERROR: Still only {len(classes_in_schedule)} classes used after forced redistribution!")
+            else:
+                logger.info(f"SUCCESS: All {self.config.class_count} classes are now used after forced redistribution")
+        
+        # Calculate penalty breakdown
+        penalty_breakdown = {
+            'h1_time_penalty': self.penalty_calculator.calculate_h1_time_penalty(best_overall_state),
+            'h2_workload_penalty': self.penalty_calculator.calculate_h2_workload_penalty(best_overall_state),
+            'h3_class_change_penalty': self.penalty_calculator.calculate_h3_class_change_penalty(best_overall_state),
+            'h4_class_load_penalty': self.penalty_calculator.calculate_h4_class_load_penalty(best_overall_state),
+            'continuity_penalty': self.penalty_calculator.calculate_continuity_penalty(best_overall_state),
+            'timeslot_conflict_penalty': self.penalty_calculator.calculate_timeslot_conflict_penalty(best_overall_state),
+            'unused_class_penalty': self.penalty_calculator.calculate_unused_class_penalty(best_overall_state)
+        }
+        
         return {
-            'success': True,
-            'assignments': assignments,
-            'changes_made': changes_made
+            "schedule": schedule,
+            "assignments": schedule,
+            "solution": schedule,
+            "fitness": -best_overall_cost,
+            "cost": best_overall_cost,
+            "iterations": self.iterations,
+            "restarts": self.restarts,
+            "execution_time": end_time - start_time,
+            "class_count": best_overall_state.class_count,
+            "penalty_breakdown": penalty_breakdown,
+            "status": "completed"
         }
     
-    def _reschedule_duplicate_assignment(self, conflict: Dict[str, Any], 
-                                       assignments: List[Dict[str, Any]], 
-                                       aggressiveness: float = 1.0) -> Dict[str, Any]:
-        """Çoğaltılmış atamayı yeniden zamanla"""
-        return self._reschedule_one_assignment(conflict, assignments, aggressiveness)
-    
-    def _replace_jury_member(self, conflict: Dict[str, Any], 
-                           assignments: List[Dict[str, Any]], 
-                           aggressiveness: float = 1.0) -> Dict[str, Any]:
-        """Jüri üyesini değiştir - Temperature-based replacement"""
-        changes_made = []
+    def _convert_to_schedule(self, state: SAState) -> List[Dict[str, Any]]:
+        """
+        Convert SA state to schedule format.
         
-        conflicting_assignments = conflict.get('conflicting_assignments', [])
-        instructor_id = conflict.get('instructor_id')
-        timeslot_id = conflict.get('timeslot_id')
+        CRITICAL: Before conversion, ensure ALL classes are used (HARD CONSTRAINT).
+        """
+        # CRITICAL: Before converting, verify and fix unused classes
+        class_counts = defaultdict(int)
+        for a in state.assignments:
+            class_counts[a.class_id] += 1
         
-        # Bu zaman diliminde meşgul olmayan instructor bul
-        busy_instructors = set()
-        for assignment in assignments:
-            if assignment.get('timeslot_id') == timeslot_id:
-                busy_instructors.add(assignment.get('responsible_instructor_id'))
-                busy_instructors.update(assignment.get('instructors', []))
+        used_count = len([c for c in range(state.class_count) if class_counts.get(c, 0) > 0])
+        if used_count < state.class_count:
+            logger.warning(f"CRITICAL: _convert_to_schedule - Only {used_count}/{state.class_count} classes used, forcing round-robin")
+            # Force round-robin distribution
+            for i, assignment in enumerate(state.assignments):
+                target_class = i % state.class_count
+                assignment.class_id = target_class
+                assignment.order_in_class = i // state.class_count
+            
+            # Reorder all classes
+            for class_id in range(state.class_count):
+                class_assignments = [
+                    a for a in state.assignments if a.class_id == class_id
+                ]
+                class_assignments.sort(key=lambda x: x.order_in_class)
+                for i, a in enumerate(class_assignments):
+                    a.order_in_class = i
         
-        available_instructors = []
-        for instructor in self.instructors:
-            if instructor.get('id') not in busy_instructors:
-                available_instructors.append(instructor)
+        schedule = []
         
-        if not available_instructors:
-            return {'success': False, 'error': 'No available instructors for replacement'}
+        # Get classroom and timeslot info
+        classroom_map = {i: c.get("name", f"D{105+i}") for i, c in enumerate(self.classrooms)} if self.classrooms else {}
+        timeslot_map = {i: t for i, t in enumerate(self.timeslots)} if self.timeslots else {}
         
-        # Temperature-based instructor selection
-        if aggressiveness > 0.5:
-            # High temperature: Random selection
-            replacement_instructor = random.choice(available_instructors)['id']
-        else:
-            # Low temperature: Select instructor with lowest load
-            available_instructors.sort(key=lambda inst: inst.get('total_load', 0))
-            replacement_instructor = available_instructors[0]['id']
-        
-        # Jüri üyesini değiştir
-        for assignment in assignments:
-            if assignment.get('timeslot_id') == timeslot_id:
-                instructors_list = assignment.get('instructors', [])
-                if instructor_id in instructors_list:
-                    instructors_list.remove(instructor_id)
-                    instructors_list.append(replacement_instructor)
-                    assignment['instructors'] = instructors_list
-                    
-                    changes_made.append({
-                        'assignment_id': assignment.get('project_id'),
-                        'old_jury': instructor_id,
-                        'new_jury': replacement_instructor,
-                        'action': 'jury_replaced',
-                        'temperature': self.temperature
-                    })
+        for assignment in state.assignments:
+            # Get project info
+            project = self.projects[assignment.project_id] if assignment.project_id < len(self.projects) else None
+            project_info = None
+            for p in self.projects:
+                if p.id == assignment.project_id:
+                    project_info = p
                     break
-        
-        return {
-            'success': True,
-            'assignments': assignments,
-            'changes_made': changes_made
-        }
-    
-    def _relocate_to_available_classroom(self, conflict: Dict[str, Any], 
-                                       assignments: List[Dict[str, Any]], 
-                                       aggressiveness: float = 1.0) -> Dict[str, Any]:
-        """Boş sınıfa taşı - Temperature-based relocation"""
-        changes_made = []
-        
-        conflicting_assignments = conflict.get('conflicting_assignments', [])
-        classroom_id = conflict.get('classroom_id')
-        timeslot_id = conflict.get('timeslot_id')
-        
-        # Bu zaman diliminde meşgul olmayan sınıf bul
-        busy_classrooms = set()
-        for assignment in assignments:
-            if assignment.get('timeslot_id') == timeslot_id:
-                busy_classrooms.add(assignment.get('classroom_id'))
-        
-        available_classrooms = []
-        for classroom in self.classrooms:
-            if classroom.get('id') not in busy_classrooms:
-                available_classrooms.append(classroom)
-        
-        if not available_classrooms:
-            return {'success': False, 'error': 'No available classrooms for relocation'}
-        
-        # Temperature-based classroom selection
-        if aggressiveness > 0.5:
-            # High temperature: Random selection
-            new_classroom = random.choice(available_classrooms)
-        else:
-            # Low temperature: Prefer larger capacity classrooms
-            available_classrooms.sort(key=lambda c: c.get('capacity', 0), reverse=True)
-            new_classroom = available_classrooms[0]
-        
-        new_classroom_id = new_classroom['id']
-        
-        # Sınıfı değiştir
-        for assignment in assignments:
-            if (assignment.get('classroom_id') == classroom_id and 
-                assignment.get('timeslot_id') == timeslot_id):
-                assignment['classroom_id'] = new_classroom_id
-                
-                changes_made.append({
-                    'assignment_id': assignment.get('project_id'),
-                    'old_classroom': classroom_id,
-                    'new_classroom': new_classroom_id,
-                    'action': 'relocated',
-                    'temperature': self.temperature
-                })
-                break
-        
-        return {
-            'success': True,
-            'assignments': assignments,
-            'changes_made': changes_made
-        }
-    
-    def _redistribute_to_other_timeslots(self, conflict: Dict[str, Any], 
-                                       assignments: List[Dict[str, Any]], 
-                                       aggressiveness: float = 1.0) -> Dict[str, Any]:
-        """Diğer zaman dilimlerine yeniden dağıt - Temperature-based redistribution"""
-        changes_made = []
-        
-        timeslot_id = conflict.get('timeslot_id')
-        overflow = conflict.get('overflow', 0)
-        
-        if not self.timeslots or overflow <= 0:
-            return {'success': False, 'error': 'Invalid overflow or no timeslots available'}
-        
-        # Bu zaman dilimindeki fazla atamaları bul
-        timeslot_assignments = [a for a in assignments if a.get('timeslot_id') == timeslot_id]
-        
-        if len(timeslot_assignments) <= overflow:
-            return {'success': False, 'error': 'Not enough assignments to redistribute'}
-        
-        # Boş zaman dilimleri bul
-        used_timeslots = defaultdict(int)
-        for assignment in assignments:
-            used_timeslots[assignment.get('timeslot_id')] += 1
-        
-        available_timeslots = []
-        for ts in self.timeslots:
-            if ts.get('id') != timeslot_id and used_timeslots.get(ts.get('id'), 0) < ts.get('capacity', 10):
-                available_timeslots.append(ts)
-        
-        if not available_timeslots:
-            return {'success': False, 'error': 'No available timeslots for redistribution'}
-        
-        # Temperature-based redistribution strategy
-        if aggressiveness > 0.5:
-            # High temperature: Random redistribution
-            assignments_to_move = random.sample(timeslot_assignments, min(overflow, len(timeslot_assignments)))
-        else:
-            # Low temperature: Move latest assignments to earlier slots
-            timeslot_assignments.sort(key=lambda a: a.get('timeslot_id', 0), reverse=True)
-            assignments_to_move = timeslot_assignments[:overflow]
-        
-        # Fazla atamaları yeniden dağıt
-        for i, assignment in enumerate(assignments_to_move):
-            if aggressiveness > 0.5:
-                # High temperature: Random target timeslot
-                target_timeslot = random.choice(available_timeslots)
-            else:
-                # Low temperature: Prefer earlier timeslots
-                available_timeslots.sort(key=lambda ts: ts.get('id', 0))
-                target_timeslot = available_timeslots[i % len(available_timeslots)]
             
-            old_timeslot_id = assignment.get('timeslot_id')
-            assignment['timeslot_id'] = target_timeslot.get('id')
+            # Get instructor info
+            ps_info = self.instructors.get(assignment.ps_id)
+            j1_info = self.instructors.get(assignment.j1_id)
             
-            changes_made.append({
-                'assignment_id': assignment.get('project_id'),
-                'old_timeslot': old_timeslot_id,
-                'new_timeslot': target_timeslot.get('id'),
-                'action': 'redistributed',
-                'temperature': self.temperature
+            # Build instructor list with placeholder RA
+            instructors = [
+                {
+                    "id": assignment.ps_id,
+                    "name": ps_info.name if ps_info else f"Instructor_{assignment.ps_id}",
+                    "full_name": ps_info.name if ps_info else f"Instructor_{assignment.ps_id}",
+                    "role": "Proje Sorumlusu"
+                },
+                {
+                    "id": assignment.j1_id,
+                    "name": j1_info.name if j1_info else f"Instructor_{assignment.j1_id}",
+                    "full_name": j1_info.name if j1_info else f"Instructor_{assignment.j1_id}",
+                    "role": "1. Juri"
+                },
+                "[Arastirma Gorevlisi]"  # Placeholder J2
+            ]
+            
+            # Get classroom info
+            class_id = assignment.class_id
+            classroom = None
+            if class_id < len(self.classrooms):
+                classroom = self.classrooms[class_id]
+            
+            # Get timeslot info
+            order = assignment.order_in_class
+            timeslot = None
+            if order < len(self.timeslots):
+                timeslot = self.timeslots[order]
+            
+            schedule.append({
+                "project_id": assignment.project_id,
+                "project_name": project_info.name if project_info else f"Project_{assignment.project_id}",
+                "project_type": project_info.type if project_info else "INTERIM",
+                "class_id": class_id,
+                "classroom_id": classroom.get("id") if classroom else class_id,
+                "classroom_name": classroom.get("name", f"D{105+class_id}") if classroom else f"D{105+class_id}",
+                "order_in_class": order,
+                "timeslot_id": timeslot.get("id") if timeslot else order,
+                "timeslot": timeslot if timeslot else {"id": order, "start_time": f"{9+order*0.5:.1f}"},
+                "instructors": instructors,
+                "ps_id": assignment.ps_id,
+                "j1_id": assignment.j1_id,
+                "j2_placeholder": "[Arastirma Gorevlisi]"
             })
         
-        return {
-            'success': True,
-            'assignments': assignments,
-            'changes_made': changes_made
-        }
+        # Sort by class and order
+        schedule.sort(key=lambda x: (x['class_id'], x['order_in_class']))
+        
+        # FINAL VERIFICATION: Ensure all classes are represented in schedule (HARD CONSTRAINT)
+        classes_in_schedule = set()
+        for item in schedule:
+            classes_in_schedule.add(item.get('class_id'))
+        
+        if len(classes_in_schedule) < state.class_count:
+            logger.error(f"CRITICAL ERROR in _convert_to_schedule: Only {len(classes_in_schedule)}/{state.class_count} classes in schedule!")
+            logger.error(f"Missing classes: {[c for c in range(state.class_count) if c not in classes_in_schedule]}")
+            # This should never happen if we fixed it above, but force it anyway
+            # Force round-robin one more time
+            for i, assignment in enumerate(state.assignments):
+                target_class = i % state.class_count
+                assignment.class_id = target_class
+                assignment.order_in_class = i // state.class_count
+            
+            # Reorder and rebuild schedule
+            for class_id in range(state.class_count):
+                class_assignments = [
+                    a for a in state.assignments if a.class_id == class_id
+                ]
+                class_assignments.sort(key=lambda x: x.order_in_class)
+                for i, a in enumerate(class_assignments):
+                    a.order_in_class = i
+            
+            # Rebuild schedule
+            schedule = []
+            for assignment in state.assignments:
+                class_id = assignment.class_id
+                classroom = None
+                if class_id < len(self.classrooms):
+                    classroom = self.classrooms[class_id]
+                
+                order = assignment.order_in_class
+                timeslot = None
+                if order < len(self.timeslots):
+                    timeslot = self.timeslots[order]
+                
+                project_info = None
+                for p in self.projects:
+                    if p.id == assignment.project_id:
+                        project_info = p
+                        break
+                
+                ps_info = self.instructors.get(assignment.ps_id)
+                j1_info = self.instructors.get(assignment.j1_id)
+                
+                instructors = [
+                    {
+                        "id": assignment.ps_id,
+                        "name": ps_info.name if ps_info else f"Instructor_{assignment.ps_id}",
+                        "full_name": ps_info.name if ps_info else f"Instructor_{assignment.ps_id}",
+                        "role": "Proje Sorumlusu"
+                    },
+                    {
+                        "id": assignment.j1_id,
+                        "name": j1_info.name if j1_info else f"Instructor_{assignment.j1_id}",
+                        "full_name": j1_info.name if j1_info else f"Instructor_{assignment.j1_id}",
+                        "role": "1. Juri"
+                    },
+                    "[Arastirma Gorevlisi]"
+                ]
+                
+                schedule.append({
+                    "project_id": assignment.project_id,
+                    "project_name": project_info.name if project_info else f"Project_{assignment.project_id}",
+                    "project_type": project_info.type if project_info else "INTERIM",
+                    "class_id": class_id,
+                    "classroom_id": classroom.get("id") if classroom else class_id,
+                    "classroom_name": classroom.get("name", f"D{105+class_id}") if classroom else f"D{105+class_id}",
+                    "order_in_class": order,
+                    "timeslot_id": timeslot.get("id") if timeslot else order,
+                    "timeslot": timeslot if timeslot else {"id": order, "start_time": f"{9+order*0.5:.1f}"},
+                    "instructors": instructors,
+                    "ps_id": assignment.ps_id,
+                    "j1_id": assignment.j1_id,
+                    "j2_placeholder": "[Arastirma Gorevlisi]"
+                })
+            
+            schedule.sort(key=lambda x: (x['class_id'], x['order_in_class']))
+        
+        return schedule
+    
+    def optimize(self, data: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Main optimization entry point"""
+        if data:
+            self.initialize(data)
+        
+        return self.run()
+    
+    def get_name(self) -> str:
+        """Get algorithm name"""
+        return "SimulatedAnnealing"
+
+
+# =============================================================================
+# PUBLIC API
+# =============================================================================
+
+def solve_with_simulated_annealing(
+    input_data: Dict[str, Any], 
+    config: Dict[str, Any] = None
+) -> Dict[str, Any]:
+    """
+    Public API for solving with Simulated Annealing.
+    
+    Args:
+        input_data: Dictionary containing:
+            - projects: List of project data
+            - instructors: List of instructor data
+            - classrooms: Optional list of classrooms
+            - timeslots: Optional list of timeslots
+        
+        config: Optional configuration dictionary with:
+            - initial_temperature
+            - final_temperature
+            - cooling_rate
+            - cooling_schedule
+            - max_iterations
+            - priority_mode
+            - time_penalty_mode
+            - workload_constraint_mode
+            - weights
+            - etc.
+    
+    Returns:
+        Dictionary with:
+            - schedule: List of assignments
+            - cost: Total cost
+            - fitness: -cost (for compatibility)
+            - execution_time
+            - penalty_breakdown
+            - status
+    """
+    # Build config
+    sa_config = SAConfig()
+    
+    if config:
+        # Temperature settings
+        if "initial_temperature" in config:
+            sa_config.initial_temperature = config["initial_temperature"]
+        if "final_temperature" in config:
+            sa_config.final_temperature = config["final_temperature"]
+        if "cooling_rate" in config:
+            sa_config.cooling_rate = config["cooling_rate"]
+        if "cooling_schedule" in config:
+            sa_config.cooling_schedule = CoolingSchedule(config["cooling_schedule"])
+        
+        # Iteration settings
+        if "max_iterations" in config:
+            sa_config.max_iterations = config["max_iterations"]
+        if "max_no_improve" in config:
+            sa_config.max_no_improve = config["max_no_improve"]
+        if "num_restarts" in config:
+            sa_config.num_restarts = config["num_restarts"]
+        
+        # Mode settings
+        if "priority_mode" in config:
+            sa_config.priority_mode = PriorityMode(config["priority_mode"])
+        if "time_penalty_mode" in config:
+            sa_config.time_penalty_mode = TimePenaltyMode(config["time_penalty_mode"])
+        if "workload_constraint_mode" in config:
+            sa_config.workload_constraint_mode = WorkloadConstraintMode(config["workload_constraint_mode"])
+        
+        # Weights
+        if "weight_h1" in config:
+            sa_config.weight_h1 = config["weight_h1"]
+        if "weight_h2" in config:
+            sa_config.weight_h2 = config["weight_h2"]
+        if "weight_h3" in config:
+            sa_config.weight_h3 = config["weight_h3"]
+        if "weight_h4" in config:
+            sa_config.weight_h4 = config["weight_h4"]
+        if "weight_continuity" in config:
+            sa_config.weight_continuity = config["weight_continuity"]
+        
+        # Class count
+        if "class_count" in config:
+            sa_config.class_count = config["class_count"]
+        if "auto_class_count" in config:
+            sa_config.auto_class_count = config["auto_class_count"]
+    
+    # Create scheduler
+    scheduler = SimulatedAnnealingScheduler(sa_config)
+    
+    # Initialize and run
+    scheduler.initialize(input_data)
+    result = scheduler.run()
+    
+    return result
+
+
+def create_simulated_annealing(params: Dict[str, Any] = None) -> SimulatedAnnealingScheduler:
+    """
+    Factory function to create SA scheduler.
+    
+    Args:
+        params: Configuration parameters
+    
+    Returns:
+        Configured SimulatedAnnealingScheduler instance
+    """
+    config = SAConfig()
+    
+    if params:
+        # Apply all config parameters
+        for key, value in params.items():
+            if hasattr(config, key):
+                # Handle enums
+                if key == "priority_mode" and isinstance(value, str):
+                    value = PriorityMode(value)
+                elif key == "time_penalty_mode" and isinstance(value, str):
+                    value = TimePenaltyMode(value)
+                elif key == "workload_constraint_mode" and isinstance(value, str):
+                    value = WorkloadConstraintMode(value)
+                elif key == "cooling_schedule" and isinstance(value, str):
+                    value = CoolingSchedule(value)
+                
+                setattr(config, key, value)
+    
+    return SimulatedAnnealingScheduler(config)
+
+
+# Aliases for compatibility
+EnhancedSimulatedAnnealing = SimulatedAnnealingScheduler
+SimulatedAnnealingAlgorithm = SimulatedAnnealingScheduler
+
+

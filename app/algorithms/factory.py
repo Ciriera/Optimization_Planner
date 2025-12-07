@@ -6,9 +6,9 @@ from typing import Dict, Any, Optional, List
 from app.models.algorithm import AlgorithmType
 from app.algorithms.base import OptimizationAlgorithm
 from app.algorithms.genetic_algorithm import EnhancedGeneticAlgorithm
-from app.algorithms.simulated_annealing import SimulatedAnnealing
+from app.algorithms.simulated_annealing import SimulatedAnnealingAlgorithm
 from app.algorithms.ant_colony import AntColonyOptimization
-from app.algorithms.nsga_ii import NSGAII
+from app.algorithms.nsga_ii import NSGA2Scheduler as NSGAII
 from app.algorithms.nsga_ii_enhanced import NSGAIIEnhanced
 from app.algorithms.greedy import Greedy
 from app.algorithms.tabu_search import TabuSearch
@@ -26,7 +26,7 @@ from app.algorithms.real_simplex import RealSimplexAlgorithm
 from app.algorithms.artificial_bee_colony import ArtificialBeeColony
 from app.algorithms.cuckoo_search import CuckooSearch
 from app.algorithms.branch_and_bound import BranchAndBound
-from app.algorithms.dynamic_programming import DynamicProgramming
+from app.algorithms.dynamic_programming import DynamicProgrammingAlgorithm
 from app.algorithms.whale_optimization import WhaleOptimization
 # Daha fazla algoritma
 from app.algorithms.bat_algorithm import BatAlgorithm
@@ -62,7 +62,7 @@ class AlgorithmFactory:
         if algorithm_type == AlgorithmType.GENETIC_ALGORITHM:
             return EnhancedGeneticAlgorithm(params)
         elif algorithm_type == AlgorithmType.SIMULATED_ANNEALING:
-            return SimulatedAnnealing(params)
+            return SimulatedAnnealingAlgorithm(params)
         elif algorithm_type == AlgorithmType.SIMPLEX:
             return RealSimplexAlgorithm(params)
         elif algorithm_type == AlgorithmType.ANT_COLONY:
@@ -98,7 +98,7 @@ class AlgorithmFactory:
         elif algorithm_type == AlgorithmType.BRANCH_AND_BOUND:
             return BranchAndBound(params)
         elif algorithm_type == AlgorithmType.DYNAMIC_PROGRAMMING:
-            return DynamicProgramming(params)
+            return DynamicProgrammingAlgorithm(params)
         elif algorithm_type == AlgorithmType.WHALE_OPTIMIZATION:
             return WhaleOptimization(params)
         elif algorithm_type == AlgorithmType.BAT_ALGORITHM:

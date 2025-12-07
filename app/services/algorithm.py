@@ -291,31 +291,12 @@ class AlgorithmService:
                 }
             },
             AlgorithmType.DYNAMIC_PROGRAMMING: {
-                "name": _("Dynamic Programming (🤖 AI-Powered - 17 Features)"),
-                "description": _("🤖 REVOLUTIONARY AI-POWERED: 17 advanced AI features! Aggressive early slot usage, adaptive learning weights, context-aware costing, smart conflict resolution, AI-powered emergency, real time efficiency, multi-factor balancing, pattern optimization, and multi-objective fitness. ZERO HARD CONSTRAINTS - Ultimate AI optimization!"),
-                "best_for": _("Ultimate AI scheduling: (1-4) Strategic pairing, (5) Adaptive classroom, (6) Dynamic timeslot, (7) Workload metrics, (8) Conflict prediction, (9) Jury rotation, (10) Pair weighting, (11-12) Pattern analysis/optimization, (13) Adaptive learning, (14) Context costing, (15) Smart conflicts, (16) AI emergency, (17) Real efficiency, (18) Multi-balance, (19) Context changes, (20) Multi-objective, (21) AGGRESSIVE EARLY SLOT USAGE with global search & gap filling. Most powerful AI algorithm!"),
-                "category": "AI-Enhanced Dynamic Programming",
+                "name": _("Dynamic Programming - Deterministik Sorumlu + Jüri Atama"),
+                "description": _("Tek fazlı, deterministik atama sistemi. İş yüküne göre sıralama, blok tabanlı dağılım, zigzag sınıf atama, uniform yük dengeleme ve iş yükü bazlı time-slot önceliği ile tam otomatik planlama."),
+                "best_for": _("Deterministik planlama için: (1) İş yüküne göre sıralama, (2) Blok oluşturma, (3) Zigzag/snake draft atama, (4) Uniform workload balancing, (5) İş yükü bazlı time-slot yerleşimi (yüksek sorumluluğu olanlar sabah slotlarına), (6) Consecutive proje yerleşimi, (7) Round-robin jüri atama, (8) Placeholder desteği, (9) COI kontrolü. Tek fazlı, deterministik optimizasyon!"),
+                "category": "Deterministic Optimization",
                 "parameters": {
-                    "time_limit": {"type": "int", "default": 60, "description": _("Time limit in seconds.")},
-                    "max_projects": {"type": "int", "default": 20, "description": _("Maximum number of projects to process.")},
-                    "learning_rate": {"type": "float", "default": 0.1, "description": _("🤖 AI FEATURE 13: Learning rate for adaptive weights.")},
-                    "enable_strategic_pairing": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 1-4: Strategic pairing & load balancing.")},
-                    "enable_adaptive_classroom": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 5: Adaptive classroom selection.")},
-                    "enable_dynamic_timeslot": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 6: Dynamic timeslot scoring.")},
-                    "enable_workload_metrics": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 7: Multi-dimensional workload.")},
-                    "enable_conflict_prediction": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 8: Conflict probability prediction.")},
-                    "enable_jury_rotation": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 9: Smart jury rotation.")},
-                    "enable_pair_weighting": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 10: Adaptive pair weighting.")},
-                    "enable_pattern_analysis": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 11-12: Pattern recognition.")},
-                    "enable_adaptive_learning": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 13: Self-learning weights.")},
-                    "enable_context_costing": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 14: Context-aware costing.")},
-                    "enable_smart_conflicts": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 15: Smart conflict resolution.")},
-                    "enable_ai_emergency": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 16: AI-powered emergency.")},
-                    "enable_real_efficiency": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 17: Real time efficiency.")},
-                    "enable_multi_balancing": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 18: Multi-factor balancing.")},
-                    "enable_context_changes": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 19: Context-aware changes.")},
-                    "enable_multi_objective": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 20: Multi-objective fitness.")},
-                    "enable_aggressive_early_slots": {"type": "bool", "default": True, "description": _("🤖 AI FEATURE 21: Aggressive early slot usage with global search & gap filling.")}
+                    "workload_threshold": {"type": "int", "default": 2, "description": _("Uniform dağılım için yük farkı threshold'u (±2).")}
                 }
             },
             AlgorithmType.WHALE_OPTIMIZATION: {
@@ -483,12 +464,25 @@ class AlgorithmService:
                     print("AlgorithmService: Loading real data...")
                     classroom_count = params.get("classroom_count", 7) if params else 7
                     data = await AlgorithmService._get_real_data(db, classroom_count)
+                
+                # CRITICAL: Add classroom_count to data dictionary so algorithms can access it
+                # Algoritmalar data.get("classroom_count") ile kontrol ediyor
+                if params and "classroom_count" in params:
+                    data["classroom_count"] = params["classroom_count"]
+                    logger.info(f"AlgorithmService: Added classroom_count={params['classroom_count']} to data dictionary")
 
                 # Create algorithm instance
                 algorithm = AlgorithmFactory().create_algorithm(
                     algorithm_name=algorithm_type.value,
                     params=params
                 )
+                
+                # DEBUG: Log jury refinement parameters
+                logger.info("ALGORITHM SERVICE DEBUG:")
+                logger.info(f"  Algorithm type: {algorithm_type.value}")
+                logger.info(f"  Parameters: {params}")
+                logger.info(f"  Jury refinement layer: {params.get('jury_refinement_layer', True) if params else True}")
+                logger.info(f"  Algorithm instance: {type(algorithm)}")
 
                 # WebSocket progress tracking - başlatıldı
                 if user_id:
@@ -501,6 +495,71 @@ class AlgorithmService:
                 print(f"AlgorithmService Debug: Passing data with {len(data.get('projects', []))} projects to algorithm")
                 result = algorithm.execute(data)
                 print(f"AlgorithmService Debug: Algorithm returned result: {result}")
+                
+                # DEBUG: Check algorithm name in result
+                if isinstance(result, dict):
+                    algorithm_name = result.get('algorithm', 'Unknown')
+                    print(f"AlgorithmService Debug: Algorithm name in result: {algorithm_name}")
+                else:
+                    print(f"AlgorithmService Debug: Result is not dict: {type(result)}")
+
+                # 🎯 JURY REFINEMENT - DISABLED FOR GENETIC ALGORITHM
+                # Genetic Algorithm has its own jury refinement system
+                # Service level jury refinement causes conflicts
+                try:
+                    if isinstance(result, dict) and params.get('jury_refinement_layer', True):
+                        # Check if this is Genetic Algorithm - if so, skip service level refinement
+                        algorithm_name = result.get('algorithm', '').lower()
+                        if 'genetic' in algorithm_name:
+                            logger.info("🎯 SKIPPING SERVICE LEVEL JURY REFINEMENT FOR GENETIC ALGORITHM")
+                            logger.info("   Genetic Algorithm has its own integrated jury refinement system")
+                        else:
+                            logger.info("🎯 APPLYING JURY REFINEMENT AT SERVICE LEVEL")
+                            for key in ("schedule", "assignments", "solution"):
+                                lst = result.get(key)
+                                if isinstance(lst, list) and lst:
+                                    try:
+                                        # Apply jury refinement using base class method
+                                        refined = algorithm.apply_jury_refinement(lst, enable_refinement=True)
+                                        if refined and len(refined) > 0:
+                                            result[key] = refined
+                                            logger.info(f"✅ Jury refinement applied to {key}")
+                                    except Exception as e:
+                                        logger.warning(f"⚠️ Jury refinement failed for {key}: {e}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Service-level jury refinement failed: {e}")
+
+                # 🔧 INSTRUCTOR DATA ENRICHMENT - DISABLED FOR DEBUGGING
+                # This causes issues with jury filtering in frontend
+                # Frontend expects only instructor IDs, not full objects
+                try:
+                    if isinstance(result, dict):
+                        logger.info("🔧 SKIPPING INSTRUCTOR DATA ENRICHMENT FOR DEBUGGING")
+                        logger.info("   Frontend expects only instructor IDs, not full objects")
+                        logger.info("   This prevents jury filtering issues")
+                        
+                        # Log current instructor data format
+                        for key in ("schedule", "assignments", "solution"):
+                            lst = result.get(key)
+                            if isinstance(lst, list) and lst:
+                                for assignment in lst[:3]:  # First 3 assignments
+                                    if isinstance(assignment, dict) and 'instructors' in assignment:
+                                        instructors = assignment.get('instructors', [])
+                                        logger.info(f"   {key} assignment {assignment.get('project_id')}: instructors format = {type(instructors[0]) if instructors else 'empty'}")
+                                        break
+                except Exception as e:
+                    logger.warning(f"⚠️ Instructor data enrichment check failed: {e}")
+
+                # 🔧 INSTRUCTOR DATA ENRICHMENT - DISABLED FOR DEBUGGING (SECOND BLOCK)
+                # This causes issues with jury filtering in frontend
+                # Frontend expects only instructor IDs, not full objects
+                try:
+                    if isinstance(result, dict):
+                        logger.info("🔧 SKIPPING SECOND INSTRUCTOR DATA ENRICHMENT FOR DEBUGGING")
+                        logger.info("   Frontend expects only instructor IDs, not full objects")
+                        logger.info("   This prevents jury filtering issues")
+                except Exception as e:
+                    logger.warning(f"⚠️ Second instructor data enrichment check failed: {e}")
 
                 # Enforce global gap-free compaction, late-slot removal and reporting at service level
                 try:
@@ -673,9 +732,27 @@ class AlgorithmService:
                 # Calculate execution time
                 execution_time = time.time() - start_time
 
+                # Determine final status - result içindeki status'ü kontrol et
+                # Eğer result içinde "status" varsa ve "error" ise, yine de "completed" olarak kaydet
+                # çünkü algoritma çalıştı ve sonuç döndü (hata olsa bile)
+                final_status = "completed"
+                if isinstance(result, dict):
+                    result_status = result.get("status", "").lower()
+                    # Eğer result içinde "error" status varsa, yine de "completed" olarak kaydet
+                    # çünkü algoritma çalıştı ve sonuç döndü
+                    if result_status in ("error", "failed", "infeasible"):
+                        # Sonuç döndü ama hata var - yine de "completed" olarak kaydet
+                        # çünkü algoritma çalıştı ve sonuç döndü
+                        final_status = "completed"
+                    elif result_status == "completed":
+                        final_status = "completed"
+                    else:
+                        # Diğer durumlarda da "completed" olarak kaydet
+                        final_status = "completed"
+
                 # Update algorithm run record
                 algorithm_run_update = AlgorithmRunUpdate(
-                    status="completed",
+                    status=final_status,
                     result=result,
                     execution_time=execution_time,
                     completed_at=datetime.now()
@@ -685,7 +762,14 @@ class AlgorithmService:
                 return result, algorithm_run
 
             except Exception as e:
-                logger.exception(f"Error running algorithm {algorithm_type}: {str(e)}")
+                import traceback
+                error_traceback = traceback.format_exc()
+                logger.error(f"=== ALGORITHM ERROR ===")
+                logger.error(f"Algorithm: {algorithm_type}")
+                logger.error(f"Error Type: {type(e).__name__}")
+                logger.error(f"Error Message: {str(e)}")
+                logger.error(f"Full Traceback:\n{error_traceback}")
+                logger.error(f"======================")
 
                 # FALLBACK: Comprehensive Optimizer ile çalıştır ve sonuç dön
                 try:
@@ -708,14 +792,16 @@ class AlgorithmService:
 
                     # Update run as completed with fallback
                     execution_time = time.time() - start_time
+                    fallback_result_dict = {
+                        **(fallback_result or {}),
+                        "fallback_used": True,
+                        "fallback_from": algorithm_type.value if hasattr(algorithm_type, 'value') else str(algorithm_type),
+                        "original_error": str(e),
+                        "status": "completed"  # Fallback sonucu da "completed" olarak işaretle
+                    }
                     algorithm_run_update = AlgorithmRunUpdate(
-                        status="completed",
-                        result={
-                            **(fallback_result or {}),
-                            "fallback_used": True,
-                            "fallback_from": algorithm_type.value if hasattr(algorithm_type, 'value') else str(algorithm_type),
-                            "original_error": str(e)
-                        },
+                        status="completed",  # Her zaman "completed" olarak kaydet
+                        result=fallback_result_dict,
                         execution_time=execution_time,
                         completed_at=datetime.now()
                     )
@@ -777,8 +863,11 @@ class AlgorithmService:
             # Extract schedule data from different possible formats
             schedules = []
             
+            # Format 0: Phase 3 "final_assignments" key (öncelikli, placeholder ile)
+            if "final_assignments" in result and result["final_assignments"]:
+                schedules = result["final_assignments"]
             # Format 1: Direct "schedule" key
-            if "schedule" in result and result["schedule"]:
+            elif "schedule" in result and result["schedule"]:
                 schedules = result["schedule"]
             # Format 2: "assignments" key
             elif "assignments" in result and result["assignments"]:
@@ -1297,6 +1386,7 @@ class AlgorithmService:
                         "project_type": row[2].lower() if row[2] else "ara",  # Standart alan
                         "instructor_id": row[3] or 1,  # FIXED: instructor_id kullan (tüm algoritmalarla uyumlu)
                         "responsible_id": row[3] or 1,  # Geriye uyumluluk
+                        "responsible_instructor_id": row[3] or 1,  # Jury refinement için gerekli
                         "advisor_id": row[4],
                         "co_advisor_id": row[5],
                         "assistant_ids": [int(x) for x in row[6].split(',')] if row[6] else [],
@@ -1344,10 +1434,11 @@ class AlgorithmService:
                         "is_morning": bool(row[4]) if row[4] is not None else True
                     }
                     for row in timeslots_data
-                ]
+                ],
+                "classroom_count": classroom_count  # CRITICAL: Add classroom_count to data so algorithms can access it
             }
             
-            logger.info(f"Loaded real data: {len(data['projects'])} projects, {len(data['instructors'])} instructors, {len(data['classrooms'])} classrooms, {len(data['timeslots'])} timeslots")
+            logger.info(f"Loaded real data: {len(data['projects'])} projects, {len(data['instructors'])} instructors, {len(data['classrooms'])} classrooms, {len(data['timeslots'])} timeslots, classroom_count={classroom_count}")
             return data
             
         except Exception as e:

@@ -22,7 +22,7 @@ class NSGAIIEnhanced(OptimizationAlgorithm):
     
     SUCCESS STRATEGY (Same as Deep Search Algorithm):
     NOT 1: RASTGELE INSTRUCTOR SIRALAMA - Her çalıştırmada farklı öğretim görevlisi sırası
-    NOT 2: AKILLI JÜRİ ATAMALARI - Aynı sınıfta ardışık olan instructor'lar birbirinin jürisi
+    NOT 2: AKILLI EK GÖREV ATAMALARI - Aynı sınıfta ardışık olan instructor'lar birbirinin ek görevi
     NOT 3: CONSECUTIVE GROUPING - Her instructor'ın projeleri ardışık ve aynı sınıfta
     
     This implementation uses the SAME logic as Deep Search Algorithm for:
@@ -30,7 +30,7 @@ class NSGAIIEnhanced(OptimizationAlgorithm):
     2. EN ERKEN BOŞ SLOT mantığı - Boş slotlar varken ileri atlamaz
     3. Uniform distribution - D111 dahil tüm sınıfları kullanır
     4. Pure consecutive grouping - Her instructor'ın projeleri ardışık
-    5. AKILLI JÜRİ ATAMALARI - Aynı sınıfta ardışık olan instructor'lar birbirinin jürisi
+    5. AKILLI EK GÖREV ATAMALARI - Aynı sınıfta ardışık olan instructor'lar birbirinin ek görevi
     6. Conflict-free scheduling - Instructor çakışmalarını önler
     
     Strategy:
@@ -66,7 +66,7 @@ class NSGAIIEnhanced(OptimizationAlgorithm):
         
         # Enhanced features
         self.instructor_types = {}  # instructor_id -> type mapping
-        self.available_instructors = []  # Available instructors for jury assignment
+        self.available_instructors = []  # Available instructors for additional assignment
         self.placeholder_ra_count = 0  # Counter for RA-Placeholder
 
     def initialize(self, data: Dict[str, Any]) -> None:
@@ -85,12 +85,12 @@ class NSGAIIEnhanced(OptimizationAlgorithm):
             instructor_type = instructor.get("type", "instructor")
             self.instructor_types[instructor_id] = instructor_type
             
-            # Only add instructors (not assistants) to available list for jury assignment
+            # Only add instructors (not assistants) to available list for additional assignment
             if instructor_type == "instructor":
                 self.available_instructors.append(instructor_id)
         
         logger.info(f"Initialized with {len(self.projects)} projects, {len(self.instructors)} instructors, {len(self.classrooms)} classrooms, {len(self.timeslots)} timeslots")
-        logger.info(f"Available instructors for jury: {len(self.available_instructors)}")
+        logger.info(f"Available instructors for additional: {len(self.available_instructors)}")
 
     def _get_jury_assignment_rules(self, project_type: str) -> Dict[str, Any]:
         """
@@ -706,7 +706,7 @@ class NSGAIIEnhanced(OptimizationAlgorithm):
         
         SUCCESS STRATEGY:
         NOT 1: RASTGELE INSTRUCTOR SIRALAMA - Her çalıştırmada farklı öğretim görevlisi sırası
-        NOT 2: AKILLI JÜRİ ATAMALARI - Aynı sınıfta ardışık olan instructor'lar birbirinin jürisi
+        NOT 2: AKILLI EK GÖREV ATAMALARI - Aynı sınıfta ardışık olan instructor'lar birbirinin ek görevi
         NOT 3: CONSECUTIVE GROUPING - Her instructor'ın projeleri ardışık ve aynı sınıfta
         """
         start_time = time.time()
@@ -791,7 +791,7 @@ class NSGAIIEnhanced(OptimizationAlgorithm):
         
         SUCCESS STRATEGY:
         NOT 1: RASTGELE INSTRUCTOR SIRALAMA - Her çalıştırmada farklı öğretim görevlisi sırası
-        NOT 2: AKILLI JÜRİ ATAMALARI - Aynı sınıfta ardışık olan instructor'lar birbirinin jürisi
+        NOT 2: AKILLI EK GÖREV ATAMALARI - Aynı sınıfta ardışık olan instructor'lar birbirinin ek görevi
         NOT 3: CONSECUTIVE GROUPING - Her instructor'ın projeleri ardışık ve aynı sınıfta
         
         "Bir öğretim görevlimizi sorumlu olduğu projelerden birisiyle birlikte diyelim ki 09:00-09:30 
