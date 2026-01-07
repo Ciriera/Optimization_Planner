@@ -35,6 +35,8 @@ from app.algorithms.a_star_search import AStarSearch
 from app.algorithms.integer_linear_programming import IntegerLinearProgramming
 from app.algorithms.genetic_local_search import GeneticLocalSearch
 from app.algorithms.comprehensive_optimizer import ComprehensiveOptimizer
+from app.algorithms.hungarian_algorithm import HungarianAlgorithm
+from app.algorithms.bitirme_priority_scheduler import BitirmePriorityScheduler
 
 
 class AlgorithmFactory:
@@ -109,10 +111,14 @@ class AlgorithmFactory:
             return AStarSearch(params)
         elif algorithm_type == AlgorithmType.INTEGER_LINEAR_PROGRAMMING:
             return IntegerLinearProgramming(params)
+        elif algorithm_type == AlgorithmType.HUNGARIAN:
+            return HungarianAlgorithm(params)
         elif algorithm_type == AlgorithmType.GENETIC_LOCAL_SEARCH:
             return GeneticLocalSearch(params)
         elif algorithm_type == AlgorithmType.COMPREHENSIVE_OPTIMIZER:
             return ComprehensiveOptimizer(params)
+        elif algorithm_type == AlgorithmType.BITIRME_PRIORITY_SCHEDULER:
+            return BitirmePriorityScheduler(params)
         else:
             raise ValueError(f"Unsupported algorithm type: {algorithm_type}")
             

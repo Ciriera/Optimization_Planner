@@ -132,6 +132,11 @@ async def update_schedule(
 ) -> Any:
     """
     Planlama kaydını güncelle
+    
+    Güncellenebilir alanlar:
+    - classroom_id, timeslot_id, is_makeup: Schedule alanları
+    - instructors: Jüri üyeleri (JSON array)
+    - responsible_instructor_id: Proje sorumlusu (Project'in responsible_id'si)
     """
     schedule = await schedule_service.get(db, id=schedule_id)
     if not schedule:
@@ -141,11 +146,13 @@ async def update_schedule(
         )
     
     # Çakışma kontrolü (eğer sınıf veya zaman dilimi değiştiyse)
-    if (schedule_in.classroom_id != schedule.classroom_id or 
-            schedule_in.timeslot_id != schedule.timeslot_id):
+    if (schedule_in.classroom_id and schedule_in.classroom_id != schedule.classroom_id) or \
+       (schedule_in.timeslot_id and schedule_in.timeslot_id != schedule.timeslot_id):
+        new_classroom_id = schedule_in.classroom_id or schedule.classroom_id
+        new_timeslot_id = schedule_in.timeslot_id or schedule.timeslot_id
         exists = await schedule_service.check_conflict(
-            db, classroom_id=schedule_in.classroom_id, 
-            timeslot_id=schedule_in.timeslot_id, exclude_id=schedule_id
+            db, classroom_id=new_classroom_id, 
+            timeslot_id=new_timeslot_id, exclude_id=schedule_id
         )
         if exists:
             raise HTTPException(
@@ -153,7 +160,39 @@ async def update_schedule(
                 detail=_("schedule.conflict", locale=current_user.language)
             )
     
+    # Schedule'ı güncelle
     schedule = await schedule_service.update(db, db_obj=schedule, obj_in=schedule_in)
+    
+    # Eğer instructors güncelleniyorsa, schedule'ın instructors alanını güncelle
+    if schedule_in.instructors is not None:
+        schedule.instructors = schedule_in.instructors
+        await db.commit()
+        await db.refresh(schedule)
+    
+    # Eğer responsible_instructor_id güncelleniyorsa, Project'in responsible_id'sini güncelle
+    if schedule_in.responsible_instructor_id is not None:
+        # Project'i al
+        project_stmt = select(models.Project).where(models.Project.id == schedule.project_id)
+        project_result = await db.execute(project_stmt)
+        project = project_result.scalars().first()
+        
+        if project:
+            # Instructor'ın var olduğunu kontrol et
+            instructor_stmt = select(models.Instructor).where(models.Instructor.id == schedule_in.responsible_instructor_id)
+            instructor_result = await db.execute(instructor_stmt)
+            instructor = instructor_result.scalars().first()
+            
+            if not instructor:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=_("schedule.instructor_not_found", locale=current_user.language, default="Öğretim görevlisi bulunamadı")
+                )
+            
+            # Project'in responsible_id'sini güncelle
+            project.responsible_id = schedule_in.responsible_instructor_id
+            await db.commit()
+            await db.refresh(project)
+    
     return schedule
 
 @router.delete("/{schedule_id}", response_model=schemas.Schedule)

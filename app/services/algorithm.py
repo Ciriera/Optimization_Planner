@@ -4,6 +4,7 @@ Algorithm service module for managing algorithm operations.
 from typing import Dict, Any, List, Optional, Tuple
 import logging
 import time
+import math
 from datetime import datetime
 
 from app.models.algorithm import AlgorithmType, AlgorithmRun
@@ -336,6 +337,16 @@ class AlgorithmService:
                     "mutation_rate": {"type": "float", "default": 0.1, "description": _("Mutation rate.")},
                     "crossover_rate": {"type": "float", "default": 0.8, "description": _("Crossover rate.")}
                 }
+            },
+            AlgorithmType.HUNGARIAN: {
+                "name": _("Hungarian Algorithm (Kuhn-Munkres)"),
+                "description": _("Klasik Hungarian (Kuhn-Munkres) algoritması ile atama problemlerini çözer. Çok kriterli ve çok kısıtlı akademik proje sınavı/jüri planlama için optimize edilmiştir."),
+                "best_for": _("Atama problemleri, proje-slot eşleştirme, jüri atama, optimal eşleştirme gerektiren durumlar."),
+                "category": "Mathematical",
+                "parameters": {
+                    "max_iterations": {"type": "int", "default": 1000, "description": _("Maximum number of iterations.")},
+                    "tolerance": {"type": "float", "default": 0.001, "description": _("Convergence tolerance.")}
+                }
             }
         }
 
@@ -367,6 +378,32 @@ class AlgorithmService:
                 "best_for": info["best_for"]
             })
         return algorithms
+
+    @staticmethod
+    def sanitize_for_json(obj: Any) -> Any:
+        """
+        Recursively sanitize values for JSON compatibility.
+        Converts float('inf'), float('-inf'), and float('nan') to None.
+        PostgreSQL JSON doesn't support these special float values.
+        """
+        if obj is None:
+            return None
+        
+        if isinstance(obj, float):
+            if math.isinf(obj) or math.isnan(obj):
+                return None
+            return obj
+        
+        if isinstance(obj, dict):
+            return {k: AlgorithmService.sanitize_for_json(v) for k, v in obj.items()}
+        
+        if isinstance(obj, list):
+            return [AlgorithmService.sanitize_for_json(item) for item in obj]
+        
+        if isinstance(obj, tuple):
+            return tuple(AlgorithmService.sanitize_for_json(item) for item in obj)
+        
+        return obj
 
     @staticmethod
     def recommend_algorithm(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -437,8 +474,10 @@ class AlgorithmService:
         logger.info(f"Starting algorithm {algorithm_type} with {len(data.get('projects', []))} projects, {len(data.get('instructors', []))} instructors, {len(data.get('classrooms', []))} classrooms, {len(data.get('timeslots', []))} timeslots")
 
         # Create algorithm run record
+        # Ensure algorithm_type is converted to string value for database
+        algorithm_type_str = algorithm_type.value if isinstance(algorithm_type, AlgorithmType) else str(algorithm_type)
         algorithm_run_data = AlgorithmRunCreate(
-            algorithm_type=algorithm_type,
+            algorithm_type=algorithm_type_str,
             parameters=params or {},
             data=data or {},
             status="running",
@@ -470,6 +509,13 @@ class AlgorithmService:
                 if params and "classroom_count" in params:
                     data["classroom_count"] = params["classroom_count"]
                     logger.info(f"AlgorithmService: Added classroom_count={params['classroom_count']} to data dictionary")
+                
+                # CRITICAL: Add entire params dictionary to data so algorithms can access all parameters
+                # Bu, NSGA-II, SA, GA gibi algoritmaların data.get('params') ile parametrelere erişmesini sağlar
+                # Özellikle project_priority parametresi için gerekli!
+                if params:
+                    data["params"] = params
+                    logger.info(f"AlgorithmService: Added params to data dictionary: {params}")
 
                 # Create algorithm instance
                 algorithm = AlgorithmFactory().create_algorithm(
@@ -502,6 +548,48 @@ class AlgorithmService:
                     print(f"AlgorithmService Debug: Algorithm name in result: {algorithm_name}")
                 else:
                     print(f"AlgorithmService Debug: Result is not dict: {type(result)}")
+
+                # ============================================================
+                # FALLBACK: Eğer algoritma boş sonuç veya failed döndürdüyse
+                # ComprehensiveOptimizer'a fallback yap (PSO hariç)
+                # ============================================================
+                should_fallback = False
+                if isinstance(result, dict):
+                    result_status = result.get('status', '').lower()
+                    has_assignments = bool(result.get('assignments') or result.get('schedule') or result.get('solution'))
+                    
+                    # PSO için fallback yapma - kendi mantığı var
+                    is_pso = 'pso' in str(algorithm_type).lower() or 'pso' in result.get('algorithm', '').lower()
+                    
+                    if not is_pso and (result_status in ('failed', 'error', 'infeasible') or not has_assignments):
+                        should_fallback = True
+                        logger.info(f"Algorithm {algorithm_type} returned empty/failed result, falling back to ComprehensiveOptimizer")
+                
+                if should_fallback:
+                    try:
+                        logger.info("FALLBACK: Running ComprehensiveOptimizer due to empty/failed result")
+                        fallback_algo = AlgorithmFactory().create_algorithm(
+                            algorithm_name="comprehensive_optimizer",
+                            params=params or {}
+                        )
+                        
+                        fallback_algo.initialize(data)
+                        fallback_result = fallback_algo.optimize(data)
+                        
+                        if fallback_result and (fallback_result.get('assignments') or fallback_result.get('schedule') or fallback_result.get('solution')):
+                            # Fallback başarılı - sonucu kullan
+                            result = {
+                                **(fallback_result or {}),
+                                "fallback_used": True,
+                                "fallback_from": algorithm_type.value if hasattr(algorithm_type, 'value') else str(algorithm_type),
+                                "original_status": result.get('status', 'unknown'),
+                                "status": "completed"
+                            }
+                            logger.info(f"FALLBACK SUCCESS: ComprehensiveOptimizer returned {len(result.get('assignments', []))} assignments")
+                        else:
+                            logger.warning("FALLBACK: ComprehensiveOptimizer also returned empty result")
+                    except Exception as fallback_error:
+                        logger.error(f"FALLBACK ERROR: {fallback_error}")
 
                 # 🎯 JURY REFINEMENT - DISABLED FOR GENETIC ALGORITHM
                 # Genetic Algorithm has its own jury refinement system
@@ -751,9 +839,11 @@ class AlgorithmService:
                         final_status = "completed"
 
                 # Update algorithm run record
+                # Sanitize result to remove infinity/nan values (PostgreSQL JSON incompatible)
+                sanitized_result = AlgorithmService.sanitize_for_json(result)
                 algorithm_run_update = AlgorithmRunUpdate(
                     status=final_status,
-                    result=result,
+                    result=sanitized_result,
                     execution_time=execution_time,
                     completed_at=datetime.now()
                 )
@@ -801,7 +891,7 @@ class AlgorithmService:
                     }
                     algorithm_run_update = AlgorithmRunUpdate(
                         status="completed",  # Her zaman "completed" olarak kaydet
-                        result=fallback_result_dict,
+                        result=AlgorithmService.sanitize_for_json(fallback_result_dict),
                         execution_time=execution_time,
                         completed_at=datetime.now()
                     )

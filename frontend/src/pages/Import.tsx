@@ -55,6 +55,13 @@ const Import: React.FC = () => {
         severity: 'success',
     });
 
+    // Notification import (instructor emails)
+    const [emailFile, setEmailFile] = useState<File | null>(null);
+    const [emailValidation, setEmailValidation] = useState<any>(null);
+    const [emailImportResult, setEmailImportResult] = useState<any>(null);
+    const [emailValidating, setEmailValidating] = useState(false);
+    const [emailImporting, setEmailImporting] = useState(false);
+
     const showSnack = useCallback((message: string, severity: 'success' | 'error' | 'warning' | 'info') => {
         setSnack({ open: true, message, severity });
     }, []);
@@ -148,6 +155,76 @@ const Import: React.FC = () => {
         } catch (error: any) {
             console.error('Error downloading template:', error);
             showSnack('Error downloading template', 'error');
+        }
+    };
+
+    // Notification import (instructor emails)
+    const handleEmailFileChange = (file: File | null) => {
+        setEmailFile(file);
+        setEmailValidation(null);
+        setEmailImportResult(null);
+    };
+
+    const handleDownloadEmailTemplate = async () => {
+        try {
+            setLoading(true);
+            await importService.downloadInstructorEmailTemplate();
+            showSnack('Instructor email template downloaded', 'success');
+        } catch (error: any) {
+            showSnack(error?.response?.data?.detail || 'Template download failed', 'error');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleValidateEmails = async () => {
+        if (!emailFile) {
+            showSnack('Please select an email file first', 'warning');
+            return;
+        }
+        setEmailValidating(true);
+        try {
+            const res = await importService.validateInstructorEmails(emailFile);
+            setEmailValidation(res);
+            if (res.success) {
+                showSnack(`Validation successful. ${res.valid_rows} valid rows.`, 'success');
+            } else {
+                showSnack(res.error || 'Validation failed', 'error');
+            }
+        } catch (e: any) {
+            showSnack(e?.response?.data?.detail || 'Validation failed', 'error');
+        } finally {
+            setEmailValidating(false);
+        }
+    };
+
+    const handleImportEmails = async (dryRun: boolean = false) => {
+        if (!emailFile) {
+            showSnack('Please select an email file first', 'warning');
+            return;
+        }
+        if (!emailValidation || !emailValidation.success) {
+            showSnack('Please validate the email file first', 'warning');
+            return;
+        }
+        setEmailImporting(true);
+        try {
+            const res = await importService.executeInstructorEmails(emailFile, dryRun);
+            setEmailImportResult(res);
+            if (res.success) {
+                showSnack(
+                    dryRun
+                        ? `Dry run: ${res.statistics?.valid_rows || 0} rows valid`
+                        : `Emails updated: ${res.statistics?.updated || 0}`,
+                    'success'
+                );
+            } else {
+                showSnack(res.error || 'Import failed', 'error');
+            }
+        } catch (e: any) {
+            showSnack(e?.response?.data?.detail || 'Import failed', 'error');
+        } finally {
+            setEmailImporting(false);
         }
     };
 
@@ -283,6 +360,141 @@ const Import: React.FC = () => {
                                 {validating ? 'Validating...' : 'Validate File'}
                             </Button>
                         </Stack>
+                    </CardContent>
+                </Card>
+
+                {/* Notification Import: Instructor Emails */}
+                <Card>
+                    <CardContent>
+                        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+                            Notification Import (Instructor Emails)
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                            1) "Export Instructor Email Template" ile mevcut öğretim görevlilerini ve e-posta alanlarını dışa aktarın.
+                            2) Excel'de e-posta sütunlarını doldurun veya güncelleyin.
+                            3) Dosyayı seçip doğrulayın, ardından içeri aktarın.
+                        </Typography>
+
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
+                            <Button
+                                variant="outlined"
+                                startIcon={<Download />}
+                                onClick={handleDownloadEmailTemplate}
+                                disabled={loading}
+                            >
+                                Export Instructor Email Template
+                            </Button>
+                            <Button
+                                variant="outlined"
+                                color="error"
+                                startIcon={<Cancel />}
+                                onClick={() => handleEmailFileChange(null)}
+                            >
+                                Clear Selection
+                            </Button>
+                        </Stack>
+
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+                            <Button variant="contained" component="label" startIcon={<CloudUpload />}>
+                                Select Email Excel
+                                <input
+                                    type="file"
+                                    accept=".xlsx,.xls"
+                                    hidden
+                                    onChange={(e) => handleEmailFileChange(e.target.files?.[0] || null)}
+                                />
+                            </Button>
+                            <Typography variant="body2">
+                                {emailFile ? `${emailFile.name} (${(emailFile.size / 1024).toFixed(1)} KB)` : 'No file selected'}
+                            </Typography>
+                        </Box>
+
+                        <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+                            <Button
+                                variant="contained"
+                                startIcon={emailValidating ? <CircularProgress size={20} /> : <Refresh />}
+                                onClick={handleValidateEmails}
+                                disabled={!emailFile || emailValidating}
+                            >
+                                {emailValidating ? 'Validating...' : 'Validate Emails'}
+                            </Button>
+                            <Button
+                                variant="outlined"
+                                color="secondary"
+                                startIcon={<PlayArrow />}
+                                onClick={() => handleImportEmails(true)}
+                                disabled={!emailFile || emailImporting}
+                            >
+                                Dry Run
+                            </Button>
+                            <Button
+                                variant="contained"
+                                color="success"
+                                startIcon={emailImporting ? <CircularProgress size={20} /> : <CheckCircle />}
+                                onClick={() => handleImportEmails(false)}
+                                disabled={!emailFile || emailImporting}
+                            >
+                                {emailImporting ? 'Importing...' : 'Import Emails'}
+                            </Button>
+                        </Stack>
+
+                        {emailValidation && (
+                            <Box sx={{ mt: 2 }}>
+                                <Alert severity={emailValidation.success ? 'success' : 'warning'}>
+                                    {emailValidation.success
+                                        ? `Validation successful. Valid rows: ${emailValidation.valid_rows}, Invalid rows: ${emailValidation.invalid_rows}.`
+                                        : emailValidation.error || 'Validation failed.'}
+                                </Alert>
+                                {emailValidation.rows && emailValidation.rows.length > 0 && (
+                                    <TableContainer component={Paper} sx={{ mt: 2, maxHeight: 320 }}>
+                                        <Table size="small" stickyHeader>
+                                            <TableHead>
+                                                <TableRow>
+                                                    <TableCell>Row</TableCell>
+                                                    <TableCell>Instructor</TableCell>
+                                                    <TableCell>Email</TableCell>
+                                                    <TableCell>Errors</TableCell>
+                                                </TableRow>
+                                            </TableHead>
+                                            <TableBody>
+                                                {emailValidation.rows.map((row: any) => (
+                                                    <TableRow key={row.row_number}>
+                                                        <TableCell>{row.row_number}</TableCell>
+                                                        <TableCell>{row.instructor_name}</TableCell>
+                                                        <TableCell>{row.email}</TableCell>
+                                                        <TableCell>
+                                                            {row.errors && row.errors.length > 0 ? (
+                                                                <Stack spacing={0.5}>
+                                                                    {row.errors.map((err: string, idx: number) => (
+                                                                        <Typography key={idx} variant="caption" color="error">
+                                                                            {err}
+                                                                        </Typography>
+                                                                    ))}
+                                                                </Stack>
+                                                            ) : (
+                                                                <Typography variant="caption" color="success.main">
+                                                                    OK
+                                                                </Typography>
+                                                            )}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
+                                )}
+                            </Box>
+                        )}
+
+                        {emailImportResult && (
+                            <Box sx={{ mt: 2 }}>
+                                <Alert severity={emailImportResult.success ? 'success' : 'error'}>
+                                    {emailImportResult.success
+                                        ? `Updated: ${emailImportResult.statistics?.updated || 0}, Valid rows: ${emailImportResult.statistics?.valid_rows || 0}, Invalid: ${emailImportResult.statistics?.invalid_rows || 0}`
+                                        : emailImportResult.error || 'Import failed'}
+                                </Alert>
+                            </Box>
+                        )}
                     </CardContent>
                 </Card>
 

@@ -34,12 +34,14 @@ class AlgorithmType(str, enum.Enum):
     INTEGER_LINEAR_PROGRAMMING = "integer_linear_programming"
     GENETIC_LOCAL_SEARCH = "genetic_local_search"
     COMPREHENSIVE_OPTIMIZER = "comprehensive_optimizer"
+    HUNGARIAN = "hungarian"
+    BITIRME_PRIORITY_SCHEDULER = "bitirme_priority_scheduler"
 
 class AlgorithmRun(Base):
     __tablename__ = "algorithm_runs"
 
     id = Column(Integer, primary_key=True, index=True)
-    algorithm_type = Column(Enum(AlgorithmType), nullable=False)
+    algorithm_type = Column(Enum(AlgorithmType, native_enum=True), nullable=False)
     parameters = Column(JSON)  # Algoritma parametreleri
     data = Column(JSON)  # Algoritma giriş verisi
     status = Column(String, default="running")  # running, completed, failed

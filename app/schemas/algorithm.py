@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
 from app.models.algorithm import AlgorithmType
 from app.schemas.base import BaseSchema
@@ -8,6 +8,17 @@ class AlgorithmRunBase(BaseModel):
     algorithm_type: str
     parameters: Optional[Dict[str, Any]] = None
     data: Optional[Dict[str, Any]] = None
+    
+    @field_validator('algorithm_type', mode='before')
+    @classmethod
+    def convert_enum_to_value(cls, v):
+        """Convert AlgorithmType enum to its string value (lowercase)"""
+        if isinstance(v, AlgorithmType):
+            return v.value
+        # Ensure string values are lowercase (enum values are lowercase)
+        if isinstance(v, str):
+            return v.lower()
+        return v
 
 class AlgorithmRunCreate(AlgorithmRunBase):
     pass

@@ -1,489 +1,471 @@
 """
-Dynamic Programming (DP) Optimization Algorithm
-Multi-Criteria, Highly-Constrained Academic Project Jury Scheduling System
-
-This module implements a full DP-based optimization for academic project exam planning.
-
-SYSTEM OVERVIEW:
-- Each project p has: fixed PS[p], decision variable J1[p], placeholder J2="Research Assistant"
-- X real faculty members, Y projects, z classes (5, 6, or 7)
-- Projects must be placed consecutively (no gaps) within each class
-- DP solves class[p], slot[p], J1[p] all together in a single computation
+Dynamic Programming Algorithm - Multi-Criteria Optimization
+Aligned with Simulated Annealing constraint structure
 
 OBJECTIVE FUNCTION:
-    min Z = C1*H1(n) + C2*H2(n) + C3*H3(n) + CCL*H_classload(n)
+    min Z = C1*H1(n) + C2*H2(n) + C3*H3(n) + C4*H4(n) + C5*H5(n) + C6*H6(n) + C7*H7(n)
+    
+    Where C2 > C1, C2 > C3 (workload uniformity is most important)
 
-Where:
-- H1: Continuity/gap penalty
-- H2: Workload uniformity penalty (most important, C2 > C1, C2 > C3)
-- H3: Class change penalty
-- H_classload: Class load balance penalty
+PENALTY FUNCTIONS:
+    H1: Time/Gap penalty (consecutive scheduling)
+    H2: Workload uniformity penalty (±2 band)
+    H3: Class change penalty
+    H4: Class load balance penalty
+    H5: Continuity penalty
+    H6: Timeslot conflict penalty (HARD - proactive prevention)
+    H7: Unused class penalty (HARD)
 
-HARD CONSTRAINTS:
-1. Every project assigned to exactly one class and slot
-2. Back-to-back scheduling (no gaps within class)
-3. Single-duty per slot per faculty
-4. J1[p] != PS[p]
-5. Exactly z classes active
-6. Priority mode (ARA_ONCE, BITIRME_ONCE, ESIT)
-7. J2 placeholder not in faculty set
+HARD CONSTRAINTS (enforced proactively):
+    1. Back-to-back placement (no gaps between projects in same class)
+    2. Single-duty per timeslot (instructor can't be in multiple places)
+    3. J1 != PS (jury member cannot be project supervisor)
+    4. Exact class count (all classes must be used)
+    5. J2 is placeholder (-1), excluded from all calculations
+
+SOFT CONSTRAINTS:
+    1. Workload uniformity within ±2 band (can be hard with SOFT_AND_HARD mode)
+    2. Minimize class changes for instructors
+    3. Consecutive grouping preference
+
+CONFIGURATION:
+    - priority_mode: ARA_ONCE, BITIRME_ONCE, ESIT
+    - time_penalty_mode: BINARY, GAP_PROPORTIONAL
+    - workload_constraint_mode: SOFT_ONLY, SOFT_AND_HARD
 """
 
-from typing import Dict, Any, List, Tuple, Set, Optional, FrozenSet
+from typing import Dict, Any, Optional, List, Tuple, Set
 from dataclasses import dataclass, field
 from enum import Enum
-from collections import defaultdict
+import random
+import numpy as np
 import time
 import logging
-import heapq
-import copy
-import random
-
+from collections import defaultdict
 from app.algorithms.base import OptimizationAlgorithm
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
-# ============================================================================
-# CONFIGURATION ENUMS
-# ============================================================================
+# =============================================================================
+# ENUMS FOR CONFIGURATION
+# =============================================================================
 
-class PriorityMode(str, Enum):
-    """Project type priority mode."""
-    ARA_ONCE = "ARA_ONCE"           # ARA projects first
-    BITIRME_ONCE = "BITIRME_ONCE"   # BITIRME projects first
+class PriorityMode(Enum):
+    """Project type prioritization mode"""
+    ARA_ONCE = "ARA_ONCE"           # Interim projects first
+    BITIRME_ONCE = "BITIRME_ONCE"   # Final projects first
     ESIT = "ESIT"                   # No priority
 
 
-class TimePenaltyMode(str, Enum):
-    """Time penalty mode."""
-    BINARY = "BINARY"                       # Non-consecutive = 1 penalty
-    GAP_PROPORTIONAL = "GAP_PROPORTIONAL"   # Penalty = gap slot count
+class TimePenaltyMode(Enum):
+    """Time/gap penalty calculation mode"""
+    BINARY = "BINARY"                       # 0 or 1 penalty
+    GAP_PROPORTIONAL = "GAP_PROPORTIONAL"   # Penalty proportional to gap size
 
 
-class WorkloadConstraintMode(str, Enum):
-    """Workload constraint mode."""
-    SOFT_ONLY = "SOFT_ONLY"           # Penalty only
-    SOFT_AND_HARD = "SOFT_AND_HARD"   # Penalty + hard constraint
+class WorkloadConstraintMode(Enum):
+    """Workload constraint enforcement mode"""
+    SOFT_ONLY = "SOFT_ONLY"           # Only soft penalty
+    SOFT_AND_HARD = "SOFT_AND_HARD"   # Soft penalty + hard limit
 
 
-# ============================================================================
-# DATA CLASSES
-# ============================================================================
+# =============================================================================
+# CONFIGURATION DATACLASS
+# =============================================================================
 
 @dataclass
 class DPConfig:
-    """DP Algorithm configuration parameters."""
+    """Configuration for Dynamic Programming algorithm"""
     
-    # Class count settings
+    # Class count
     class_count: int = 6
-    auto_class_count: bool = True  # Try 5, 6, 7 and pick best
+    auto_class_count: bool = True
     
-    # DP control parameters
-    max_states_per_layer: int = 10000  # Limit frontier size
-    time_limit: int = 300  # seconds
-    enable_dominance_pruning: bool = True
-    beam_width: int = 5000  # For beam search variant
-    
-    # Priority mode
+    # Priority and penalty modes
     priority_mode: PriorityMode = PriorityMode.ESIT
-    
-    # Time penalty mode
     time_penalty_mode: TimePenaltyMode = TimePenaltyMode.GAP_PROPORTIONAL
-    
-    # Workload constraint mode
     workload_constraint_mode: WorkloadConstraintMode = WorkloadConstraintMode.SOFT_ONLY
-    workload_hard_limit: int = 4  # B_max
-    workload_soft_band: int = 2   # +/- 2 tolerance
+    workload_hard_limit: int = 4  # B_max - maximum workload per instructor
     
-    # Penalty weights (C2 > C1, C2 > C3)
-    weight_h1: float = 1.0   # C1: Time/Gap penalty weight
-    weight_h2: float = 3.0   # C2: Workload penalty weight (MOST IMPORTANT)
-    weight_h3: float = 1.5   # C3: Class change penalty weight
-    weight_h4: float = 2.0   # C4: Class load balance penalty weight
-    weight_continuity: float = 2.5  # Continuity penalty weight
+    # Penalty weights (C1, C2, C3, C4, C5, C6, C7)
+    weight_h1: float = 1.0    # Time/Gap penalty
+    weight_h2: float = 2.0    # Workload uniformity penalty (most important)
+    weight_h3: float = 3.0    # Class change penalty
+    weight_h4: float = 0.5    # Class load balance penalty
+    weight_h5: float = 5.0    # Continuity penalty
+    weight_h6: float = 1000.0 # Timeslot conflict penalty (HARD)
+    weight_h7: float = 10000.0 # Unused class penalty (HARD)
     
-    # Slot duration
-    slot_duration: float = 0.5  # hours (30 minutes)
+    # DP-specific parameters
+    beam_width: int = 10      # Number of best solutions to keep
+    max_iterations: int = 1000
     tolerance: float = 0.001
 
 
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
+
 @dataclass
 class Project:
-    """Project data structure."""
+    """Project data structure"""
     id: int
-    title: str
-    type: str  # "interim" (ARA) or "final" (BITIRME)
-    responsible_id: int  # Project Supervisor (PS) - fixed
-    is_makeup: bool = False
-    
-    def __hash__(self):
-        return hash(self.id)
-    
-    def __eq__(self, other):
-        if isinstance(other, Project):
-            return self.id == other.id
-        return False
+    name: str
+    type: str  # "INTERIM" or "FINAL"
+    responsible_id: int  # PS (advisor) - fixed
 
 
 @dataclass
 class Instructor:
-    """Instructor data structure."""
+    """Instructor data structure"""
     id: int
     name: str
-    type: str  # "instructor" or "assistant"
-    
-    def __hash__(self):
-        return hash(self.id)
-    
-    def __eq__(self, other):
-        if isinstance(other, Instructor):
-            return self.id == other.id
-        return False
+    type: str  # "instructor" or "research_assistant"
 
 
 @dataclass
 class ProjectAssignment:
-    """Project assignment information."""
+    """Assignment of a single project"""
     project_id: int
     class_id: int
-    order_in_class: int  # slot within class (0-indexed)
-    ps_id: int  # Project Supervisor (fixed)
-    j1_id: int  # 1st Jury (decision variable)
-    j2_id: int = -1  # 2nd Jury (placeholder - not in model)
-    
-    def copy(self) -> 'ProjectAssignment':
-        return ProjectAssignment(
-            project_id=self.project_id,
-            class_id=self.class_id,
-            order_in_class=self.order_in_class,
-            ps_id=self.ps_id,
-            j1_id=self.j1_id,
-            j2_id=self.j2_id
-        )
+    order_in_class: int
+    ps_id: int      # Fixed advisor
+    j1_id: int      # Jury 1 (decision variable)
+    j2_id: int = -1  # Placeholder for RA (excluded from calculations)
 
 
 @dataclass
 class DPState:
-    """
-    DP State representation.
-    
-    Contains all information needed to uniquely identify a partial solution.
-    Must be hashable for memoization.
-    """
-    project_index: int  # Number of projects assigned so far
-    class_loads: Tuple[int, ...]  # Projects per class
-    faculty_loads: Tuple[int, ...]  # Workload per faculty
-    class_visit_masks: Tuple[int, ...]  # Bitmask of visited classes per faculty
-    continuity_signature: Tuple[Tuple[int, ...], ...]  # Block tracking per faculty per class
-    priority_state: Tuple[int, int]  # (max_ara_slot, min_bitirme_slot)
-    
-    def __hash__(self):
-        return hash((
-            self.project_index,
-            self.class_loads,
-            self.faculty_loads,
-            self.class_visit_masks,
-            self.continuity_signature,
-            self.priority_state
-        ))
-    
-    def __eq__(self, other):
-        if not isinstance(other, DPState):
-            return False
-        return (
-            self.project_index == other.project_index and
-            self.class_loads == other.class_loads and
-            self.faculty_loads == other.faculty_loads and
-            self.class_visit_masks == other.class_visit_masks and
-            self.continuity_signature == other.continuity_signature and
-            self.priority_state == other.priority_state
-        )
-    
-    def __lt__(self, other):
-        """Less than comparison for heap operations."""
-        if not isinstance(other, DPState):
-            return NotImplemented
-        # Compare by project_index first, then by sum of class_loads
-        if self.project_index != other.project_index:
-            return self.project_index < other.project_index
-        return sum(self.class_loads) < sum(other.class_loads)
-    
-    def __le__(self, other):
-        return self == other or self < other
-    
-    def __gt__(self, other):
-        if not isinstance(other, DPState):
-            return NotImplemented
-        return other < self
-    
-    def __ge__(self, other):
-        return self == other or self > other
-
-
-@dataclass
-class DPTransition:
-    """DP transition (action) information."""
-    project_id: int
-    class_id: int
-    slot_in_class: int
-    j1_id: int
-    incremental_cost: float
-
-
-@dataclass
-class DPSolution:
-    """Complete DP solution."""
+    """DP solution state"""
     assignments: List[ProjectAssignment] = field(default_factory=list)
     class_count: int = 6
-    total_cost: float = float('inf')
+    cost: float = float('inf')
     
-    def copy(self) -> 'DPSolution':
-        new_sol = DPSolution(
-            class_count=self.class_count,
-            total_cost=self.total_cost
-        )
-        new_sol.assignments = [a.copy() for a in self.assignments]
-        return new_sol
-
-
-@dataclass
-class ScoreBreakdown:
-    """Score details."""
-    h1_time_gap: float = 0.0
-    h2_workload: float = 0.0
-    h3_class_change: float = 0.0
-    h4_class_load_balance: float = 0.0
-    h5_continuity: float = 0.0
-    total_z: float = 0.0
+    def copy(self) -> 'DPState':
+        """Create a deep copy of this state"""
+        new_state = DPState(class_count=self.class_count, cost=self.cost)
+        new_state.assignments = [
+            ProjectAssignment(
+                project_id=a.project_id,
+                class_id=a.class_id,
+                order_in_class=a.order_in_class,
+                ps_id=a.ps_id,
+                j1_id=a.j1_id,
+                j2_id=a.j2_id
+            )
+            for a in self.assignments
+        ]
+        return new_state
     
-    def to_dict(self) -> Dict[str, float]:
-        return {
-            "h1_time_gap": self.h1_time_gap,
-            "h2_workload": self.h2_workload,
-            "h3_class_change": self.h3_class_change,
-            "h4_class_load_balance": self.h4_class_load_balance,
-            "h5_continuity": self.h5_continuity,
-            "total_z": self.total_z
-        }
+    def get_project_assignment(self, project_id: int) -> Optional[ProjectAssignment]:
+        """Get assignment for a specific project"""
+        for a in self.assignments:
+            if a.project_id == project_id:
+                return a
+        return None
 
 
-# ============================================================================
+# =============================================================================
 # PENALTY CALCULATOR
-# ============================================================================
+# =============================================================================
 
 class DPPenaltyCalculator:
     """
-    Penalty calculator for DP algorithm.
+    Calculate all penalty values for DP cost function.
     
-    OBJECTIVE: min Z = C1*H1 + C2*H2 + C3*H3 + C4*H4 + C5*H5
-    
-    - H1: Time/Gap Penalty
-    - H2: Workload Uniformity Penalty
-    - H3: Class Change Penalty
-    - H4: Class Load Balance Penalty
-    - H5: Continuity Penalty
+    Implements:
+    - H1: Time/Gap penalty
+    - H2: Workload uniformity penalty (±2 band)
+    - H3: Class change penalty
+    - H4: Class load balance penalty
+    - H5: Continuity penalty
+    - H6: Timeslot conflict penalty (hard)
+    - H7: Unused class penalty (hard)
     """
     
     def __init__(
-        self,
-        projects: List[Project],
-        instructors: List[Instructor],
+        self, 
+        projects: List[Project], 
+        instructors: List[Instructor], 
         config: DPConfig
     ):
         self.projects = {p.id: p for p in projects}
         self.instructors = {i.id: i for i in instructors}
         self.config = config
         
-        # Only real instructors (not assistants)
+        # Filter real faculty (not research assistants)
         self.faculty_instructors = {
-            i.id: i for i in instructors
+            i.id: i for i in instructors 
             if i.type == "instructor"
         }
         
-        # Calculate average workload: L_avg = 2Y / X
+        # Calculate average workload
         num_projects = len(projects)
         num_faculty = len(self.faculty_instructors)
-        self.total_workload = 2 * num_projects  # Each project = 2 duties: PS + J1
-        self.avg_workload = self.total_workload / num_faculty if num_faculty > 0 else 0
+        self.avg_workload = (2 * num_projects) / num_faculty if num_faculty > 0 else 0
     
-    def calculate_full_penalty(self, solution: DPSolution) -> ScoreBreakdown:
-        """Calculate all penalties and return detailed breakdown."""
-        h1 = self.calculate_h1_time_penalty(solution)
-        h2 = self.calculate_h2_workload_penalty(solution)
-        h3 = self.calculate_h3_class_change_penalty(solution)
-        h4 = self.calculate_h4_class_load_penalty(solution)
-        h5 = self.calculate_continuity_penalty(solution)
+    def calculate_total_cost(self, state: DPState) -> float:
+        """
+        Calculate total cost (penalty) for a state.
         
-        total_z = (
+        Cost = C1*H1 + C2*H2 + C3*H3 + C4*H4 + C5*H5 + C6*H6 + C7*H7
+        """
+        h1 = self.calculate_h1_time_penalty(state)
+        h2 = self.calculate_h2_workload_penalty(state)
+        h3 = self.calculate_h3_class_change_penalty(state)
+        h4 = self.calculate_h4_class_load_penalty(state)
+        h5 = self.calculate_h5_continuity_penalty(state)
+        h6 = self.calculate_h6_timeslot_conflict_penalty(state)
+        h7 = self.calculate_h7_unused_class_penalty(state)
+        
+        total = (
             self.config.weight_h1 * h1 +
             self.config.weight_h2 * h2 +
             self.config.weight_h3 * h3 +
             self.config.weight_h4 * h4 +
-            self.config.weight_continuity * h5
+            self.config.weight_h5 * h5 +
+            self.config.weight_h6 * h6 +
+            self.config.weight_h7 * h7
         )
         
-        return ScoreBreakdown(
-            h1_time_gap=h1,
-            h2_workload=h2,
-            h3_class_change=h3,
-            h4_class_load_balance=h4,
-            h5_continuity=h5,
-            total_z=total_z
-        )
+        return total
     
-    def calculate_total_penalty(self, solution: DPSolution) -> float:
-        """Calculate total penalty value."""
-        return self.calculate_full_penalty(solution).total_z
-    
-    def calculate_h1_time_penalty(self, solution: DPSolution) -> float:
+    def calculate_h1_time_penalty(self, state: DPState) -> float:
         """
-        H1: Time/Gap penalty.
+        H1: Time/Gap penalty for non-consecutive tasks.
         
-        For each instructor, check consecutive tasks in same class.
-        BINARY: gap > 0 = 1 penalty
-        GAP_PROPORTIONAL: penalty = gap count
+        Binary mode: 1 if not consecutive, 0 otherwise
+        GAP_PROPORTIONAL mode: gap size as penalty
         """
         total_penalty = 0.0
-        instructor_tasks = self._build_instructor_task_matrix(solution)
+        
+        # Build task matrix for each instructor
+        instructor_tasks = self._build_instructor_task_matrix(state)
         
         for instructor_id, tasks in instructor_tasks.items():
             if len(tasks) <= 1:
                 continue
             
-            # Sort by class and slot
-            tasks.sort(key=lambda x: (x['class_id'], x['order']))
+            # Sort by timeslot (class_id * 100 + order)
+            tasks.sort(key=lambda x: x['class_id'] * 100 + x['order'])
             
-            # Check consecutive tasks in same class
-            for r in range(len(tasks) - 1):
-                current = tasks[r]
-                next_task = tasks[r + 1]
+            # Calculate gap penalties between consecutive tasks
+            for i in range(len(tasks) - 1):
+                current = tasks[i]
+                next_task = tasks[i + 1]
                 
+                # Check if same class and consecutive
                 if current['class_id'] == next_task['class_id']:
                     gap = next_task['order'] - current['order'] - 1
-                    
                     if gap > 0:
                         if self.config.time_penalty_mode == TimePenaltyMode.BINARY:
                             total_penalty += 1
                         else:  # GAP_PROPORTIONAL
                             total_penalty += gap
                 else:
-                    # Class change also counts as disruption
+                    # Different class - always penalty
                     if self.config.time_penalty_mode == TimePenaltyMode.BINARY:
                         total_penalty += 1
                     else:
-                        total_penalty += 1
+                        # Calculate equivalent gap
+                        total_penalty += 2  # Cross-class penalty
         
         return total_penalty
     
-    def calculate_h2_workload_penalty(self, solution: DPSolution) -> float:
+    def calculate_h2_workload_penalty(self, state: DPState) -> float:
         """
         H2: Workload uniformity penalty.
         
-        deviation = max(0, |Load(i) - L_avg| - 2)
-        H2 = sum(deviation)
+        For each instructor:
+        penalty = max(0, |Load(h) - AvgLoad| - 2)
         
-        SOFT_AND_HARD: |Load(i) - L_avg| > B_max = large penalty
+        The ±2 band means deviations within 2 are acceptable.
         """
         total_penalty = 0.0
-        workload = self._calculate_instructor_workloads(solution)
         
+        # Count workload per instructor
+        workloads = defaultdict(int)
+        for assignment in state.assignments:
+            workloads[assignment.ps_id] += 1  # PS role
+            workloads[assignment.j1_id] += 1  # J1 role
+            # J2 is placeholder, excluded from calculations
+        
+        # Calculate penalty for each faculty member
         for instructor_id in self.faculty_instructors.keys():
-            load = workload.get(instructor_id, 0)
+            load = workloads.get(instructor_id, 0)
             deviation = abs(load - self.avg_workload)
-            
-            # Soft penalty: +/- 2 tolerance
-            penalty = max(0, deviation - self.config.workload_soft_band)
+            penalty = max(0, deviation - 2)  # ±2 band tolerance
             total_penalty += penalty
-            
-            # Hard constraint check
-            if self.config.workload_constraint_mode == WorkloadConstraintMode.SOFT_AND_HARD:
-                if deviation > self.config.workload_hard_limit:
-                    total_penalty += 1000  # Large penalty (infeasible)
         
         return total_penalty
     
-    def calculate_h3_class_change_penalty(self, solution: DPSolution) -> float:
+    def calculate_h3_class_change_penalty(self, state: DPState) -> float:
         """
         H3: Class change penalty.
         
-        count = number of different classes instructor has duties in
-        penalty = max(0, count - 2)
+        For each instructor:
+        penalty = max(0, NumberOfClasses(h) - 2)^2 * 5
         """
         total_penalty = 0.0
-        instructor_classes = defaultdict(set)
         
-        for assignment in solution.assignments:
+        # Find classes used by each instructor
+        instructor_classes = defaultdict(set)
+        for assignment in state.assignments:
             instructor_classes[assignment.ps_id].add(assignment.class_id)
             instructor_classes[assignment.j1_id].add(assignment.class_id)
         
         for instructor_id in self.faculty_instructors.keys():
             class_count = len(instructor_classes.get(instructor_id, set()))
-            # 1-2 classes ideal, more = penalty
             if class_count > 2:
-                penalty = (class_count - 2) ** 2  # Quadratic penalty
+                # Squared penalty for excessive class changes
+                penalty = (class_count - 2) ** 2 * 5
                 total_penalty += penalty
         
         return total_penalty
     
-    def calculate_h4_class_load_penalty(self, solution: DPSolution) -> float:
+    def calculate_h4_class_load_penalty(self, state: DPState) -> float:
         """
         H4: Class load balance penalty.
         
-        Target per class = num_projects / class_count
-        Empty classes = large penalty (hard constraint)
+        Each class should have approximately equal number of projects.
         """
         total_penalty = 0.0
         
-        num_projects = len(solution.assignments)
+        num_projects = len(state.assignments)
         if num_projects == 0:
             return 0.0
         
-        target_per_class = num_projects / solution.class_count
+        target_per_class = num_projects / state.class_count
         
+        # Count projects per class
         class_loads = defaultdict(int)
-        for assignment in solution.assignments:
+        for assignment in state.assignments:
             class_loads[assignment.class_id] += 1
         
-        # Empty class penalty (hard constraint)
-        for class_id in range(solution.class_count):
+        # Calculate penalty for each class
+        for class_id in range(state.class_count):
             load = class_loads.get(class_id, 0)
-            if load == 0:
-                total_penalty += 1000.0  # Large penalty
-            else:
-                deviation = abs(load - target_per_class)
-                total_penalty += deviation
+            if load > 0:
+                penalty = abs(load - target_per_class)
+                total_penalty += penalty
         
         return total_penalty
     
-    def calculate_continuity_penalty(self, solution: DPSolution) -> float:
+    def calculate_h5_continuity_penalty(self, state: DPState) -> float:
         """
-        Continuity penalty.
+        H5: Continuity penalty.
         
-        For each instructor in each class, count activity blocks.
-        Ideal: 1 block (consecutive duties)
-        Penalty: Blocks(h,s) - 1
+        Penalizes instructors who have fragmented schedules
+        (multiple separate blocks instead of continuous tasks).
         """
         total_penalty = 0.0
         
-        for instructor_id in self.faculty_instructors.keys():
-            for class_id in range(solution.class_count):
-                blocks = self._count_blocks(solution, instructor_id, class_id)
+        # Build task matrix
+        instructor_tasks = self._build_instructor_task_matrix(state)
+        
+        for instructor_id, tasks in instructor_tasks.items():
+            if len(tasks) <= 1:
+                continue
+            
+            # Group tasks by class
+            tasks_by_class = defaultdict(list)
+            for task in tasks:
+                tasks_by_class[task['class_id']].append(task)
+            
+            # Count blocks per class
+            for class_id, class_tasks in tasks_by_class.items():
+                if len(class_tasks) <= 1:
+                    continue
+                
+                # Sort by order
+                class_tasks.sort(key=lambda x: x['order'])
+                
+                # Count separate blocks
+                blocks = 1
+                for i in range(len(class_tasks) - 1):
+                    if class_tasks[i + 1]['order'] - class_tasks[i]['order'] > 1:
+                        blocks += 1
+                
+                # Penalty for extra blocks
                 if blocks > 1:
-                    penalty = (blocks - 1) ** 2  # Quadratic penalty
-                    total_penalty += penalty
+                    total_penalty += (blocks - 1) ** 2 * 10
         
         return total_penalty
     
-    def _build_instructor_task_matrix(
-        self,
-        solution: DPSolution
-    ) -> Dict[int, List[Dict[str, Any]]]:
-        """Build task matrix for each instructor."""
+    def calculate_h6_timeslot_conflict_penalty(self, state: DPState) -> float:
+        """
+        H6: Timeslot conflict penalty (HARD constraint).
+        
+        Penalizes instructors who have multiple tasks in the same timeslot.
+        CRITICAL: Same order_in_class across different classes = SAME TIMESLOT!
+        """
+        total_penalty = 0.0
+        
+        # Build instructor schedule: instructor_id -> order -> list of class_ids
+        instructor_schedule = defaultdict(lambda: defaultdict(list))
+        
+        for assignment in state.assignments:
+            # PS role
+            instructor_schedule[assignment.ps_id][assignment.order_in_class].append(assignment.class_id)
+            # J1 role
+            instructor_schedule[assignment.j1_id][assignment.order_in_class].append(assignment.class_id)
+        
+        # Find conflicts: multiple assignments at same timeslot (order)
+        for instructor_id, orders in instructor_schedule.items():
+            for order, classes in orders.items():
+                if len(classes) > 1:
+                    # Check if they are in DIFFERENT classes (real conflict)
+                    unique_classes = set(classes)
+                    if len(unique_classes) > 1:
+                        # CONFLICT: Instructor in multiple classes at same time
+                        total_penalty += (len(unique_classes) - 1) * 1.0
+        
+        return total_penalty
+    
+    def calculate_h7_unused_class_penalty(self, state: DPState) -> float:
+        """
+        H7: Unused class penalty (HARD constraint).
+        
+        All specified classes must be used.
+        """
+        used_classes = set()
+        for assignment in state.assignments:
+            used_classes.add(assignment.class_id)
+        
+        unused_count = state.class_count - len(used_classes)
+        if unused_count > 0:
+            return unused_count * unused_count * 100.0  # Squared penalty
+        return 0.0
+    
+    def count_conflicts(self, state: DPState) -> int:
+        """Count the number of timeslot conflicts in the state."""
+        conflict_count = 0
+        
+        # Build instructor schedule: instructor_id -> order -> set of class_ids
+        instructor_schedule = defaultdict(lambda: defaultdict(set))
+        
+        for assignment in state.assignments:
+            # PS role
+            instructor_schedule[assignment.ps_id][assignment.order_in_class].add(assignment.class_id)
+            # J1 role
+            instructor_schedule[assignment.j1_id][assignment.order_in_class].add(assignment.class_id)
+        
+        # Count conflicts
+        for instructor_id, orders in instructor_schedule.items():
+            for order, classes in orders.items():
+                if len(classes) > 1:
+                    conflict_count += len(classes) - 1
+        
+        return conflict_count
+    
+    def _build_instructor_task_matrix(self, state: DPState) -> Dict[int, List[Dict]]:
+        """Build task matrix for each instructor"""
         instructor_tasks = defaultdict(list)
         
-        for assignment in solution.assignments:
-            # PS duty
+        for assignment in state.assignments:
+            # PS task
             instructor_tasks[assignment.ps_id].append({
                 'project_id': assignment.project_id,
                 'class_id': assignment.class_id,
@@ -491,7 +473,7 @@ class DPPenaltyCalculator:
                 'role': 'PS'
             })
             
-            # J1 duty
+            # J1 task
             instructor_tasks[assignment.j1_id].append({
                 'project_id': assignment.project_id,
                 'class_id': assignment.class_id,
@@ -500,1828 +482,1042 @@ class DPPenaltyCalculator:
             })
         
         return instructor_tasks
-    
-    def _calculate_instructor_workloads(
-        self,
-        solution: DPSolution
-    ) -> Dict[int, int]:
-        """Calculate total workload for each instructor."""
-        workload = defaultdict(int)
-        
-        for assignment in solution.assignments:
-            workload[assignment.ps_id] += 1
-            workload[assignment.j1_id] += 1
-        
-        return workload
-    
-    def _count_blocks(
-        self,
-        solution: DPSolution,
-        instructor_id: int,
-        class_id: int
-    ) -> int:
-        """Count activity blocks for instructor in class."""
-        class_assignments = [
-            a for a in solution.assignments
-            if a.class_id == class_id
-        ]
-        
-        if not class_assignments:
-            return 0
-        
-        class_assignments.sort(key=lambda x: x.order_in_class)
-        
-        # Build presence array
-        presence = []
-        for a in class_assignments:
-            is_present = (a.ps_id == instructor_id or a.j1_id == instructor_id)
-            presence.append(1 if is_present else 0)
-        
-        if sum(presence) == 0:
-            return 0
-        
-        # Count 0->1 transitions (block starts)
-        blocks = 0
-        for i in range(len(presence)):
-            if presence[i] == 1:
-                if i == 0 or presence[i - 1] == 0:
-                    blocks += 1
-        
-        return blocks
-    
-    def calculate_incremental_cost(
-        self,
-        state: DPState,
-        transition: DPTransition,
-        project: Project,
-        class_count: int
-    ) -> float:
-        """
-        Calculate incremental cost for a transition.
-        
-        This is used during DP to estimate cost without building full solution.
-        """
-        cost = 0.0
-        
-        # Workload penalty increment
-        # New load for PS and J1
-        ps_idx = self._get_faculty_index(project.responsible_id)
-        j1_idx = self._get_faculty_index(transition.j1_id)
-        
-        if ps_idx is not None:
-            new_ps_load = state.faculty_loads[ps_idx] + 1
-            old_deviation = max(0, abs(state.faculty_loads[ps_idx] - self.avg_workload) - self.config.workload_soft_band)
-            new_deviation = max(0, abs(new_ps_load - self.avg_workload) - self.config.workload_soft_band)
-            cost += self.config.weight_h2 * (new_deviation - old_deviation)
-        
-        if j1_idx is not None:
-            new_j1_load = state.faculty_loads[j1_idx] + 1
-            old_deviation = max(0, abs(state.faculty_loads[j1_idx] - self.avg_workload) - self.config.workload_soft_band)
-            new_deviation = max(0, abs(new_j1_load - self.avg_workload) - self.config.workload_soft_band)
-            cost += self.config.weight_h2 * (new_deviation - old_deviation)
-        
-        # Class change penalty increment
-        if ps_idx is not None:
-            old_class_count = bin(state.class_visit_masks[ps_idx]).count('1')
-            new_mask = state.class_visit_masks[ps_idx] | (1 << transition.class_id)
-            new_class_count = bin(new_mask).count('1')
-            if new_class_count > old_class_count:
-                old_penalty = max(0, old_class_count - 2) ** 2
-                new_penalty = max(0, new_class_count - 2) ** 2
-                cost += self.config.weight_h3 * (new_penalty - old_penalty)
-        
-        if j1_idx is not None:
-            old_class_count = bin(state.class_visit_masks[j1_idx]).count('1')
-            new_mask = state.class_visit_masks[j1_idx] | (1 << transition.class_id)
-            new_class_count = bin(new_mask).count('1')
-            if new_class_count > old_class_count:
-                old_penalty = max(0, old_class_count - 2) ** 2
-                new_penalty = max(0, new_class_count - 2) ** 2
-                cost += self.config.weight_h3 * (new_penalty - old_penalty)
-        
-        # Class load balance penalty
-        target_per_class = len(self.projects) / class_count
-        old_load = state.class_loads[transition.class_id]
-        new_load = old_load + 1
-        
-        old_deviation = abs(old_load - target_per_class)
-        new_deviation = abs(new_load - target_per_class)
-        cost += self.config.weight_h4 * (new_deviation - old_deviation)
-        
-        return cost
-    
-    def _get_faculty_index(self, instructor_id: int) -> Optional[int]:
-        """Get faculty index from instructor ID."""
-        faculty_list = list(self.faculty_instructors.keys())
-        try:
-            return faculty_list.index(instructor_id)
-        except ValueError:
-            return None
 
 
-# ============================================================================
-# DP SOLVER
-# ============================================================================
-
-class DPSolver:
-    """
-    Dynamic Programming Solver for academic project jury scheduling.
-    
-    Uses a forward DP approach with state-space exploration.
-    State: (project_index, class_loads, faculty_loads, class_visit_masks, 
-            continuity_signature, priority_state)
-    """
-    
-    def __init__(
-        self,
-        projects: List[Project],
-        instructors: List[Instructor],
-        classrooms: List[Dict[str, Any]],
-        timeslots: List[Dict[str, Any]],
-        config: DPConfig
-    ):
-        self.projects = projects
-        self.instructors = instructors
-        self.classrooms = classrooms
-        self.timeslots = timeslots
-        self.config = config
-        
-        # Only real instructors
-        self.faculty_instructors = [
-            i for i in instructors if i.type == "instructor"
-        ]
-        self.faculty_ids = [i.id for i in self.faculty_instructors]
-        
-        # Create mappings
-        self.project_map = {p.id: p for p in projects}
-        self.instructor_map = {i.id: i for i in instructors}
-        self.faculty_index_map = {
-            fid: idx for idx, fid in enumerate(self.faculty_ids)
-        }
-        
-        # Penalty calculator
-        self.penalty_calculator = DPPenaltyCalculator(
-            projects, instructors, config
-        )
-        
-        # Order projects by type for priority mode
-        self.ordered_projects = self._order_projects_by_priority()
-        
-        logger.info(f"DPSolver initialized: {len(projects)} projects, "
-                   f"{len(self.faculty_instructors)} faculty, "
-                   f"priority_mode={config.priority_mode}")
-    
-    def _order_projects_by_priority(self) -> List[Project]:
-        """Order projects based on priority mode."""
-        ara_projects = [p for p in self.projects if p.type == "interim"]
-        bitirme_projects = [p for p in self.projects if p.type == "final"]
-        
-        if self.config.priority_mode == PriorityMode.ARA_ONCE:
-            return ara_projects + bitirme_projects
-        elif self.config.priority_mode == PriorityMode.BITIRME_ONCE:
-            return bitirme_projects + ara_projects
-        else:  # ESIT
-            return self.projects.copy()
-    
-    def solve(self, class_count: int) -> Tuple[DPSolution, ScoreBreakdown]:
-        """
-        Solve DP for given class count.
-        
-        Args:
-            class_count: Number of classes to use
-            
-        Returns:
-            (best_solution, score_breakdown)
-        """
-        start_time = time.time()
-        num_projects = len(self.projects)
-        num_faculty = len(self.faculty_instructors)
-        
-        logger.info(f"Starting DP solve with {class_count} classes...")
-        
-        # Build initial state
-        initial_state = self._build_initial_state(class_count, num_faculty)
-        
-        # DP frontier: state -> (cost, predecessor_state, transition)
-        frontier = {initial_state: (0.0, None, None)}
-        
-        best_solution = None
-        best_cost = float('inf')
-        
-        # Forward DP loop
-        for k in range(num_projects):
-            if time.time() - start_time > self.config.time_limit:
-                logger.warning(f"DP time limit reached at project {k}")
-                break
-            
-            project = self.ordered_projects[k]
-            next_frontier = {}
-            
-            logger.debug(f"Processing project {k + 1}/{num_projects}: {project.title}")
-            
-            for state, (cost, pred_state, pred_trans) in frontier.items():
-                # Generate all valid transitions for this project
-                transitions = self._generate_transitions(
-                    state, project, class_count
-                )
-                
-                for transition in transitions:
-                    # Check hard constraints
-                    if not self._is_valid_transition(state, transition, project):
-                        continue
-                    
-                    # Compute new state
-                    new_state = self._apply_transition(
-                        state, transition, project, class_count, num_faculty
-                    )
-                    
-                    # Calculate incremental cost
-                    incr_cost = self.penalty_calculator.calculate_incremental_cost(
-                        state, transition, project, class_count
-                    )
-                    new_cost = cost + incr_cost
-                    
-                    # Check if this state is better
-                    if new_state not in next_frontier or new_cost < next_frontier[new_state][0]:
-                        next_frontier[new_state] = (new_cost, state, transition)
-            
-            # Apply dominance pruning if enabled
-            if self.config.enable_dominance_pruning:
-                next_frontier = self._prune_dominated_states(next_frontier)
-            
-            # Limit frontier size (beam search)
-            if len(next_frontier) > self.config.max_states_per_layer:
-                next_frontier = self._beam_prune(next_frontier)
-            
-            frontier = next_frontier
-            
-            logger.debug(f"Layer {k + 1}: {len(frontier)} states in frontier")
-        
-        # Find best final state
-        if frontier:
-            for state, (cost, pred_state, pred_trans) in frontier.items():
-                if state.project_index == num_projects and cost < best_cost:
-                    best_cost = cost
-                    best_solution = self._reconstruct_solution(
-                        state, frontier, class_count
-                    )
-        
-        if best_solution is None:
-            logger.warning("No valid solution found, creating fallback")
-            best_solution = self._create_fallback_solution(class_count)
-        
-        # Calculate final score breakdown
-        score = self.penalty_calculator.calculate_full_penalty(best_solution)
-        best_solution.total_cost = score.total_z
-        
-        elapsed = time.time() - start_time
-        logger.info(f"DP solve completed in {elapsed:.2f}s, cost={score.total_z:.2f}")
-        
-        return best_solution, score
-    
-    def _build_initial_state(
-        self,
-        class_count: int,
-        num_faculty: int
-    ) -> DPState:
-        """Build initial DP state."""
-        return DPState(
-            project_index=0,
-            class_loads=tuple([0] * class_count),
-            faculty_loads=tuple([0] * num_faculty),
-            class_visit_masks=tuple([0] * num_faculty),
-            continuity_signature=tuple(
-                tuple([0] * class_count) for _ in range(num_faculty)
-            ),
-            priority_state=(0, 999999)  # (max_ara_slot, min_bitirme_slot) - use large int
-        )
-    
-    def _generate_transitions(
-        self,
-        state: DPState,
-        project: Project,
-        class_count: int
-    ) -> List[DPTransition]:
-        """Generate all possible transitions for a project."""
-        transitions = []
-        
-        for class_id in range(class_count):
-            # Slot is determined by current class load (back-to-back)
-            slot_in_class = state.class_loads[class_id]
-            
-            # J1 candidates: all faculty except PS
-            for j1_id in self.faculty_ids:
-                if j1_id == project.responsible_id:
-                    continue  # J1 != PS
-                
-                transition = DPTransition(
-                    project_id=project.id,
-                    class_id=class_id,
-                    slot_in_class=slot_in_class,
-                    j1_id=j1_id,
-                    incremental_cost=0.0  # Calculated later
-                )
-                transitions.append(transition)
-        
-        return transitions
-    
-    def _is_valid_transition(
-        self,
-        state: DPState,
-        transition: DPTransition,
-        project: Project
-    ) -> bool:
-        """Check if transition satisfies hard constraints."""
-        
-        # 1. J1 != PS (already filtered in generate_transitions)
-        if transition.j1_id == project.responsible_id:
-            return False
-        
-        # 2. Priority mode constraints
-        if self.config.priority_mode == PriorityMode.ARA_ONCE:
-            if project.type == "interim":
-                # ARA project - update max_ara_slot
-                global_slot = self._calculate_global_slot(
-                    state, transition.class_id, transition.slot_in_class
-                )
-                # Check if this would violate ordering
-                if global_slot > state.priority_state[1]:  # max_ara > min_bitirme
-                    return False
-            elif project.type == "final":
-                global_slot = self._calculate_global_slot(
-                    state, transition.class_id, transition.slot_in_class
-                )
-                if global_slot < state.priority_state[0]:  # min_bitirme < max_ara
-                    return False
-        
-        elif self.config.priority_mode == PriorityMode.BITIRME_ONCE:
-            if project.type == "final":
-                global_slot = self._calculate_global_slot(
-                    state, transition.class_id, transition.slot_in_class
-                )
-                if global_slot > state.priority_state[1]:
-                    return False
-            elif project.type == "interim":
-                global_slot = self._calculate_global_slot(
-                    state, transition.class_id, transition.slot_in_class
-                )
-                if global_slot < state.priority_state[0]:
-                    return False
-        
-        # 3. Workload hard limit (if SOFT_AND_HARD)
-        if self.config.workload_constraint_mode == WorkloadConstraintMode.SOFT_AND_HARD:
-            ps_idx = self.faculty_index_map.get(project.responsible_id)
-            j1_idx = self.faculty_index_map.get(transition.j1_id)
-            
-            if ps_idx is not None:
-                new_load = state.faculty_loads[ps_idx] + 1
-                deviation = abs(new_load - self.penalty_calculator.avg_workload)
-                if deviation > self.config.workload_hard_limit:
-                    return False
-            
-            if j1_idx is not None:
-                new_load = state.faculty_loads[j1_idx] + 1
-                deviation = abs(new_load - self.penalty_calculator.avg_workload)
-                if deviation > self.config.workload_hard_limit:
-                    return False
-        
-        return True
-    
-    def _calculate_global_slot(
-        self,
-        state: DPState,
-        class_id: int,
-        slot_in_class: int
-    ) -> int:
-        """Calculate global slot index from class and local slot."""
-        # Simple linearization: class_id * max_slots_per_class + slot_in_class
-        max_slots = len(self.timeslots) if self.timeslots else 20
-        return class_id * max_slots + slot_in_class
-    
-    def _apply_transition(
-        self,
-        state: DPState,
-        transition: DPTransition,
-        project: Project,
-        class_count: int,
-        num_faculty: int
-    ) -> DPState:
-        """Apply transition to create new state."""
-        
-        # Update class loads
-        new_class_loads = list(state.class_loads)
-        new_class_loads[transition.class_id] += 1
-        
-        # Update faculty loads
-        new_faculty_loads = list(state.faculty_loads)
-        ps_idx = self.faculty_index_map.get(project.responsible_id)
-        j1_idx = self.faculty_index_map.get(transition.j1_id)
-        
-        if ps_idx is not None:
-            new_faculty_loads[ps_idx] += 1
-        if j1_idx is not None:
-            new_faculty_loads[j1_idx] += 1
-        
-        # Update class visit masks
-        new_class_visit_masks = list(state.class_visit_masks)
-        if ps_idx is not None:
-            new_class_visit_masks[ps_idx] |= (1 << transition.class_id)
-        if j1_idx is not None:
-            new_class_visit_masks[j1_idx] |= (1 << transition.class_id)
-        
-        # Update continuity signature
-        new_continuity = [list(row) for row in state.continuity_signature]
-        if ps_idx is not None:
-            new_continuity[ps_idx][transition.class_id] = transition.slot_in_class + 1
-        if j1_idx is not None:
-            new_continuity[j1_idx][transition.class_id] = transition.slot_in_class + 1
-        
-        # Update priority state
-        global_slot = self._calculate_global_slot(
-            state, transition.class_id, transition.slot_in_class
-        )
-        max_ara, min_bitirme = state.priority_state
-        
-        if project.type == "interim":
-            max_ara = max(max_ara, global_slot)
-        elif project.type == "final":
-            min_bitirme = min(min_bitirme, global_slot)
-        
-        return DPState(
-            project_index=state.project_index + 1,
-            class_loads=tuple(new_class_loads),
-            faculty_loads=tuple(new_faculty_loads),
-            class_visit_masks=tuple(new_class_visit_masks),
-            continuity_signature=tuple(tuple(row) for row in new_continuity),
-            priority_state=(max_ara, min_bitirme)
-        )
-    
-    def _prune_dominated_states(
-        self,
-        frontier: Dict[DPState, Tuple[float, Any, Any]]
-    ) -> Dict[DPState, Tuple[float, Any, Any]]:
-        """
-        Prune dominated states from frontier.
-        
-        A state S1 dominates S2 if S1 has same structural features
-        but strictly better cost.
-        """
-        # Group states by structural key (excluding cost-dependent parts)
-        groups = defaultdict(list)
-        
-        for state, value in frontier.items():
-            # Structural key: class_loads + faculty_loads distribution
-            struct_key = (
-                state.project_index,
-                state.class_loads,
-                # Sorted faculty loads (distribution matters, not individual assignment)
-                tuple(sorted(state.faculty_loads))
-            )
-            groups[struct_key].append((state, value))
-        
-        # Keep only best in each group
-        pruned = {}
-        for struct_key, states in groups.items():
-            best_state, best_value = min(states, key=lambda x: x[1][0])
-            pruned[best_state] = best_value
-        
-        return pruned
-    
-    def _beam_prune(
-        self,
-        frontier: Dict[DPState, Tuple[float, Any, Any]]
-    ) -> Dict[DPState, Tuple[float, Any, Any]]:
-        """Keep only top-k states by cost (beam search)."""
-        sorted_states = sorted(frontier.items(), key=lambda x: x[1][0])
-        pruned = dict(sorted_states[:self.config.beam_width])
-        return pruned
-    
-    def _reconstruct_solution(
-        self,
-        final_state: DPState,
-        frontier: Dict[DPState, Tuple[float, Any, Any]],
-        class_count: int
-    ) -> DPSolution:
-        """
-        Reconstruct full solution from DP path.
-        
-        CRITICAL: Ensures ALL projects are included.
-        """
-        solution = DPSolution(class_count=class_count)
-        
-        # Need to trace back through all states
-        # This requires storing predecessor info during DP
-        # For simplicity, rebuild using a fresh forward pass
-        
-        # CRITICAL: Use ALL projects, not just ordered_projects
-        # ordered_projects might be filtered, but we need ALL projects
-        all_projects = self.projects.copy()
-        ordered_projects = self._order_projects()
-        
-        # Ensure ordered_projects contains ALL projects
-        ordered_ids = {p.id for p in ordered_projects}
-        for p in all_projects:
-            if p.id not in ordered_ids:
-                logger.warning(f"[RECONSTRUCT] Adding missing project {p.id} to ordered list")
-                ordered_projects.append(p)
-        
-        # Simplified reconstruction: use greedy assignment following ordered projects
-        assignments = []
-        class_loads = [0] * class_count
-        
-        for project in ordered_projects:
-            # Find best class/J1 combination
-            best_class = min(range(class_count), key=lambda c: class_loads[c])
-            slot = class_loads[best_class]
-            
-            # Pick J1 with lowest workload (excluding PS)
-            workloads = defaultdict(int)
-            for a in assignments:
-                workloads[a.ps_id] += 1
-                workloads[a.j1_id] += 1
-            
-            available_j1 = [
-                fid for fid in self.faculty_ids
-                if fid != project.responsible_id
-            ]
-            
-            if available_j1:
-                best_j1 = min(available_j1, key=lambda j: workloads.get(j, 0))
-            else:
-                best_j1 = self.faculty_ids[0] if self.faculty_ids else -1
-            
-            assignment = ProjectAssignment(
-                project_id=project.id,
-                class_id=best_class,
-                order_in_class=slot,
-                ps_id=project.responsible_id,
-                j1_id=best_j1,
-                j2_id=-1  # Placeholder
-            )
-            assignments.append(assignment)
-            class_loads[best_class] += 1
-        
-        solution.assignments = assignments
-        
-        # CRITICAL: Verify ALL projects are included
-        assigned_ids = {a.project_id for a in assignments}
-        all_project_ids = {p.id for p in self.projects}
-        if len(assigned_ids) != len(all_project_ids):
-            logger.error(f"[RECONSTRUCT] CRITICAL: Missing {len(all_project_ids) - len(assigned_ids)} projects!")
-        else:
-            logger.info(f"[RECONSTRUCT] SUCCESS: All {len(all_project_ids)} projects are in solution!")
-        
-        return solution
-    
-    def _create_fallback_solution(self, class_count: int) -> DPSolution:
-        """Create fallback solution when DP fails."""
-        solution = DPSolution(class_count=class_count)
-        class_loads = [0] * class_count
-        
-        for i, project in enumerate(self.projects):
-            class_id = i % class_count
-            slot = class_loads[class_id]
-            
-            # Pick first available J1
-            j1_id = None
-            for fid in self.faculty_ids:
-                if fid != project.responsible_id:
-                    j1_id = fid
-                    break
-            
-            if j1_id is None:
-                j1_id = self.faculty_ids[0] if self.faculty_ids else -1
-            
-            assignment = ProjectAssignment(
-                project_id=project.id,
-                class_id=class_id,
-                order_in_class=slot,
-                ps_id=project.responsible_id,
-                j1_id=j1_id,
-                j2_id=-1
-            )
-            solution.assignments.append(assignment)
-            class_loads[class_id] += 1
-        
-        return solution
-
-
-# ============================================================================
-# SOLUTION BUILDER (Advanced)
-# ============================================================================
+# =============================================================================
+# SOLUTION BUILDER WITH PROACTIVE CONFLICT PREVENTION
+# =============================================================================
 
 class DPSolutionBuilder:
     """
-    Advanced solution builder using DP with A* style heuristics.
+    Build DP solutions with PROACTIVE conflict prevention.
     
-    Uses priority queue with f(n) = g(n) + h(n) where:
-    - g(n) = actual cost so far
-    - h(n) = estimated remaining cost (admissible heuristic)
+    Key principle: conflict-free solutions by design, not by repair.
+    Uses instructor_schedule as the central component to track all assignments.
     """
     
     def __init__(
         self,
         projects: List[Project],
         instructors: List[Instructor],
-        config: DPConfig
+        config: DPConfig,
+        penalty_calculator: DPPenaltyCalculator
     ):
         self.projects = projects
+        self.projects_dict = {p.id: p for p in projects}
         self.instructors = instructors
         self.config = config
+        self.penalty_calculator = penalty_calculator
         
-        self.faculty_instructors = [
-            i for i in instructors if i.type == "instructor"
+        # Faculty IDs (not research assistants)
+        self.faculty_ids = [
+            i.id for i in instructors 
+            if i.type == "instructor"
         ]
-        self.faculty_ids = [i.id for i in self.faculty_instructors]
-        self.faculty_index_map = {
-            fid: idx for idx, fid in enumerate(self.faculty_ids)
-        }
         
-        self.penalty_calculator = DPPenaltyCalculator(
-            projects, instructors, config
-        )
+        # Track projects by instructor
+        self.projects_by_instructor = defaultdict(list)
+        for p in projects:
+            self.projects_by_instructor[p.responsible_id].append(p)
+        
+        # Average workload
+        num_projects = len(projects)
+        num_faculty = len(self.faculty_ids)
+        self.avg_workload = (2 * num_projects) / num_faculty if num_faculty > 0 else 0
+        
+        # CENTRAL COMPONENT: Instructor schedule tracking
+        # Key: (class_id, order_in_class) -> set of instructor_ids busy at this slot
+        self.instructor_schedule: Dict[Tuple[int, int], Set[int]] = {}
     
-    def build_optimal_solution(self, class_count: int) -> DPSolution:
-        """
-        Build optimal solution using A* search variant.
-        
-        This method explores the state space more efficiently than pure DP
-        by using estimated remaining costs to guide search.
-        """
-        num_projects = len(self.projects)
-        num_faculty = len(self.faculty_instructors)
-        
-        # Order projects
-        ordered_projects = self._order_projects()
-        
-        # Initial state
-        initial_state = DPState(
-            project_index=0,
-            class_loads=tuple([0] * class_count),
-            faculty_loads=tuple([0] * num_faculty),
-            class_visit_masks=tuple([0] * num_faculty),
-            continuity_signature=tuple(
-                tuple([0] * class_count) for _ in range(num_faculty)
-            ),
-            priority_state=(0, 999999)  # Use large int instead of float('inf')
-        )
-        
-        # Priority queue: (f_score, counter, g_score, state, path)
-        # Counter ensures stable ordering when f_scores are equal
-        # path = list of (project_id, class_id, slot, j1_id)
-        initial_h = self._estimate_remaining_cost(initial_state, num_projects)
-        counter = 0
-        pq = [(initial_h, counter, 0.0, initial_state, [])]
-        visited = set()
-        
-        best_solution = None
-        best_cost = float('inf')
-        
-        max_iterations = self.config.max_states_per_layer * num_projects
-        iteration = 0
-        
-        while pq and iteration < max_iterations:
-            iteration += 1
-            f_score, _, g_score, state, path = heapq.heappop(pq)
-            
-            if state in visited:
-                continue
-            visited.add(state)
-            
-            # Check if complete
-            if state.project_index == num_projects:
-                if g_score < best_cost:
-                    best_cost = g_score
-                    best_solution = self._build_solution_from_path(
-                        path, class_count
-                    )
-                continue
-            
-            # Generate successors
-            project = ordered_projects[state.project_index]
-            
-            for class_id in range(class_count):
-                slot = state.class_loads[class_id]
-                
-                for j1_id in self.faculty_ids:
-                    if j1_id == project.responsible_id:
-                        continue
-                    
-                    # Create transition
-                    transition = DPTransition(
-                        project_id=project.id,
-                        class_id=class_id,
-                        slot_in_class=slot,
-                        j1_id=j1_id,
-                        incremental_cost=0.0
-                    )
-                    
-                    # Check validity
-                    if not self._is_valid_transition_simple(state, transition, project):
-                        continue
-                    
-                    # Apply transition
-                    new_state = self._apply_transition_simple(
-                        state, transition, project, class_count, num_faculty
-                    )
-                    
-                    if new_state in visited:
-                        continue
-                    
-                    # Calculate costs
-                    incr_cost = self.penalty_calculator.calculate_incremental_cost(
-                        state, transition, project, class_count
-                    )
-                    new_g = g_score + incr_cost
-                    new_h = self._estimate_remaining_cost(new_state, num_projects)
-                    new_f = new_g + new_h
-                    
-                    # Pruning: skip if clearly worse than best
-                    if new_g > best_cost:
-                        continue
-                    
-                    counter += 1
-                    new_path = path + [(project.id, class_id, slot, j1_id)]
-                    heapq.heappush(pq, (new_f, counter, new_g, new_state, new_path))
-            
-            # Limit queue size
-            if len(pq) > self.config.beam_width * 2:
-                pq = sorted(pq)[:self.config.beam_width]
-                heapq.heapify(pq)
-        
-        if best_solution is None:
-            best_solution = self._create_greedy_solution(class_count)
-        
-        return best_solution
+    def _reset_schedule(self) -> None:
+        """Reset the instructor schedule for new solution building."""
+        self.instructor_schedule = {}
     
-    def _order_projects(self) -> List[Project]:
+    def _is_instructor_available(self, instructor_id: int, class_id: int, slot: int) -> bool:
         """
-        Order projects by priority mode.
+        Check if an instructor is available at a given timeslot.
         
-        CRITICAL: Ensures ALL projects are included, regardless of type.
-        
-        ESIT mode: Projects are shuffled (no priority) - like Simulated Annealing
+        CRITICAL: Same slot across ANY class = same timeslot.
+        An instructor busy at slot X in class A cannot be at slot X in class B.
         """
-        # Normalize project types - handle both "interim"/"final" and "ara"/"bitirme"
-        ara = []
-        bitirme = []
-        other = []
-        
-        for p in self.projects:
-            proj_type = str(p.type).lower()
-            if proj_type in ["interim", "ara", "ara proje"]:
-                ara.append(p)
-            elif proj_type in ["final", "bitirme", "bitirme proje"]:
-                bitirme.append(p)
-            else:
-                # Unknown type - include in both lists to ensure it's not lost
-                other.append(p)
-        
-        # CRITICAL: Order based on priority mode
-        if self.config.priority_mode == PriorityMode.ARA_ONCE:
-            result = ara + other + bitirme
-        elif self.config.priority_mode == PriorityMode.BITIRME_ONCE:
-            result = bitirme + other + ara
-        else:
-            # ESIT mode: NO PRIORITY - shuffle all projects randomly
-            # This ensures no type-based ordering
-            result = ara + bitirme + other
-            random.shuffle(result)
-        
-        # CRITICAL: Verify ALL projects are included
-        if len(result) != len(self.projects):
-            logger.warning(f"[ORDER_PROJECTS] Missing projects! Expected {len(self.projects)}, got {len(result)}")
-            # Add any missing projects
-            result_ids = {p.id for p in result}
-            for p in self.projects:
-                if p.id not in result_ids:
-                    logger.warning(f"[ORDER_PROJECTS] Adding missing project {p.id} ({p.type})")
-                    result.append(p)
-        
-        return result
-    
-    def _estimate_remaining_cost(
-        self,
-        state: DPState,
-        total_projects: int
-    ) -> float:
-        """
-        Estimate remaining cost (admissible heuristic).
-        
-        Uses lower bound estimation based on:
-        - Remaining workload distribution
-        - Class balance requirements
-        """
-        remaining = total_projects - state.project_index
-        if remaining == 0:
-            return 0.0
-        
-        # Estimate class load balance penalty
-        class_count = len(state.class_loads)
-        target = total_projects / class_count
-        
-        current_deviation = sum(
-            abs(load - (state.project_index / class_count))
-            for load in state.class_loads
-        )
-        
-        # Minimum additional deviation from remaining assignments
-        estimated_h4 = self.config.weight_h4 * current_deviation * 0.5
-        
-        # Minimum workload deviation
-        avg_remaining_per_faculty = (remaining * 2) / len(self.faculty_ids)
-        estimated_h2 = self.config.weight_h2 * avg_remaining_per_faculty * 0.1
-        
-        return estimated_h4 + estimated_h2
-    
-    def _is_valid_transition_simple(
-        self,
-        state: DPState,
-        transition: DPTransition,
-        project: Project
-    ) -> bool:
-        """Simplified validity check."""
-        if transition.j1_id == project.responsible_id:
-            return False
-        
-        # Check workload hard limit
-        if self.config.workload_constraint_mode == WorkloadConstraintMode.SOFT_AND_HARD:
-            ps_idx = self.faculty_index_map.get(project.responsible_id)
-            j1_idx = self.faculty_index_map.get(transition.j1_id)
-            
-            if ps_idx is not None:
-                if state.faculty_loads[ps_idx] + 1 > self.penalty_calculator.avg_workload + self.config.workload_hard_limit:
+        # Check all classes at this slot
+        for c in range(self.config.class_count):
+            key = (c, slot)
+            if key in self.instructor_schedule:
+                if instructor_id in self.instructor_schedule[key]:
                     return False
-            
-            if j1_idx is not None:
-                if state.faculty_loads[j1_idx] + 1 > self.penalty_calculator.avg_workload + self.config.workload_hard_limit:
-                    return False
-        
         return True
     
-    def _apply_transition_simple(
-        self,
-        state: DPState,
-        transition: DPTransition,
-        project: Project,
-        class_count: int,
-        num_faculty: int
-    ) -> DPState:
-        """Apply transition to create new state."""
-        new_class_loads = list(state.class_loads)
-        new_class_loads[transition.class_id] += 1
-        
-        new_faculty_loads = list(state.faculty_loads)
-        ps_idx = self.faculty_index_map.get(project.responsible_id)
-        j1_idx = self.faculty_index_map.get(transition.j1_id)
-        
-        if ps_idx is not None:
-            new_faculty_loads[ps_idx] += 1
-        if j1_idx is not None:
-            new_faculty_loads[j1_idx] += 1
-        
-        new_class_visit_masks = list(state.class_visit_masks)
-        if ps_idx is not None:
-            new_class_visit_masks[ps_idx] |= (1 << transition.class_id)
-        if j1_idx is not None:
-            new_class_visit_masks[j1_idx] |= (1 << transition.class_id)
-        
-        # Simplified continuity signature
-        new_continuity = state.continuity_signature
-        
-        return DPState(
-            project_index=state.project_index + 1,
-            class_loads=tuple(new_class_loads),
-            faculty_loads=tuple(new_faculty_loads),
-            class_visit_masks=tuple(new_class_visit_masks),
-            continuity_signature=new_continuity,
-            priority_state=state.priority_state
-        )
+    def _mark_instructor_busy(self, instructor_id: int, class_id: int, slot: int) -> None:
+        """Mark an instructor as busy at a specific timeslot."""
+        key = (class_id, slot)
+        if key not in self.instructor_schedule:
+            self.instructor_schedule[key] = set()
+        self.instructor_schedule[key].add(instructor_id)
     
-    def _build_solution_from_path(
-        self,
-        path: List[Tuple[int, int, int, int]],
-        class_count: int
-    ) -> DPSolution:
+    def _get_available_j1_candidates(
+        self, 
+        ps_id: int, 
+        class_id: int, 
+        slot: int
+    ) -> List[int]:
         """
-        Build solution from path.
-        
-        CRITICAL: Ensures ALL projects are included.
+        Get list of J1 candidates who are:
+        1. Not the PS (J1 != PS)
+        2. Not busy at this timeslot (no conflict)
         """
-        solution = DPSolution(class_count=class_count)
-        project_map = {p.id: p for p in self.projects}
-        path_project_ids = {project_id for project_id, _, _, _ in path}
-        
-        # Add projects from path
-        for project_id, class_id, slot, j1_id in path:
-            project = project_map.get(project_id)
-            if not project:
-                logger.warning(f"[BUILD_PATH] Project {project_id} not found in project map!")
-                continue
-            
-            assignment = ProjectAssignment(
-                project_id=project_id,
-                class_id=class_id,
-                order_in_class=slot,
-                ps_id=project.responsible_id,
-                j1_id=j1_id,
-                j2_id=-1
-            )
-            solution.assignments.append(assignment)
-        
-        # CRITICAL: Check for missing projects and add them
-        all_project_ids = {p.id for p in self.projects}
-        missing_project_ids = all_project_ids - path_project_ids
-        
-        if missing_project_ids:
-            logger.warning(f"[BUILD_PATH] Found {len(missing_project_ids)} missing projects in path, adding them...")
-            # Add missing projects using greedy assignment
-            class_loads = defaultdict(int)
-            for assignment in solution.assignments:
-                class_loads[assignment.class_id] += 1
-            
-            for missing_id in missing_project_ids:
-                project = project_map.get(missing_id)
-                if not project:
-                    continue
-                
-                # Find class with minimum load
-                min_class_id = min(range(class_count), key=lambda c: class_loads.get(c, 0))
-                slot = class_loads[min_class_id]
-                class_loads[min_class_id] += 1
-                
-                # Find J1 (must not be PS)
-                j1_id = None
-                for fid in self.faculty_ids:
-                    if fid != project.responsible_id:
-                        j1_id = fid
-                        break
-                
-                if j1_id is None:
-                    j1_id = self.faculty_ids[0] if self.faculty_ids else -1
-                
-                assignment = ProjectAssignment(
-                    project_id=missing_id,
-                    class_id=min_class_id,
-                    order_in_class=slot,
-                    ps_id=project.responsible_id,
-                    j1_id=j1_id,
-                    j2_id=-1
-                )
-                solution.assignments.append(assignment)
-                logger.info(f"[BUILD_PATH] Added missing project {missing_id} to class {min_class_id}, slot {slot}")
-        
-        # Final verification
-        final_assigned_ids = {a.project_id for a in solution.assignments}
-        if len(final_assigned_ids) != len(all_project_ids):
-            logger.error(f"[BUILD_PATH] CRITICAL: Still missing {len(all_project_ids) - len(final_assigned_ids)} projects!")
-        else:
-            # Use debug level to avoid duplicate log messages during optimization iterations
-            logger.debug(f"[BUILD_PATH] SUCCESS: All {len(all_project_ids)} projects are in solution!")
-        
-        return solution
+        candidates = []
+        for fid in self.faculty_ids:
+            if fid == ps_id:
+                continue  # J1 != PS
+            if not self._is_instructor_available(fid, class_id, slot):
+                continue  # Already busy at this slot
+            candidates.append(fid)
+        return candidates
     
-    def _create_greedy_solution(self, class_count: int) -> DPSolution:
+    def _select_best_j1(
+        self, 
+        ps_id: int, 
+        class_id: int, 
+        slot: int, 
+        workloads: Dict[int, int]
+    ) -> int:
         """
-        Create greedy solution as fallback.
+        Select the best J1 based on:
+        1. Availability (no conflict)
+        2. Lowest workload (load balancing)
+        3. Random tie-breaking among equals
         
-        CRITICAL: Ensures ALL projects are included.
+        Returns -1 if no J1 is available.
         """
-        solution = DPSolution(class_count=class_count)
-        class_loads = [0] * class_count
+        candidates = self._get_available_j1_candidates(ps_id, class_id, slot)
+        
+        if not candidates:
+            return -1  # No available J1 at this slot
+        
+        # Sort by workload (ascending)
+        candidates.sort(key=lambda x: workloads.get(x, 0))
+        
+        # Find all candidates with minimum workload
+        min_workload = workloads.get(candidates[0], 0)
+        best_candidates = [c for c in candidates if workloads.get(c, 0) == min_workload]
+        
+        # Random tie-breaking
+        return random.choice(best_candidates)
+    
+    def build_initial_solution(self) -> DPState:
+        """
+        Build an initial solution with PROACTIVE conflict prevention.
+        
+        Strategy:
+        1. Sort projects by priority (if configured)
+        2. For each project, find a slot where both PS and J1 can be assigned without conflict
+        3. Distribute evenly across all classes to satisfy H7 (all classes used)
+        """
+        self._reset_schedule()
+        
+        state = DPState(class_count=self.config.class_count)
+        
+        # Sort projects by priority
+        sorted_projects = self._sort_projects_by_priority()
+        
+        # Track workloads for load balancing
         workloads = defaultdict(int)
         
-        # CRITICAL: Use ALL projects, ensure _order_projects returns all
-        ordered_projects = self._order_projects()
+        # Track class loads for even distribution
+        class_loads = defaultdict(int)
         
-        # Verify all projects are in ordered list
-        ordered_ids = {p.id for p in ordered_projects}
-        all_project_ids = {p.id for p in self.projects}
-        if len(ordered_ids) != len(all_project_ids):
-            logger.warning(f"[GREEDY] Missing projects in ordered list! Expected {len(all_project_ids)}, got {len(ordered_ids)}")
-            # Add missing projects
-            for p in self.projects:
-                if p.id not in ordered_ids:
-                    logger.warning(f"[GREEDY] Adding missing project {p.id}")
-                    ordered_projects.append(p)
+        # Calculate target projects per class
+        projects_per_class = len(sorted_projects) // self.config.class_count
+        extra_projects = len(sorted_projects) % self.config.class_count
         
-        for project in ordered_projects:
-            # Pick class with lowest load
-            best_class = min(range(class_count), key=lambda c: class_loads[c])
-            slot = class_loads[best_class]
+        # Build class order for round-robin distribution
+        class_order = list(range(self.config.class_count))
+        random.shuffle(class_order)
+        
+        # Assign each project
+        for proj_idx, project in enumerate(sorted_projects):
+            ps_id = project.responsible_id
             
-            # Pick J1 with lowest workload
-            available_j1 = [
-                fid for fid in self.faculty_ids
-                if fid != project.responsible_id
-            ]
+            # Find best class and slot for this project
+            best_class_id, best_slot, best_j1 = self._find_best_placement(
+                ps_id, proj_idx, class_loads, workloads, projects_per_class, extra_projects
+            )
             
-            if available_j1:
-                best_j1 = min(available_j1, key=lambda j: workloads.get(j, 0))
-            else:
-                best_j1 = self.faculty_ids[0] if self.faculty_ids else -1
+            if best_j1 == -1:
+                # Fallback: force assignment (should be rare)
+                logger.warning(f"No conflict-free slot found for project {project.id}, using fallback")
+                best_j1 = self._force_j1_selection(ps_id, best_class_id, best_slot, workloads)
             
+            # Create assignment
             assignment = ProjectAssignment(
                 project_id=project.id,
-                class_id=best_class,
-                order_in_class=slot,
-                ps_id=project.responsible_id,
+                class_id=best_class_id,
+                order_in_class=best_slot,
+                ps_id=ps_id,
                 j1_id=best_j1,
-                j2_id=-1
+                j2_id=-1  # Placeholder
             )
-            solution.assignments.append(assignment)
             
-            class_loads[best_class] += 1
-            workloads[project.responsible_id] += 1
+            # Mark instructors as busy
+            self._mark_instructor_busy(ps_id, best_class_id, best_slot)
+            self._mark_instructor_busy(best_j1, best_class_id, best_slot)
+            
+            # Update workloads
+            workloads[ps_id] += 1
             workloads[best_j1] += 1
+            
+            # Update class loads
+            class_loads[best_class_id] += 1
+            
+            state.assignments.append(assignment)
         
-        # CRITICAL: Final verification
-        assigned_ids = {a.project_id for a in solution.assignments}
-        if len(assigned_ids) != len(all_project_ids):
-            logger.error(f"[GREEDY] CRITICAL: Missing {len(all_project_ids) - len(assigned_ids)} projects!")
-        else:
-            logger.info(f"[GREEDY] SUCCESS: All {len(all_project_ids)} projects are in solution!")
+        # Reorder assignments within each class
+        self._reorder_class_assignments(state)
         
-        return solution
-
-
-# ============================================================================
-# MAIN ALGORITHM CLASS
-# ============================================================================
-
-class DynamicProgrammingAlgorithm(OptimizationAlgorithm):
-    """
-    Dynamic Programming Algorithm for academic project jury scheduling.
+        # Calculate cost
+        state.cost = self.penalty_calculator.calculate_total_cost(state)
+        
+        # Verify no conflicts
+        conflict_count = self.penalty_calculator.count_conflicts(state)
+        if conflict_count > 0:
+            logger.warning(f"Initial solution has {conflict_count} conflicts - applying repair")
+            self._repair_conflicts(state)
+        
+        logger.info(f"Initial solution built: cost={state.cost:.2f}, conflicts={conflict_count}")
+        
+        return state
     
-    Implements full DP-based optimization with:
-    - Multi-dimensional state space
-    - Incremental cost computation
-    - Dominance pruning
-    - Beam search for scalability
-    - Priority mode handling
-    - Multiple class count evaluation
+    def _sort_projects_by_priority(self) -> List[Project]:
+        """Sort projects based on priority mode."""
+        projects = list(self.projects)
+        
+        if self.config.priority_mode == PriorityMode.ARA_ONCE:
+            # Interim projects first
+            projects.sort(key=lambda p: (0 if p.type == "INTERIM" else 1, p.id))
+        elif self.config.priority_mode == PriorityMode.BITIRME_ONCE:
+            # Final projects first
+            projects.sort(key=lambda p: (0 if p.type == "FINAL" else 1, p.id))
+        else:
+            # Random order for diversity
+            random.shuffle(projects)
+        
+        return projects
+    
+    def _find_best_placement(
+        self,
+        ps_id: int,
+        proj_idx: int,
+        class_loads: Dict[int, int],
+        workloads: Dict[int, int],
+        projects_per_class: int,
+        extra_projects: int
+    ) -> Tuple[int, int, int]:
+        """
+        Find the best class_id, slot, and J1 for a project.
+        
+        Strategy:
+        1. Prioritize classes with low load (for even distribution)
+        2. Find a slot where both PS and J1 are available
+        3. Select J1 with lowest workload
+        """
+        # Sort classes by current load
+        sorted_classes = sorted(range(self.config.class_count), key=lambda c: class_loads.get(c, 0))
+        
+        for class_id in sorted_classes:
+            current_load = class_loads.get(class_id, 0)
+            target = projects_per_class + (1 if class_id < extra_projects else 0)
+            
+            if current_load >= target * 1.5:  # Allow some overflow
+                continue
+            
+            # Find an available slot in this class
+            slot = current_load  # Next available slot
+            
+            # Check if PS is available at this slot
+            if not self._is_instructor_available(ps_id, class_id, slot):
+                # Try other slots
+                for alt_slot in range(max(0, slot - 2), slot + 10):
+                    if self._is_instructor_available(ps_id, class_id, alt_slot):
+                        slot = alt_slot
+                        break
+                else:
+                    continue  # No available slot for PS in this class
+            
+            # Find available J1
+            j1 = self._select_best_j1(ps_id, class_id, slot, workloads)
+            
+            if j1 != -1:
+                return class_id, slot, j1
+        
+        # Fallback: use first class with any available slot
+        for class_id in range(self.config.class_count):
+            for slot in range(100):  # Check many slots
+                if self._is_instructor_available(ps_id, class_id, slot):
+                    j1 = self._select_best_j1(ps_id, class_id, slot, workloads)
+                    if j1 != -1:
+                        return class_id, slot, j1
+        
+        # Last resort: return first class, next slot, with J1 = -1 (will be forced)
+        return 0, class_loads.get(0, 0), -1
+    
+    def _force_j1_selection(
+        self,
+        ps_id: int,
+        class_id: int,
+        slot: int,
+        workloads: Dict[int, int]
+    ) -> int:
+        """
+        Force J1 selection when no conflict-free option exists.
+        Select the least loaded instructor (even if it creates a conflict).
+        """
+        candidates = [fid for fid in self.faculty_ids if fid != ps_id]
+        if not candidates:
+            # Extreme fallback - use PS itself (will be repaired)
+            return ps_id
+        
+        # Sort by workload
+        candidates.sort(key=lambda x: workloads.get(x, 0))
+        return candidates[0]
+    
+    def _reorder_class_assignments(self, state: DPState) -> None:
+        """Reorder assignments within each class to be consecutive."""
+        for class_id in range(state.class_count):
+            class_assignments = [a for a in state.assignments if a.class_id == class_id]
+            class_assignments.sort(key=lambda a: a.order_in_class)
+            
+            for i, assignment in enumerate(class_assignments):
+                assignment.order_in_class = i
+    
+    def _repair_conflicts(self, state: DPState) -> None:
+        """
+        Repair any remaining conflicts in the state.
+        
+        This is a backup mechanism - ideally, solutions should be conflict-free by design.
+        """
+        max_iterations = 100
+        
+        for iteration in range(max_iterations):
+            conflicts = self._find_conflicts(state)
+            if not conflicts:
+                return
+            
+            for conflict in conflicts:
+                self._resolve_conflict(state, conflict)
+                break  # Re-check after each resolution
+    
+    def _find_conflicts(self, state: DPState) -> List[Dict]:
+        """Find all timeslot conflicts in the state."""
+        conflicts = []
+        
+        # Build instructor schedule
+        instructor_schedule = defaultdict(lambda: defaultdict(list))
+        
+        for assignment in state.assignments:
+            instructor_schedule[assignment.ps_id][assignment.order_in_class].append({
+                'assignment': assignment,
+                'class_id': assignment.class_id,
+                'role': 'PS'
+            })
+            instructor_schedule[assignment.j1_id][assignment.order_in_class].append({
+                'assignment': assignment,
+                'class_id': assignment.class_id,
+                'role': 'J1'
+            })
+        
+        # Find conflicts
+        for instructor_id, orders in instructor_schedule.items():
+            for order, entries in orders.items():
+                if len(entries) > 1:
+                    classes = set(e['class_id'] for e in entries)
+                    if len(classes) > 1:
+                        conflicts.append({
+                            'instructor_id': instructor_id,
+                            'order': order,
+                            'entries': entries,
+                            'classes': classes
+                        })
+        
+        return conflicts
+    
+    def _resolve_conflict(self, state: DPState, conflict: Dict) -> None:
+        """Resolve a single timeslot conflict."""
+        instructor_id = conflict['instructor_id']
+        entries = conflict['entries']
+        order = conflict['order']
+        
+        # Build a map of who is busy at this slot
+        busy_at_slot = set()
+        for a in state.assignments:
+            if a.order_in_class == order:
+                busy_at_slot.add(a.ps_id)
+                busy_at_slot.add(a.j1_id)
+        
+        # Keep first entry, fix others
+        for entry in entries[1:]:
+            assignment = entry['assignment']
+            role = entry['role']
+            
+            if role == 'J1':
+                # Try to reassign J1 to someone who is NOT busy at this slot
+                workloads = defaultdict(int)
+                for a in state.assignments:
+                    workloads[a.ps_id] += 1
+                    workloads[a.j1_id] += 1
+                
+                # Find alternative J1 who is NOT busy at this slot
+                available = []
+                for fid in self.faculty_ids:
+                    if fid == assignment.ps_id:
+                        continue  # J1 != PS
+                    if fid == instructor_id:
+                        continue  # This is the conflicting instructor
+                    if fid in busy_at_slot:
+                        # Check if this is busy only for the current assignment
+                        is_only_current = True
+                        for a in state.assignments:
+                            if a.order_in_class == order and a.project_id != assignment.project_id:
+                                if a.ps_id == fid or a.j1_id == fid:
+                                    is_only_current = False
+                                    break
+                        if not is_only_current:
+                            continue  # Busy for another project at this slot
+                    available.append(fid)
+                
+                if available:
+                    # Select least loaded
+                    available.sort(key=lambda x: workloads.get(x, 0))
+                    assignment.j1_id = available[0]
+                    logger.debug(f"Conflict resolved: reassigned J1 to {available[0]} for project {assignment.project_id}")
+                    return
+            
+            # If J1 reassignment failed or role is PS, move project to different slot
+            # Find a slot where the conflicting instructor is NOT busy
+            class_loads = defaultdict(int)
+            for a in state.assignments:
+                class_loads[a.class_id] += 1
+            
+            for attempt_class in range(state.class_count):
+                for attempt_slot in range(20):  # Try various slots
+                    # Check if PS and J1 are available at this new slot
+                    ps_busy = False
+                    j1_busy = False
+                    
+                    for a in state.assignments:
+                        if a.project_id == assignment.project_id:
+                            continue  # Skip current assignment
+                        if a.order_in_class == attempt_slot:
+                            if a.ps_id == assignment.ps_id or a.j1_id == assignment.ps_id:
+                                ps_busy = True
+                            if a.ps_id == assignment.j1_id or a.j1_id == assignment.j1_id:
+                                j1_busy = True
+                    
+                    if not ps_busy and not j1_busy:
+                        # Found a conflict-free slot!
+                        assignment.class_id = attempt_class
+                        assignment.order_in_class = attempt_slot
+                        logger.debug(f"Conflict resolved: moved project {assignment.project_id} to class {attempt_class}, slot {attempt_slot}")
+                        self._reorder_class_assignments(state)
+                        return
+            
+            # Last resort: move to least loaded class at next available slot
+            min_class = min(range(state.class_count), key=lambda c: class_loads.get(c, 0))
+            assignment.class_id = min_class
+            assignment.order_in_class = class_loads.get(min_class, 0)
+            logger.warning(f"Conflict fallback: moved project {assignment.project_id} to class {min_class}")
+            
+            # Reorder
+            self._reorder_class_assignments(state)
+
+
+# =============================================================================
+# MAIN DYNAMIC PROGRAMMING ALGORITHM
+# =============================================================================
+
+class DynamicProgramming(OptimizationAlgorithm):
+    """
+    Dynamic Programming Algorithm for Multi-Criteria Optimization
+    
+    Features:
+    - Proactive conflict prevention (conflict-free by design)
+    - Multi-criteria objective function (H1-H7)
+    - Configurable priority modes and penalty weights
+    - Workload balancing with ±2 band
+    - Single-phase operation
     """
     
     def __init__(self, params: Optional[Dict[str, Any]] = None):
         super().__init__(params)
         self.name = "Dynamic Programming Algorithm"
-        self.description = (
-            "Multi-dimensional DP optimization for academic project jury scheduling "
-            "with workload balance, continuity, and class distribution optimization."
-        )
+        self.description = "Multi-criteria optimization with proactive conflict prevention and workload balancing"
         
-        # Configuration
-        self.config = self._build_config(params or {})
+        # Initialize configuration
+        self.config = DPConfig()
+        if params:
+            self._apply_params(params)
         
         # Data storage
         self.projects: List[Project] = []
         self.instructors: List[Instructor] = []
-        self.classrooms: List[Dict[str, Any]] = []
-        self.timeslots: List[Dict[str, Any]] = []
-        
-        # Results
-        self.best_solution: Optional[DPSolution] = None
-        self.best_score: Optional[ScoreBreakdown] = None
+        self.classrooms: List[Dict] = []  # Store classroom data
+        self.timeslots: List[Dict] = []   # Store timeslot data
+        self.penalty_calculator: Optional[DPPenaltyCalculator] = None
+        self.solution_builder: Optional[DPSolutionBuilder] = None
     
-    def _build_config(self, params: Dict[str, Any]) -> DPConfig:
-        """Build configuration from parameters."""
-        config = DPConfig()
+    def _apply_params(self, params: Dict[str, Any]) -> None:
+        """Apply parameters to configuration."""
+        if 'class_count' in params:
+            self.config.class_count = params['class_count']
         
-        # Apply parameters
-        for key, value in params.items():
-            if hasattr(config, key):
-                if key == "priority_mode" and isinstance(value, str):
-                    value = PriorityMode(value)
-                elif key == "time_penalty_mode" and isinstance(value, str):
-                    value = TimePenaltyMode(value)
-                elif key == "workload_constraint_mode" and isinstance(value, str):
-                    value = WorkloadConstraintMode(value)
-                setattr(config, key, value)
+        if 'priority_mode' in params:
+            mode = params['priority_mode']
+            if isinstance(mode, str):
+                self.config.priority_mode = PriorityMode[mode.upper()]
+            elif isinstance(mode, PriorityMode):
+                self.config.priority_mode = mode
         
-        return config
+        if 'time_penalty_mode' in params:
+            mode = params['time_penalty_mode']
+            if isinstance(mode, str):
+                self.config.time_penalty_mode = TimePenaltyMode[mode.upper()]
+            elif isinstance(mode, TimePenaltyMode):
+                self.config.time_penalty_mode = mode
+        
+        if 'workload_constraint_mode' in params:
+            mode = params['workload_constraint_mode']
+            if isinstance(mode, str):
+                self.config.workload_constraint_mode = WorkloadConstraintMode[mode.upper()]
+            elif isinstance(mode, WorkloadConstraintMode):
+                self.config.workload_constraint_mode = mode
+        
+        if 'workload_hard_limit' in params:
+            self.config.workload_hard_limit = params['workload_hard_limit']
+        
+        # Penalty weights
+        for key in ['weight_h1', 'weight_h2', 'weight_h3', 'weight_h4', 
+                    'weight_h5', 'weight_h6', 'weight_h7']:
+            if key in params:
+                setattr(self.config, key, params[key])
     
     def initialize(self, data: Dict[str, Any]) -> None:
-        """
-        Initialize algorithm with data.
-        
-        CRITICAL: Handles classroom_count parameter from data.
-        """
-        self._parse_input_data(data)
-        
-        # CRITICAL: Handle classroom_count from data
-        classroom_count = data.get("classroom_count")
-        if classroom_count and classroom_count > 0:
-            # Limit to available classrooms
-            if classroom_count > len(self.classrooms):
-                logger.warning(
-                    f"Requested classroom_count ({classroom_count}) exceeds available "
-                    f"({len(self.classrooms)}). Using all available."
-                )
-                self.config.class_count = len(self.classrooms)
-                self.config.auto_class_count = False
-            else:
-                self.config.class_count = classroom_count
-                self.config.auto_class_count = False
-                logger.info(f"DP Algorithm: Using {classroom_count} classrooms (from data)")
-        elif len(self.classrooms) > 0:
-            # Use available classrooms if no count specified
-            self.config.class_count = len(self.classrooms)
-            logger.info(f"DP Algorithm: Using {len(self.classrooms)} classrooms (from available)")
-        
-        logger.info(f"DP Algorithm initialized: {len(self.projects)} projects, "
-                   f"{len(self.instructors)} instructors, "
-                   f"{self.config.class_count} classes")
-    
-    def _parse_input_data(self, data: Dict[str, Any]) -> None:
-        """Parse input data into internal structures."""
+        """Initialize the algorithm with input data."""
         # Parse projects
-        raw_projects = data.get("projects", [])
         self.projects = []
-        for p in raw_projects:
+        for p in data.get('projects', []):
             if isinstance(p, dict):
-                # CRITICAL: Check multiple possible field names for responsible instructor
-                responsible_id = (
-                    p.get("responsible_instructor_id") or
-                    p.get("responsible_id") or
-                    p.get("instructor_id") or
-                    0
-                )
-                project = Project(
-                    id=p.get("id", 0),
-                    title=p.get("title", ""),
-                    type=p.get("type", "interim"),
-                    responsible_id=responsible_id,
-                    is_makeup=p.get("is_makeup", False)
-                )
-            else:
-                project = Project(
-                    id=getattr(p, "id", 0),
-                    title=getattr(p, "title", ""),
-                    type=getattr(p, "type", "interim"),
-                    responsible_id=getattr(p, "instructor_id", getattr(p, "responsible_id", 0)),
-                    is_makeup=getattr(p, "is_makeup", False)
-                )
-            self.projects.append(project)
+                self.projects.append(Project(
+                    id=p.get('id', 0),
+                    name=p.get('name', p.get('title', '')),
+                    type=p.get('type', p.get('project_type', 'INTERIM')).upper(),
+                    responsible_id=p.get('responsible_instructor_id') or p.get('advisor_id') or p.get('instructor_id', 0)
+                ))
+            elif isinstance(p, Project):
+                self.projects.append(p)
+            elif hasattr(p, 'id'):
+                self.projects.append(Project(
+                    id=p.id,
+                    name=getattr(p, 'name', getattr(p, 'title', '')),
+                    type=getattr(p, 'type', 'INTERIM').upper(),
+                    responsible_id=getattr(p, 'responsible_instructor_id', None) or getattr(p, 'advisor_id', 0)
+                ))
         
         # Parse instructors
-        raw_instructors = data.get("instructors", [])
         self.instructors = []
-        for i in raw_instructors:
+        for i in data.get('instructors', []):
             if isinstance(i, dict):
-                instructor = Instructor(
-                    id=i.get("id", 0),
-                    name=i.get("name", ""),
-                    type=i.get("type", "instructor")
-                )
+                self.instructors.append(Instructor(
+                    id=i.get('id', 0),
+                    name=i.get('name', ''),
+                    type=i.get('type', 'instructor')
+                ))
+            elif isinstance(i, Instructor):
+                self.instructors.append(i)
+            elif hasattr(i, 'id'):
+                self.instructors.append(Instructor(
+                    id=i.id,
+                    name=getattr(i, 'name', ''),
+                    type=getattr(i, 'type', 'instructor')
+                ))
+        
+        # Store classrooms and timeslots for ID mapping
+        self.classrooms = data.get('classrooms', [])
+        self.timeslots = data.get('timeslots', [])
+        
+        # Update class count based on available classrooms (like SA)
+        if self.classrooms:
+            available_class_count = len(self.classrooms)
+            if self.config.auto_class_count or self.config.class_count == 6:
+                self.config.class_count = available_class_count
+                logger.info(f"DP: Class count set to {available_class_count} based on available classrooms")
+            elif self.config.class_count > available_class_count:
+                logger.warning(f"DP: Requested class count ({self.config.class_count}) > available ({available_class_count}). Using available.")
+                self.config.class_count = available_class_count
+        elif self.config.auto_class_count:
+            # Fallback auto class count based on projects
+            num_projects = len(self.projects)
+            if num_projects <= 6:
+                self.config.class_count = 2
+            elif num_projects <= 12:
+                self.config.class_count = 3
+            elif num_projects <= 24:
+                self.config.class_count = 4
+            elif num_projects <= 36:
+                self.config.class_count = 5
             else:
-                instructor = Instructor(
-                    id=getattr(i, "id", 0),
-                    name=getattr(i, "name", ""),
-                    type=getattr(i, "type", "instructor")
-                )
-            self.instructors.append(instructor)
+                self.config.class_count = 6
         
-        # Parse classrooms and timeslots
-        self.classrooms = data.get("classrooms", [])
-        self.timeslots = data.get("timeslots", [])
+        # Initialize penalty calculator and solution builder
+        self.penalty_calculator = DPPenaltyCalculator(
+            self.projects, self.instructors, self.config
+        )
+        self.solution_builder = DPSolutionBuilder(
+            self.projects, self.instructors, self.config, self.penalty_calculator
+        )
+        
+        logger.info(f"DP initialized: {len(self.projects)} projects, "
+                   f"{len(self.instructors)} instructors, "
+                   f"{self.config.class_count} classes, "
+                   f"{len(self.classrooms)} classrooms, "
+                   f"{len(self.timeslots)} timeslots")
     
-    def optimize(self, data: Dict[str, Any] = None) -> Dict[str, Any]:
+    def optimize(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Run DP optimization.
+        Run the Dynamic Programming optimization.
         
-        Args:
-            data: Input data (optional if already initialized)
-                  Note: initialize() is called by base class execute() method
-            
-        Returns:
-            Optimization result dictionary
+        Returns a dictionary with:
+        - 'assignments': List of project assignments
+        - 'schedule': Same as assignments (for compatibility)
+        - 'solution': Same as assignments (for compatibility)
+        - 'statistics': Statistics about the solution
         """
         start_time = time.time()
+        logger.info("Dynamic Programming optimization starting...")
         
-        # Note: initialize() is already called by base class execute() method
-        # No need to call it again here to avoid duplicate initialization
+        # Initialize from data
+        self.initialize(data)
         
-        logger.info(f"Starting DP optimization...")
-        logger.info(f"  Priority mode: {self.config.priority_mode}")
-        logger.info(f"  Auto class count: {self.config.auto_class_count}")
+        # Build initial solution
+        best_state = self.solution_builder.build_initial_solution()
         
-        # Determine class counts to try
-        if self.config.auto_class_count:
-            class_counts = [5, 6, 7]
-        else:
-            class_counts = [self.config.class_count]
+        # Improve solution using beam search / DP transitions
+        best_state = self._improve_solution(best_state)
         
-        best_overall_solution = None
-        best_overall_score = None
-        best_overall_cost = float('inf')
-        best_class_count = class_counts[0]
-        
-        for class_count in class_counts:
-            logger.info(f"Trying class_count = {class_count}")
-            
-            try:
-                # Use advanced solution builder
-                builder = DPSolutionBuilder(
-                    self.projects,
-                    self.instructors,
-                    self.config
-                )
-                solution = builder.build_optimal_solution(class_count)
-                
-                # Calculate final score
-                penalty_calc = DPPenaltyCalculator(
-                    self.projects, self.instructors, self.config
-                )
-                score = penalty_calc.calculate_full_penalty(solution)
-                
-                logger.info(f"  Class count {class_count}: cost = {score.total_z:.2f}")
-                
-                if score.total_z < best_overall_cost:
-                    best_overall_cost = score.total_z
-                    best_overall_solution = solution
-                    best_overall_score = score
-                    best_class_count = class_count
-            
-            except Exception as e:
-                logger.error(f"Error with class_count={class_count}: {e}")
-                continue
-        
-        if best_overall_solution is None:
-            logger.warning("No valid solution found, creating fallback")
-            best_overall_solution = self._create_fallback_solution()
-            best_overall_score = ScoreBreakdown(total_z=float('inf'))
-        
-        self.best_solution = best_overall_solution
-        self.best_score = best_overall_score
+        # Final repair if needed
+        self._final_repair(best_state)
         
         # Convert to output format
-        schedule = self._convert_solution_to_schedule(best_overall_solution)
+        assignments = self._convert_to_output_format(best_state)
         
-        elapsed = time.time() - start_time
+        end_time = time.time()
+        execution_time = end_time - start_time
+        
+        # Calculate statistics
+        statistics = self._calculate_statistics(best_state)
+        statistics['execution_time'] = execution_time
         
         result = {
-            "schedule": schedule,
-            "assignments": schedule,
-            "solution": schedule,
-            "cost": best_overall_score.total_z,
-            "fitness": -best_overall_score.total_z,
-            "penalty_breakdown": best_overall_score.to_dict(),
-            "execution_time": elapsed,
-            "class_count": best_class_count,
-            "status": "completed",
-            "algorithm_info": {
-                "name": self.name,
-                "description": self.description,
-                "priority_mode": self.config.priority_mode.value,
-                "time_penalty_mode": self.config.time_penalty_mode.value,
-                "workload_constraint_mode": self.config.workload_constraint_mode.value
+            'assignments': assignments,
+            'schedule': assignments,
+            'solution': assignments,
+            'schedules': assignments,  # For backward compatibility
+            'statistics': statistics,
+            'algorithm_info': {
+                'name': self.name,
+                'description': self.description,
+                'class_count': self.config.class_count,
+                'priority_mode': self.config.priority_mode.value,
+                'final_cost': best_state.cost,
+                'execution_time': execution_time
             }
         }
         
-        logger.info(f"DP optimization completed in {elapsed:.2f}s")
-        logger.info(f"  Best class count: {best_class_count}")
-        logger.info(f"  Total cost: {best_overall_score.total_z:.2f}")
+        logger.info(f"DP optimization complete: cost={best_state.cost:.2f}, "
+                   f"time={execution_time:.2f}s")
         
         return result
     
-    def _create_fallback_solution(self) -> DPSolution:
+    def _improve_solution(self, state: DPState) -> DPState:
         """
-        Create fallback solution.
+        Improve the solution using DP-style transitions.
         
-        CRITICAL: Ensures ALL projects are assigned.
+        Tries local improvements:
+        - J1 reassignment
+        - Class moves
+        - Order swaps
         """
-        # Use configured class count or default to available classrooms
-        class_count = self.config.class_count
-        if class_count <= 0 or class_count > len(self.classrooms):
-            class_count = len(self.classrooms) if self.classrooms else 6
-            logger.warning(f"[FALLBACK] Invalid class_count, using {class_count}")
+        best_state = state.copy()
+        best_cost = best_state.cost
         
-        solution = DPSolution(class_count=class_count)
-        faculty_ids = [
-            i.id for i in self.instructors
-            if i.type == "instructor"
-        ]
+        no_improve = 0
+        max_no_improve = 500
         
-        # CRITICAL: Ensure ALL projects are assigned
-        class_loads = [0] * class_count
-        for i, project in enumerate(self.projects):
-            class_id = i % class_count
-            slot = class_loads[class_id]
-            class_loads[class_id] += 1
+        for iteration in range(self.config.max_iterations):
+            # Generate neighbor
+            neighbor = self._generate_neighbor(best_state)
             
-            j1_id = None
-            for fid in faculty_ids:
-                if fid != project.responsible_id:
-                    j1_id = fid
-                    break
-            
-            if j1_id is None:
-                j1_id = faculty_ids[0] if faculty_ids else -1
-            
-            assignment = ProjectAssignment(
-                project_id=project.id,
-                class_id=class_id,
-                order_in_class=slot,
-                ps_id=project.responsible_id,
-                j1_id=j1_id,
-                j2_id=-1
-            )
-            solution.assignments.append(assignment)
-        
-        return solution
-    
-    def _convert_solution_to_schedule(
-        self,
-        solution: DPSolution
-    ) -> List[Dict[str, Any]]:
-        """
-        Convert DPSolution to schedule format.
-        
-        CRITICAL: Ensures ALL projects are included in the output.
-        """
-        schedule = []
-        
-        if not solution or not solution.assignments:
-            logger.warning("[CONVERT_SCHEDULE] Empty solution, creating fallback")
-            return self._create_emergency_schedule()
-        
-        # Create mappings
-        classroom_mapping = self._create_classroom_mapping(solution.class_count)
-        timeslot_mapping = self._create_timeslot_mapping()
-        project_map = {p.id: p for p in self.projects}
-        
-        # Track assigned projects
-        assigned_project_ids = set()
-        
-        for assignment in solution.assignments:
-            assigned_project_ids.add(assignment.project_id)
-            
-            classroom_id = classroom_mapping.get(
-                assignment.class_id,
-                self.classrooms[0].get("id", 1) if self.classrooms else assignment.class_id + 1
-            )
-            
-            timeslot_id = timeslot_mapping.get(
-                assignment.order_in_class,
-                self.timeslots[0].get("id", 1) if self.timeslots else assignment.order_in_class + 1
-            )
-            
-            # Instructors: [PS, J1, J2 placeholder]
-            instructors = [assignment.ps_id, assignment.j1_id]
-            
-            # Add J2 placeholder
-            if assignment.j2_id > 0:
-                instructors.append(assignment.j2_id)
-            else:
-                instructors.append({
-                    "id": -1,
-                    "name": "[Arastirma Gorevlisi]",
-                    "is_placeholder": True
-                })
-            
-            project = project_map.get(assignment.project_id)
-            
-            entry = {
-                "project_id": assignment.project_id,
-                "classroom_id": classroom_id,
-                "timeslot_id": timeslot_id,
-                "instructors": instructors,
-                "class_order": assignment.order_in_class,
-                "class_id": assignment.class_id,
-                "is_makeup": project.is_makeup if project else False
-            }
-            schedule.append(entry)
-        
-        # CRITICAL: Check for missing projects and add them
-        all_project_ids = {p.id for p in self.projects}
-        missing_project_ids = all_project_ids - assigned_project_ids
-        
-        if missing_project_ids:
-            logger.warning(f"[CONVERT_SCHEDULE] Found {len(missing_project_ids)} missing projects, adding them...")
-            schedule = self._add_missing_projects(schedule, missing_project_ids, solution.class_count)
-        
-        # Final verification
-        final_assigned_ids = {entry["project_id"] for entry in schedule}
-        if len(final_assigned_ids) != len(all_project_ids):
-            logger.error(f"[CONVERT_SCHEDULE] CRITICAL: Still missing {len(all_project_ids) - len(final_assigned_ids)} projects!")
-        else:
-            logger.info(f"[CONVERT_SCHEDULE] SUCCESS: All {len(all_project_ids)} projects are in schedule!")
-        
-        return schedule
-    
-    def _add_missing_projects(
-        self,
-        schedule: List[Dict[str, Any]],
-        missing_project_ids: Set[int],
-        class_count: int
-    ) -> List[Dict[str, Any]]:
-        """
-        Add missing projects to schedule.
-        
-        CRITICAL: Ensures ALL projects are included.
-        """
-        project_map = {p.id: p for p in self.projects}
-        classroom_mapping = self._create_classroom_mapping(class_count)
-        timeslot_mapping = self._create_timeslot_mapping()
-        
-        # Get faculty IDs
-        faculty_ids = [
-            i.id for i in self.instructors
-            if i.type == "instructor"
-        ]
-        
-        # Calculate class loads from existing schedule
-        class_loads = defaultdict(int)
-        for entry in schedule:
-            class_id = entry.get("class_id", 0)
-            class_loads[class_id] += 1
-        
-        # Add missing projects
-        for missing_id in missing_project_ids:
-            project = project_map.get(missing_id)
-            if not project:
-                logger.error(f"[ADD_MISSING] Project {missing_id} not found in project map!")
+            if neighbor is None:
                 continue
             
-            # Find class with minimum load
-            min_class_id = min(range(class_count), key=lambda c: class_loads.get(c, 0))
-            slot = class_loads[min_class_id]
-            class_loads[min_class_id] += 1
+            # Calculate cost
+            neighbor.cost = self.penalty_calculator.calculate_total_cost(neighbor)
             
-            # Get classroom ID
-            classroom_id = classroom_mapping.get(
-                min_class_id,
-                self.classrooms[0].get("id", 1) if self.classrooms else min_class_id + 1
-            )
+            # CRITICAL: Check for conflicts - reject if conflicts introduced
+            neighbor_conflicts = self.penalty_calculator.count_conflicts(neighbor)
+            current_conflicts = self.penalty_calculator.count_conflicts(best_state)
             
-            # Get timeslot ID
-            timeslot_id = timeslot_mapping.get(
-                slot,
-                self.timeslots[0].get("id", 1) if self.timeslots else slot + 1
-            )
+            # Only accept if: (no new conflicts AND better cost) OR (fewer conflicts)
+            if neighbor_conflicts > current_conflicts:
+                # Reject - this move introduced conflicts
+                no_improve += 1
+                continue
             
-            # Find J1 (must not be PS)
-            j1_id = None
-            for fid in faculty_ids:
-                if fid != project.responsible_id:
-                    j1_id = fid
-                    break
+            # Check for improvement (prefer conflict-free solutions)
+            accept = False
+            if neighbor_conflicts < current_conflicts:
+                # Always accept if it reduces conflicts
+                accept = True
+            elif neighbor.cost < best_cost:
+                accept = True
             
-            if j1_id is None:
-                j1_id = faculty_ids[0] if faculty_ids else -1
-            
-            # Create entry
-            entry = {
-                "project_id": missing_id,
-                "classroom_id": classroom_id,
-                "timeslot_id": timeslot_id,
-                "instructors": [
-                    project.responsible_id,
-                    j1_id,
-                    {
-                        "id": -1,
-                        "name": "[Arastirma Gorevlisi]",
-                        "is_placeholder": True
-                    }
-                ],
-                "class_order": slot,
-                "class_id": min_class_id,
-                "is_makeup": project.is_makeup
-            }
-            schedule.append(entry)
-            logger.info(f"[ADD_MISSING] Added project {missing_id} to class {min_class_id}, slot {slot}")
-        
-        return schedule
-    
-    def _create_emergency_schedule(self) -> List[Dict[str, Any]]:
-        """
-        Create emergency schedule when solution is empty.
-        
-        CRITICAL: Ensures ALL projects are assigned.
-        """
-        logger.warning("[EMERGENCY_SCHEDULE] Creating emergency schedule for all projects")
-        
-        # Use configured class count or default
-        class_count = self.config.class_count
-        if class_count <= 0 or class_count > len(self.classrooms):
-            class_count = len(self.classrooms) if self.classrooms else 6
-        
-        schedule = []
-        class_loads = [0] * class_count
-        classroom_mapping = self._create_classroom_mapping(class_count)
-        timeslot_mapping = self._create_timeslot_mapping()
-        
-        faculty_ids = [
-            i.id for i in self.instructors
-            if i.type == "instructor"
-        ]
-        
-        # Assign ALL projects
-        for i, project in enumerate(self.projects):
-            class_id = i % class_count
-            slot = class_loads[class_id]
-            class_loads[class_id] += 1
-            
-            classroom_id = classroom_mapping.get(
-                class_id,
-                self.classrooms[0].get("id", 1) if self.classrooms else class_id + 1
-            )
-            
-            timeslot_id = timeslot_mapping.get(
-                slot,
-                self.timeslots[0].get("id", 1) if self.timeslots else slot + 1
-            )
-            
-            # Find J1
-            j1_id = None
-            for fid in faculty_ids:
-                if fid != project.responsible_id:
-                    j1_id = fid
-                    break
-            
-            if j1_id is None:
-                j1_id = faculty_ids[0] if faculty_ids else -1
-            
-            entry = {
-                "project_id": project.id,
-                "classroom_id": classroom_id,
-                "timeslot_id": timeslot_id,
-                "instructors": [
-                    project.responsible_id,
-                    j1_id,
-                    {
-                        "id": -1,
-                        "name": "[Arastirma Gorevlisi]",
-                        "is_placeholder": True
-                    }
-                ],
-                "class_order": slot,
-                "class_id": class_id,
-                "is_makeup": project.is_makeup
-            }
-            schedule.append(entry)
-        
-        logger.info(f"[EMERGENCY_SCHEDULE] Created schedule with {len(schedule)} assignments for {len(self.projects)} projects")
-        return schedule
-    
-    def _create_classroom_mapping(self, class_count: int) -> Dict[int, int]:
-        """Map logical class IDs to real classroom IDs."""
-        mapping = {}
-        for i in range(class_count):
-            if i < len(self.classrooms):
-                cid = self.classrooms[i].get("id") if isinstance(self.classrooms[i], dict) else getattr(self.classrooms[i], "id", i + 1)
-                mapping[i] = cid
+            if accept:
+                best_state = neighbor
+                best_cost = neighbor.cost
+                no_improve = 0
+                
+                if iteration % 100 == 0:
+                    logger.debug(f"Iteration {iteration}: improved to cost={best_cost:.2f}, conflicts={neighbor_conflicts}")
             else:
-                mapping[i] = i + 1
-        return mapping
-    
-    def _create_timeslot_mapping(self) -> Dict[int, int]:
-        """Map slot index to timeslot IDs."""
-        mapping = {}
-        for i, ts in enumerate(self.timeslots):
-            tid = ts.get("id") if isinstance(ts, dict) else getattr(ts, "id", i + 1)
-            mapping[i] = tid
-        return mapping
-    
-    def evaluate_fitness(self, solution: Dict[str, Any]) -> float:
-        """
-        Evaluate fitness of a solution.
-        
-        Args:
-            solution: Solution dictionary
+                no_improve += 1
             
-        Returns:
-            Fitness value (higher = better)
-        """
-        if not solution:
-            return float('-inf')
+            # Early termination
+            if no_improve >= max_no_improve:
+                logger.info(f"Early termination at iteration {iteration}")
+                break
         
-        assignments = solution.get("solution", solution.get("schedule", solution))
-        
-        if isinstance(assignments, DPSolution):
-            penalty_calc = DPPenaltyCalculator(
-                self.projects, self.instructors, self.config
-            )
-            cost = penalty_calc.calculate_total_penalty(assignments)
-            return -cost
-        
-        # Convert list to DPSolution
-        if isinstance(assignments, list):
-            dp_solution = self._convert_schedule_to_solution(assignments)
-            if dp_solution:
-                penalty_calc = DPPenaltyCalculator(
-                    self.projects, self.instructors, self.config
-                )
-                cost = penalty_calc.calculate_total_penalty(dp_solution)
-                return -cost
-        
-        return float('-inf')
+        return best_state
     
-    def _convert_schedule_to_solution(
-        self,
-        schedule: List[Dict[str, Any]]
-    ) -> Optional[DPSolution]:
-        """Convert schedule format to DPSolution."""
-        if not schedule:
+    def _generate_neighbor(self, state: DPState) -> Optional[DPState]:
+        """Generate a neighbor solution using random move."""
+        neighbor = state.copy()
+        
+        if not neighbor.assignments:
             return None
         
-        solution = DPSolution(class_count=self.config.class_count)
-        project_map = {p.id: p for p in self.projects}
+        # Choose move type
+        move_type = random.choice(['j1_reassign', 'class_move', 'order_swap'])
         
-        for entry in schedule:
-            project_id = entry.get("project_id")
-            instructors = entry.get("instructors", [])
-            
-            if not project_id or len(instructors) < 2:
-                continue
-            
-            ps_id = instructors[0] if isinstance(instructors[0], int) else instructors[0].get("id", 0)
-            j1_id = instructors[1] if isinstance(instructors[1], int) else instructors[1].get("id", 0)
-            
-            assignment = ProjectAssignment(
-                project_id=project_id,
-                class_id=entry.get("class_id", 0),
-                order_in_class=entry.get("class_order", 0),
-                ps_id=ps_id,
-                j1_id=j1_id,
-                j2_id=-1
-            )
-            solution.assignments.append(assignment)
+        if move_type == 'j1_reassign':
+            return self._move_j1_reassign(neighbor)
+        elif move_type == 'class_move':
+            return self._move_class_move(neighbor)
+        else:
+            return self._move_order_swap(neighbor)
+    
+    def _move_j1_reassign(self, state: DPState) -> Optional[DPState]:
+        """Reassign J1 for a random project."""
+        if not state.assignments:
+            return None
         
-        return solution
+        # Pick random assignment
+        assignment = random.choice(state.assignments)
+        slot = assignment.order_in_class
+        
+        # Build a map of which instructors are busy at each slot
+        # CRITICAL: slot is the same across ALL classes (same timeslot)
+        busy_at_slot: Dict[int, Set[int]] = defaultdict(set)  # slot -> set of busy instructor_ids
+        
+        for a in state.assignments:
+            busy_at_slot[a.order_in_class].add(a.ps_id)
+            busy_at_slot[a.order_in_class].add(a.j1_id)
+        
+        # Find available J1s (not busy at this slot, not PS)
+        faculty_ids = [i.id for i in self.instructors if i.type == "instructor"]
+        available = []
+        
+        for fid in faculty_ids:
+            if fid == assignment.ps_id:
+                continue  # J1 != PS
+            if fid == assignment.j1_id:
+                continue  # Already assigned as J1
+            if fid in busy_at_slot[slot]:
+                # This instructor is already busy at this slot (same timeslot across any class)
+                # But we need to check if they're busy for a DIFFERENT project
+                # (they could be busy for this very project if they're the current J1/PS)
+                # Find the assignments that make this instructor busy at this slot
+                is_own_assignment = False
+                for a in state.assignments:
+                    if a.order_in_class == slot and (a.ps_id == fid or a.j1_id == fid):
+                        if a.project_id == assignment.project_id:
+                            # This is the current assignment - J1 can be changed
+                            is_own_assignment = True
+                        else:
+                            # Busy for another project at the same slot - conflict!
+                            is_own_assignment = False
+                            break
+                
+                if not is_own_assignment:
+                    continue  # This instructor is busy at this slot for another project
+            
+            available.append(fid)
+        
+        if not available:
+            return None
+        
+        # Select best J1 (lowest workload)
+        workloads = defaultdict(int)
+        for a in state.assignments:
+            workloads[a.ps_id] += 1
+            workloads[a.j1_id] += 1
+        
+        available.sort(key=lambda x: workloads.get(x, 0))
+        assignment.j1_id = available[0]
+        
+        return state
     
-    def get_name(self) -> str:
-        """Get algorithm name."""
-        return "DynamicProgramming"
-    
-    def repair_solution(
-        self,
-        solution: Dict[str, Any],
-        validation_result: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def _move_class_move(self, state: DPState) -> Optional[DPState]:
         """
-        Repair solution after validation.
+        Move a project to a different class.
+        
+        After moving, need to find new slot and potentially new J1 to avoid conflicts.
+        """
+        if not state.assignments:
+            return None
+        
+        # Pick random assignment
+        assignment = random.choice(state.assignments)
+        old_class = assignment.class_id
+        
+        # Pick new class
+        new_class = random.choice([c for c in range(state.class_count) if c != old_class])
+        
+        # Update assignment
+        assignment.class_id = new_class
+        
+        # Reorder
+        self._reorder_assignments(state)
+        
+        return state
+    
+    def _move_order_swap(self, state: DPState) -> Optional[DPState]:
+        """Swap order of two projects in the same class."""
+        if not state.assignments:
+            return None
+        
+        # Pick random class
+        class_id = random.randint(0, state.class_count - 1)
+        class_assignments = [a for a in state.assignments if a.class_id == class_id]
+        
+        if len(class_assignments) < 2:
+            return None
+        
+        # Pick two random assignments
+        a1, a2 = random.sample(class_assignments, 2)
+        
+        # Swap orders
+        a1.order_in_class, a2.order_in_class = a2.order_in_class, a1.order_in_class
+        
+        return state
+    
+    def _reorder_assignments(self, state: DPState) -> None:
+        """Reorder assignments within each class to be consecutive."""
+        for class_id in range(state.class_count):
+            class_assignments = [a for a in state.assignments if a.class_id == class_id]
+            class_assignments.sort(key=lambda a: a.order_in_class)
+            
+            for i, assignment in enumerate(class_assignments):
+                assignment.order_in_class = i
+    
+    def _final_repair(self, state: DPState) -> None:
+        """Final repair to ensure all constraints are satisfied."""
+        # Repair conflicts (iterate until none remain)
+        max_repair_iterations = 20
+        for repair_iter in range(max_repair_iterations):
+            conflict_count = self.penalty_calculator.count_conflicts(state)
+            if conflict_count == 0:
+                break
+            
+            logger.info(f"Final repair iteration {repair_iter + 1}: {conflict_count} conflicts detected")
+            self.solution_builder._repair_conflicts(state)
+        
+        # Check if conflicts remain after all iterations
+        final_conflicts = self.penalty_calculator.count_conflicts(state)
+        if final_conflicts > 0:
+            logger.error(f"CRITICAL: {final_conflicts} conflicts could not be resolved!")
+        else:
+            logger.info("All conflicts resolved successfully")
+        
+        # Ensure all classes are used
+        used_classes = set(a.class_id for a in state.assignments)
+        unused_classes = [c for c in range(state.class_count) if c not in used_classes]
+        
+        if unused_classes:
+            logger.info(f"Final repair: {len(unused_classes)} unused classes")
+            self._repair_unused_classes(state, unused_classes)
+        
+        # Recalculate cost
+        state.cost = self.penalty_calculator.calculate_total_cost(state)
+    
+    def _repair_unused_classes(self, state: DPState, unused_classes: List[int]) -> None:
+        """Move projects to unused classes to ensure all classes are used."""
+        # Find class with most projects
+        class_loads = defaultdict(int)
+        for a in state.assignments:
+            class_loads[a.class_id] += 1
+        
+        for unused_class in unused_classes:
+            if not class_loads:
+                break
+            
+            # Find most loaded class
+            max_class = max(class_loads.keys(), key=lambda c: class_loads[c])
+            
+            if class_loads[max_class] <= 1:
+                continue  # Can't move if only 1 project
+            
+            # Find assignment to move
+            assignments_in_max = [a for a in state.assignments if a.class_id == max_class]
+            if assignments_in_max:
+                # Move last assignment
+                assignment = assignments_in_max[-1]
+                assignment.class_id = unused_class
+                assignment.order_in_class = 0
+                
+                class_loads[max_class] -= 1
+                class_loads[unused_class] = 1
+        
+        # Reorder
+        self._reorder_assignments(state)
+    
+    def _convert_to_output_format(self, state: DPState) -> List[Dict[str, Any]]:
+        """
+        Convert DPState to output format expected by the application.
+        
+        CRITICAL: Maps class_id to actual classroom_id from database,
+        and order_in_class to actual timeslot_id from database.
+        """
+        result = []
+        
+        for assignment in state.assignments:
+            project = self.solution_builder.projects_dict.get(assignment.project_id)
+            ps_instructor = next((i for i in self.instructors if i.id == assignment.ps_id), None)
+            j1_instructor = next((i for i in self.instructors if i.id == assignment.j1_id), None)
+            
+            # Map class_id to actual classroom_id
+            class_id = assignment.class_id
+            classroom = None
+            if class_id < len(self.classrooms):
+                classroom = self.classrooms[class_id]
+            
+            # Map order_in_class to actual timeslot_id
+            order = assignment.order_in_class
+            timeslot = None
+            if order < len(self.timeslots):
+                timeslot = self.timeslots[order]
+            
+            # Get actual IDs (fall back to indices if not available)
+            actual_classroom_id = classroom.get('id') if classroom else class_id
+            actual_timeslot_id = timeslot.get('id') if timeslot else order
+            classroom_name = classroom.get('name', f'D{105+class_id}') if classroom else f'D{105+class_id}'
+            
+            result.append({
+                'project_id': assignment.project_id,
+                'project_name': project.name if project else f"Project {assignment.project_id}",
+                'project_type': project.type if project else "INTERIM",
+                'class_id': class_id,
+                'classroom_id': actual_classroom_id,
+                'classroom_name': classroom_name,
+                'order_in_class': order,
+                'timeslot_id': actual_timeslot_id,
+                'timeslot': timeslot if timeslot else {'id': order},
+                'ps_id': assignment.ps_id,
+                'j1_id': assignment.j1_id,
+                'j2_id': assignment.j2_id,  # Placeholder (-1)
+                'instructors': [assignment.ps_id, assignment.j1_id],
+                'instructor_names': [
+                    ps_instructor.name if ps_instructor else f"Instructor {assignment.ps_id}",
+                    j1_instructor.name if j1_instructor else f"Instructor {assignment.j1_id}"
+                ]
+            })
+        
+        # Sort by class and order
+        result.sort(key=lambda x: (x['class_id'], x['order_in_class']))
+        
+        return result
+    
+    def _calculate_statistics(self, state: DPState) -> Dict[str, Any]:
+        """Calculate statistics for the solution."""
+        # Workload distribution
+        workloads = defaultdict(int)
+        for a in state.assignments:
+            workloads[a.ps_id] += 1
+            workloads[a.j1_id] += 1
+        
+        workload_values = list(workloads.values()) if workloads else [0]
+        
+        # Class distribution
+        class_counts = defaultdict(int)
+        for a in state.assignments:
+            class_counts[a.class_id] += 1
+        
+        # Conflict count
+        conflict_count = self.penalty_calculator.count_conflicts(state)
+        
+        return {
+            'total_projects': len(state.assignments),
+            'class_count': state.class_count,
+            'total_cost': state.cost,
+            'conflict_count': conflict_count,
+            'workload_min': min(workload_values),
+            'workload_max': max(workload_values),
+            'workload_avg': sum(workload_values) / len(workload_values) if workload_values else 0,
+            'workload_std': float(np.std(workload_values)) if len(workload_values) > 1 else 0,
+            'class_distribution': dict(class_counts),
+            'used_classes': len(class_counts),
+            'unused_classes': state.class_count - len(class_counts),
+            'penalty_breakdown': {
+                'h1_time': self.penalty_calculator.calculate_h1_time_penalty(state),
+                'h2_workload': self.penalty_calculator.calculate_h2_workload_penalty(state),
+                'h3_class_change': self.penalty_calculator.calculate_h3_class_change_penalty(state),
+                'h4_class_load': self.penalty_calculator.calculate_h4_class_load_penalty(state),
+                'h5_continuity': self.penalty_calculator.calculate_h5_continuity_penalty(state),
+                'h6_conflict': self.penalty_calculator.calculate_h6_timeslot_conflict_penalty(state),
+                'h7_unused': self.penalty_calculator.calculate_h7_unused_class_penalty(state)
+            }
+        }
+    
+    def evaluate_fitness(self, assignments: List[Dict[str, Any]]) -> float:
+        """
+        Evaluate the fitness of a given schedule.
         
         Args:
-            solution: Solution to repair
-            validation_result: Validation results
+            assignments: List of schedule assignments
             
         Returns:
-            Repaired solution
+            float: Fitness score (higher is better, so we use negative cost)
         """
-        assignments = solution.get("assignments", solution.get("schedule", []))
-        
-        if not assignments:
-            return solution
-        
-        # Remove duplicates
-        seen_projects = set()
-        cleaned = []
+        # Convert to DPState
+        state = DPState(class_count=self.config.class_count)
         
         for a in assignments:
-            project_id = a.get("project_id")
-            if project_id not in seen_projects:
-                seen_projects.add(project_id)
-                cleaned.append(a)
+            state.assignments.append(ProjectAssignment(
+                project_id=a.get('project_id', 0),
+                class_id=a.get('class_id', 0),
+                order_in_class=a.get('order_in_class', 0),
+                ps_id=a.get('ps_id', 0),
+                j1_id=a.get('j1_id', 0),
+                j2_id=a.get('j2_id', -1)
+            ))
         
-        # Check slot conflicts
-        used_slots = set()
-        final = []
+        # Calculate cost
+        if self.penalty_calculator:
+            cost = self.penalty_calculator.calculate_total_cost(state)
+        else:
+            cost = 0.0
         
-        for a in cleaned:
-            slot_key = (a.get("classroom_id"), a.get("timeslot_id"))
-            if slot_key not in used_slots:
-                used_slots.add(slot_key)
-                final.append(a)
-        
-        return {"assignments": final}
+        # Return negative cost as fitness (higher is better)
+        return -cost
 
 
-# ============================================================================
-# PUBLIC API
-# ============================================================================
-
-def solve_with_dynamic_programming(
-    input_data: Dict[str, Any],
-    config: Dict[str, Any] = None
-) -> Dict[str, Any]:
-    """
-    Public API for solving with Dynamic Programming.
-    
-    Args:
-        input_data: Dictionary containing:
-            - projects: List of project data
-            - instructors: List of instructor data
-            - classrooms: Optional list of classrooms
-            - timeslots: Optional list of timeslots
-        
-        config: Optional configuration dictionary with:
-            - class_count: Number of classes (default: 6)
-            - auto_class_count: Try 5,6,7 and pick best (default: True)
-            - priority_mode: ARA_ONCE, BITIRME_ONCE, ESIT
-            - time_penalty_mode: BINARY, GAP_PROPORTIONAL
-            - workload_constraint_mode: SOFT_ONLY, SOFT_AND_HARD
-            - weight_h1, weight_h2, weight_h3, weight_h4: Penalty weights
-            - max_states_per_layer: DP frontier limit
-            - beam_width: Beam search width
-            - time_limit: Time limit in seconds
-    
-    Returns:
-        Dictionary with:
-            - schedule: List of assignments
-            - cost: Total cost
-            - fitness: -cost (for compatibility)
-            - execution_time: Execution time in seconds
-            - penalty_breakdown: Detailed penalty breakdown
-            - status: Completion status
-    """
-    # Build config
-    dp_config = DPConfig()
-    
-    if config:
-        # Class count settings
-        if "class_count" in config:
-            dp_config.class_count = config["class_count"]
-        if "auto_class_count" in config:
-            dp_config.auto_class_count = config["auto_class_count"]
-        
-        # DP control parameters
-        if "max_states_per_layer" in config:
-            dp_config.max_states_per_layer = config["max_states_per_layer"]
-        if "beam_width" in config:
-            dp_config.beam_width = config["beam_width"]
-        if "time_limit" in config:
-            dp_config.time_limit = config["time_limit"]
-        if "enable_dominance_pruning" in config:
-            dp_config.enable_dominance_pruning = config["enable_dominance_pruning"]
-        
-        # Mode settings
-        if "priority_mode" in config:
-            dp_config.priority_mode = PriorityMode(config["priority_mode"])
-        if "time_penalty_mode" in config:
-            dp_config.time_penalty_mode = TimePenaltyMode(config["time_penalty_mode"])
-        if "workload_constraint_mode" in config:
-            dp_config.workload_constraint_mode = WorkloadConstraintMode(config["workload_constraint_mode"])
-        
-        # Weights
-        if "weight_h1" in config:
-            dp_config.weight_h1 = config["weight_h1"]
-        if "weight_h2" in config:
-            dp_config.weight_h2 = config["weight_h2"]
-        if "weight_h3" in config:
-            dp_config.weight_h3 = config["weight_h3"]
-        if "weight_h4" in config:
-            dp_config.weight_h4 = config["weight_h4"]
-        if "weight_continuity" in config:
-            dp_config.weight_continuity = config["weight_continuity"]
-        
-        # Workload settings
-        if "workload_hard_limit" in config:
-            dp_config.workload_hard_limit = config["workload_hard_limit"]
-        if "workload_soft_band" in config:
-            dp_config.workload_soft_band = config["workload_soft_band"]
-    
-    # Create and run algorithm
-    algorithm = DynamicProgrammingAlgorithm({
-        "class_count": dp_config.class_count,
-        "auto_class_count": dp_config.auto_class_count,
-        "max_states_per_layer": dp_config.max_states_per_layer,
-        "beam_width": dp_config.beam_width,
-        "time_limit": dp_config.time_limit,
-        "enable_dominance_pruning": dp_config.enable_dominance_pruning,
-        "priority_mode": dp_config.priority_mode.value,
-        "time_penalty_mode": dp_config.time_penalty_mode.value,
-        "workload_constraint_mode": dp_config.workload_constraint_mode.value,
-        "weight_h1": dp_config.weight_h1,
-        "weight_h2": dp_config.weight_h2,
-        "weight_h3": dp_config.weight_h3,
-        "weight_h4": dp_config.weight_h4,
-        "weight_continuity": dp_config.weight_continuity,
-        "workload_hard_limit": dp_config.workload_hard_limit,
-        "workload_soft_band": dp_config.workload_soft_band
-    })
-    
-    algorithm.initialize(input_data)
-    result = algorithm.optimize(input_data)
-    
-    return result
-
-
-def create_dynamic_programming(
-    params: Dict[str, Any] = None
-) -> DynamicProgrammingAlgorithm:
-    """
-    Factory function to create DP algorithm.
-    
-    Args:
-        params: Configuration parameters
-        
-    Returns:
-        Configured DynamicProgrammingAlgorithm instance
-    """
-    return DynamicProgrammingAlgorithm(params)
-
-
-# Aliases for compatibility
-DynamicProgramming = DynamicProgrammingAlgorithm
-
+# Alias for backward compatibility with factory.py
+DynamicProgrammingAlgorithm = DynamicProgramming

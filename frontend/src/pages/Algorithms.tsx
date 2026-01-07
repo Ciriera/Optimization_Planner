@@ -32,6 +32,8 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import {
   Science,
@@ -58,31 +60,31 @@ const Algorithms: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
   const [tabValue, setTabValue] = useState(0);
-  
+
   // Execution state
   const [executing, setExecuting] = useState(false);
-  const [snack, setSnack] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({ 
-    open: false, 
-    message: '', 
-    severity: 'success' 
+  const [snack, setSnack] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+    open: false,
+    message: '',
+    severity: 'success'
   });
-  
+
   // Algorithm recommendation state
   const [recommendation, setRecommendation] = useState<any>(null);
   const [recommendationLoading, setRecommendationLoading] = useState(false);
-  
+
   // Algorithm parameters state
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<Algorithm | null>(null);
   const [showParameters, setShowParameters] = useState(false);
   const [algorithmParams, setAlgorithmParams] = useState<Record<string, any>>({});
-  
+
   // Classroom count selection state
   const [selectedClassroomCount, setSelectedClassroomCount] = useState<number>(7);
-  
+
   // Optimize classroom count state
   const [optimizeClassroomCount, setOptimizeClassroomCount] = useState<boolean>(false);
   const [optimizing, setOptimizing] = useState<boolean>(false);
-  
+
   // Slot insufficiency dialog state
   const [showSlotDialog, setShowSlotDialog] = useState(false);
   const [slotDialogData, setSlotDialogData] = useState({
@@ -91,12 +93,12 @@ const Algorithms: React.FC = () => {
     availableSlots: 0,
     requiredSlots: 0,
   });
-  
+
   // Save classroom count to localStorage when changed
   useEffect(() => {
     try {
       localStorage.setItem('selected_classroom_count', selectedClassroomCount.toString());
-    } catch {}
+    } catch { }
   }, [selectedClassroomCount]);
 
   // Check slot sufficiency when classroom count changes
@@ -105,7 +107,7 @@ const Algorithms: React.FC = () => {
       checkSlotSufficiency();
     }
   }, [selectedClassroomCount]);
-  
+
   // Real-time progress tracking
   const {
     isConnected,
@@ -120,7 +122,7 @@ const Algorithms: React.FC = () => {
     connect,
     subscribeToAlgorithm,
   } = useAlgorithmProgress({ autoConnect: true });
-  
+
   const navigate = useNavigate();
 
   // Slot insufficiency check function
@@ -130,11 +132,11 @@ const Algorithms: React.FC = () => {
       const projectsResponse = await api.get('/projects/');
       const projects = projectsResponse.data;
       const projectCount = projects.length;
-      
+
       // Calculate available slots (16 timeslots * classroom count)
       const availableSlots = 16 * selectedClassroomCount;
       const requiredSlots = projectCount;
-      
+
       // Check if there's a shortage
       if (requiredSlots > availableSlots) {
         setSlotDialogData({
@@ -146,7 +148,7 @@ const Algorithms: React.FC = () => {
         setShowSlotDialog(true);
         return false; // Insufficient slots
       }
-      
+
       return true; // Sufficient slots
     } catch (error) {
       console.error('Error checking slot sufficiency:', error);
@@ -229,30 +231,30 @@ const Algorithms: React.FC = () => {
     try {
       setOptimizing(true);
       setSnack({ open: true, message: 'Optimal sınıf sayısı hesaplanıyor...', severity: 'success' });
-      
+
       const response = await api.post('/algorithms/optimize-classroom-count', {
         algorithm: algorithm.type || algorithm.name,
         params: algorithmParams
       });
-      
+
       const result = response.data;
       const optimalCount = result.optimal_classroom_count;
       const optimalScore = result.optimal_score;
-      
+
       // Set the optimal classroom count and update UI
       setSelectedClassroomCount(optimalCount);
-      
-      setSnack({ 
-        open: true, 
-        message: `Optimal sınıf sayısı: ${optimalCount} (Skor: ${optimalScore.toFixed(2)}) - Algoritma çalıştırılıyor...`, 
-        severity: 'success' 
+
+      setSnack({
+        open: true,
+        message: `Optimal sınıf sayısı: ${optimalCount} (Skor: ${optimalScore.toFixed(2)}) - Algoritma çalıştırılıyor...`,
+        severity: 'success'
       });
-      
+
       // Wait a bit for UI to update, then execute with optimal classroom count
       setTimeout(async () => {
         try {
           setExecuting(true);
-          
+
           // Check slot sufficiency before executing
           const hasSufficientSlots = await checkSlotSufficiency();
           if (!hasSufficientSlots) {
@@ -260,7 +262,7 @@ const Algorithms: React.FC = () => {
             setOptimizing(false);
             return; // Stop execution if insufficient slots
           }
-          
+
           // WebSocket bağlantısını kontrol et
           if (!isConnected) {
             setSnack({ open: true, message: 'WebSocket baglantisi yok, baglanmaya calisiliyor...', severity: 'error' });
@@ -268,7 +270,7 @@ const Algorithms: React.FC = () => {
             const userId = user?.id || 1; // Fallback to 1 if user not available
             await connect(userId);
           }
-          
+
           // Execute with optimal classroom count
           const execRes = await api.post('/algorithms/execute', {
             algorithm: algorithm.type || algorithm.name,
@@ -290,38 +292,45 @@ const Algorithms: React.FC = () => {
           // Real-time progress tracking için algoritmaya abone ol
           subscribeToAlgorithm(run.id);
 
-          // Poll status (fallback) - WebSocket ile birlikte çalışır
-          const pollRes = await pollUntilComplete(run.id);
-          if (pollRes.status !== 'completed') {
-            const msg = pollRes.status === 'failed' ? 'Algoritma başarısız oldu' : 'Zaman aşımı: sonuç alınamadı';
+          // Execute response'unda zaten completed dönmüşse polling gerekmez
+          let finalStatus = run.status;
+
+          if (finalStatus !== 'completed' && finalStatus !== 'failed') {
+            // Poll status (fallback) - WebSocket ile birlikte çalışır
+            const pollRes = await pollUntilComplete(run.id);
+            finalStatus = pollRes.status;
+          }
+
+          if (finalStatus !== 'completed') {
+            const msg = finalStatus === 'failed' ? 'Algoritma başarısız oldu' : 'Zaman aşımı: sonuç alınamadı';
             setSnack({ open: true, message: msg, severity: 'error' });
             return;
           }
 
           // Navigate to planner (force refresh) - schedules already persisted by backend
-          try { localStorage.setItem('planner_refresh', '1'); } catch {}
+          try { localStorage.setItem('planner_refresh', '1'); } catch { }
           setSnack({ open: true, message: 'Optimal dağıtım tamamlandi, Planner\'a yonlendiriliyor...', severity: 'success' });
           navigate('/planner');
-          
+
         } catch (err: any) {
           const errorMsg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || 'Algoritma çalıştırılamadı';
           console.error('Algorithm execution error:', err);
-          setSnack({ 
-            open: true, 
-            message: `Hata: ${errorMsg}`, 
-            severity: 'error' 
+          setSnack({
+            open: true,
+            message: `Hata: ${errorMsg}`,
+            severity: 'error'
           });
         } finally {
           setExecuting(false);
           setOptimizing(false);
         }
       }, 1500);
-      
+
     } catch (err: any) {
-      setSnack({ 
-        open: true, 
-        message: err?.response?.data?.detail || 'Sınıf sayısı optimizasyonu başarısız', 
-        severity: 'error' 
+      setSnack({
+        open: true,
+        message: err?.response?.data?.detail || 'Sınıf sayısı optimizasyonu başarısız',
+        severity: 'error'
       });
       setOptimizing(false);
     }
@@ -331,14 +340,14 @@ const Algorithms: React.FC = () => {
   const handleExecuteDirect = async (algorithm: Algorithm) => {
     try {
       setExecuting(true);
-      
+
       // Check slot sufficiency before executing
       const hasSufficientSlots = await checkSlotSufficiency();
       if (!hasSufficientSlots) {
         setExecuting(false);
         return; // Stop execution if insufficient slots
       }
-      
+
       // WebSocket bağlantısını kontrol et
       if (!isConnected) {
         setSnack({ open: true, message: 'WebSocket baglantisi yok, baglanmaya calisiliyor...', severity: 'error' });
@@ -346,7 +355,7 @@ const Algorithms: React.FC = () => {
         const userId = user?.id || 1; // Fallback to 1 if user not available
         await connect(userId);
       }
-      
+
       // 1) Execute
       let execRes;
       try {
@@ -367,15 +376,15 @@ const Algorithms: React.FC = () => {
         // Backend'den gelen detaylı hata mesajını al
         // FastAPI error format: {detail: "..."} veya middleware format: {error: {...}}
         const responseData = err?.response?.data || {};
-        const backendDetail = 
+        const backendDetail =
           responseData.detail ||           // FastAPI HTTPException format
           responseData.message ||          // Middleware error format
-          (responseData.error && (typeof responseData.error === 'string' 
-            ? responseData.error 
+          (responseData.error && (typeof responseData.error === 'string'
+            ? responseData.error
             : responseData.error.detail || responseData.error.message)) || // Nested error format
-          err?.message || 
+          err?.message ||
           'Algoritma çalıştırılırken bir hata oluştu';
-        
+
         // Detaylı error logging
         console.error('=== Algorithm Execution Error ===');
         console.error('Error object:', err);
@@ -387,7 +396,7 @@ const Algorithms: React.FC = () => {
         console.error('Response data (message):', responseData.message);
         console.error('Extracted error message:', backendDetail);
         console.error('===============================');
-        
+
         // Kullanıcıya gösterilecek mesaj
         let displayMessage = backendDetail;
         if (backendDetail.includes('Errno 22') || backendDetail.includes('Invalid argument')) {
@@ -402,11 +411,11 @@ const Algorithms: React.FC = () => {
           // Backend'den gelen detaylı mesajı göster
           displayMessage = backendDetail.replace('Algorithm execution failed: ', '');
         }
-        
-        setSnack({ 
-          open: true, 
-          message: displayMessage || 'Algoritma çalıştırılırken bir hata oluştu. Lütfen console log\'larına bakın.', 
-          severity: 'error' 
+
+        setSnack({
+          open: true,
+          message: displayMessage || 'Algoritma çalıştırılırken bir hata oluştu. Lütfen console log\'larına bakın.',
+          severity: 'error'
         });
         setExecuting(false);
         return;
@@ -418,16 +427,24 @@ const Algorithms: React.FC = () => {
       // 2) Real-time progress tracking için algoritmaya abone ol
       subscribeToAlgorithm(run.id);
 
-      // 3) Poll status (fallback) - WebSocket ile birlikte çalışır
-      const pollRes = await pollUntilComplete(run.id);
-      if (pollRes.status !== 'completed') {
-        const msg = pollRes.status === 'failed' ? 'Algoritma başarısız oldu' : 'Zaman aşımı: sonuç alınamadı';
+      // 3) Execute response'unda zaten completed dönmüşse polling gerekmez
+      // Bu, backend'in senkron çalıştığı durumlarda loop'u önler
+      let finalStatus = run.status;
+
+      if (finalStatus !== 'completed' && finalStatus !== 'failed') {
+        // Poll status (fallback) - WebSocket ile birlikte çalışır
+        const pollRes = await pollUntilComplete(run.id);
+        finalStatus = pollRes.status;
+      }
+
+      if (finalStatus !== 'completed') {
+        const msg = finalStatus === 'failed' ? 'Algoritma başarısız oldu' : 'Zaman aşımı: sonuç alınamadı';
         setSnack({ open: true, message: msg, severity: 'error' });
         return;
       }
 
       // 4) Navigate to planner (force refresh) - schedules already persisted by backend
-      try { localStorage.setItem('planner_refresh', '1'); } catch {}
+      try { localStorage.setItem('planner_refresh', '1'); } catch { }
       setSnack({ open: true, message: 'Dagitim tamamlandi, Planner\'a yonlendiriliyor...', severity: 'success' });
       navigate('/planner');
     } catch (err: any) {
@@ -464,16 +481,16 @@ const Algorithms: React.FC = () => {
         }
       });
       setRecommendation(response.data);
-      setSnack({ 
-        open: true, 
-        message: `Önerilen algoritma: ${response.data.recommended_algorithm}`, 
-        severity: 'success' 
+      setSnack({
+        open: true,
+        message: `Önerilen algoritma: ${response.data.recommended_algorithm}`,
+        severity: 'success'
       });
     } catch (err: any) {
-      setSnack({ 
-        open: true, 
-        message: err?.response?.data?.detail || 'Algoritma önerisi alınamadı', 
-        severity: 'error' 
+      setSnack({
+        open: true,
+        message: err?.response?.data?.detail || 'Algoritma önerisi alınamadı',
+        severity: 'error'
       });
     } finally {
       setRecommendationLoading(false);
@@ -492,7 +509,7 @@ const Algorithms: React.FC = () => {
       setExecuting(true);
       // Execute with custom parameters
       const execRes = await api.post('/algorithms/execute', {
-        algorithm: algorithm.name,
+        algorithm: algorithm.type || algorithm.name,
         params: {
           ...params,
           classroom_count: selectedClassroomCount,
@@ -503,10 +520,17 @@ const Algorithms: React.FC = () => {
 
       setSnack({ open: true, message: `${algorithm.displayName} başlatıldı...`, severity: 'success' });
 
-      // Poll status
-      const pollRes = await pollUntilComplete(run.id);
-      if (pollRes.status !== 'completed') {
-        const msg = pollRes.status === 'failed' ? 'Algoritma başarısız oldu' : 'Zaman aşımı: sonuç alınamadı';
+      // Execute response'unda zaten completed dönmüşse polling gerekmez
+      let finalStatus = run.status;
+
+      if (finalStatus !== 'completed' && finalStatus !== 'failed') {
+        // Poll status (fallback) - WebSocket ile birlikte çalışır
+        const pollRes = await pollUntilComplete(run.id);
+        finalStatus = pollRes.status;
+      }
+
+      if (finalStatus !== 'completed') {
+        const msg = finalStatus === 'failed' ? 'Algoritma başarısız oldu' : 'Zaman aşımı: sonuç alınamadı';
         setSnack({ open: true, message: msg, severity: 'error' });
         return;
       }
@@ -529,7 +553,7 @@ const Algorithms: React.FC = () => {
     const mathematical = algorithms.filter(a => a.category === 'Mathematical').length;
     const multiObjective = algorithms.filter(a => a.category === 'Multi-objective').length;
     const metaheuristic = algorithms.filter(a => a.category === 'Metaheuristic').length;
-    
+
     return { total, bioInspired, searchBased, mathematical, multiObjective, metaheuristic };
   };
 
@@ -604,7 +628,7 @@ const Algorithms: React.FC = () => {
               <MenuItem value={7}>7 Sınıf</MenuItem>
             </Select>
           </FormControl>
-          
+
           {/* Optimize Classroom Count Checkbox */}
           <FormControl size="small" sx={{ minWidth: 200 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -625,7 +649,7 @@ const Algorithms: React.FC = () => {
               </Typography>
             )}
           </FormControl>
-          
+
           {/* Real-time progress indicator */}
           {isRunning && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -635,7 +659,7 @@ const Algorithms: React.FC = () => {
               </Typography>
             </Box>
           )}
-          
+
           {/* WebSocket connection status */}
           <Chip
             label={connectionStatus}
@@ -643,7 +667,7 @@ const Algorithms: React.FC = () => {
             size="small"
             variant="outlined"
           />
-          
+
           <Button
             variant="contained"
             startIcon={<Recommend />}
@@ -721,11 +745,11 @@ const Algorithms: React.FC = () => {
                 {algorithm.description}
               </Typography>
               {optimizeClassroomCount && (
-                <Box sx={{ 
-                  backgroundColor: 'primary.light', 
-                  color: 'primary.contrastText', 
-                  p: 1, 
-                  borderRadius: 1, 
+                <Box sx={{
+                  backgroundColor: 'primary.light',
+                  color: 'primary.contrastText',
+                  p: 1,
+                  borderRadius: 1,
                   mb: 2,
                   fontSize: '0.75rem'
                 }}>
@@ -754,8 +778,8 @@ const Algorithms: React.FC = () => {
                   size="small"
                   sx={{ flexGrow: 1 }}
                   disabled={executing || optimizing}
-                  onClick={(e) => { 
-                    e.stopPropagation(); 
+                  onClick={(e) => {
+                    e.stopPropagation();
                     if (!executing && !optimizing) {
                       if (optimizeClassroomCount) {
                         handleOptimizeClassroomCount(algorithm);
@@ -764,7 +788,7 @@ const Algorithms: React.FC = () => {
                       }
                     }
                   }}>
-{optimizing ? 'Optimizing...' : executing ? 'Running...' : optimizeClassroomCount ? 'Find Optimal & Run' : 'Run'}
+                  {optimizing ? 'Optimizing...' : executing ? 'Running...' : optimizeClassroomCount ? 'Find Optimal & Run' : 'Run'}
                 </Button>
                 <Button
                   variant="outlined"
@@ -884,8 +908,8 @@ const Algorithms: React.FC = () => {
                   {Object.entries(recommendation.all_scores || {}).map(([algo, score]: [string, any]) => (
                     <Box key={algo} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <Typography variant="body2">{algo}</Typography>
-                      <Chip 
-                        label={`${(score * 100).toFixed(1)}%`} 
+                      <Chip
+                        label={`${(score * 100).toFixed(1)}%`}
                         color={algo === recommendation.recommended_algorithm ? 'primary' : 'default'}
                         size="small"
                       />
@@ -897,8 +921,8 @@ const Algorithms: React.FC = () => {
           </DialogContent>
           <DialogActions>
             <Button onClick={() => setRecommendation(null)}>Close</Button>
-            <Button 
-              variant="contained" 
+            <Button
+              variant="contained"
               onClick={() => {
                 const recommendedAlgo = algorithms.find(a => a.name === recommendation.recommended_algorithm);
                 if (recommendedAlgo) {
@@ -924,13 +948,13 @@ const Algorithms: React.FC = () => {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
                 {selectedAlgorithm.description}
               </Typography>
-              
+
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {/* Common Parameters */}
                 <Box>
                   <Typography variant="subtitle1" sx={{ mb: 2 }}>Common Parameters</Typography>
                 </Box>
-                
+
                 {/* Priority Selection */}
                 <FormControl fullWidth>
                   <InputLabel>Proje Önceliği</InputLabel>
@@ -944,24 +968,26 @@ const Algorithms: React.FC = () => {
                     <MenuItem value="none">Önceliksiz</MenuItem>
                   </Select>
                 </FormControl>
-                
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  <TextField
-                    fullWidth
-                    label="Max Iterations"
-                    type="number"
-                    value={algorithmParams.max_iterations || 1000}
-                    onChange={(e) => setAlgorithmParams(prev => ({ ...prev, max_iterations: parseInt(e.target.value) }))}
-                  />
-                  
-                  <TextField
-                    fullWidth
-                    label="Time Limit (seconds)"
-                    type="number"
-                    value={algorithmParams.time_limit || 60}
-                    onChange={(e) => setAlgorithmParams(prev => ({ ...prev, time_limit: parseInt(e.target.value) }))}
-                  />
-                </Box>
+
+                {/* Zero Conflict Option */}
+                <FormControlLabel
+                  control={
+                    <Checkbox
+                      checked={algorithmParams.zero_conflict || false}
+                      onChange={(e) => setAlgorithmParams(prev => ({ ...prev, zero_conflict: e.target.checked }))}
+                    />
+                  }
+                  label={
+                    <Box>
+                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                        Zero Conflict Mode
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        Algoritma çakışma analizi yaparak 0 çakışma olana kadar iteratif olarak çalışacak
+                      </Typography>
+                    </Box>
+                  }
+                />
 
                 {/* Algorithm-specific parameters */}
                 {selectedAlgorithm.name.includes('genetic') && (
@@ -1017,8 +1043,8 @@ const Algorithms: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowParameters(false)}>Cancel</Button>
-          <Button 
-            variant="contained" 
+          <Button
+            variant="contained"
             onClick={() => selectedAlgorithm && handleExecuteWithParams(selectedAlgorithm, algorithmParams)}
             disabled={executing}
           >
@@ -1028,13 +1054,13 @@ const Algorithms: React.FC = () => {
       </Dialog>
 
       {/* Snackbar for notifications */}
-      <Snackbar 
-        open={snack.open} 
-        autoHideDuration={3000} 
+      <Snackbar
+        open={snack.open}
+        autoHideDuration={3000}
         onClose={() => setSnack(prev => ({ ...prev, open: false }))}
       >
-        <Alert 
-          severity={snack.severity} 
+        <Alert
+          severity={snack.severity}
           sx={{ width: '100%' }}
           onClose={() => setSnack(prev => ({ ...prev, open: false }))}
         >

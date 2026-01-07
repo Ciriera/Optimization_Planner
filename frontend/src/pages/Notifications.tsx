@@ -94,6 +94,8 @@ const Notifications: React.FC = () => {
         return () => clearInterval(interval);
     }, [logsStatusFilter]);
 
+    const missingEmails = instructors.filter((i: any) => !i.email);
+
     // Load instructor preview when selected
     useEffect(() => {
         if (selectedInstructorId && previewMode === 'personal') {
@@ -315,6 +317,53 @@ const Notifications: React.FC = () => {
                     Send the finalized calendar + personalized duty summaries by email to all instructors.
                 </Typography>
             </Box>
+
+            {/* Instructor email status */}
+            <Paper sx={{ p: 2, mb: 3 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                    <Typography variant="h6" sx={{ fontWeight: 600 }}>Instructor Emails</Typography>
+                    <Chip
+                        label={
+                            missingEmails.length > 0
+                                ? `${missingEmails.length} missing email${missingEmails.length > 1 ? 's' : ''}`
+                                : 'All emails present'
+                        }
+                        color={missingEmails.length > 0 ? 'warning' : 'success'}
+                        size="small"
+                    />
+                </Box>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    Eksik e-posta adreslerini Import sayfasındaki "Notification Import (Instructor Emails)" bölümünden Excel ile içeri aktarabilirsiniz.
+                </Typography>
+                <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 320 }}>
+                    <Table size="small" stickyHeader>
+                        <TableHead>
+                            <TableRow>
+                                <TableCell>Name</TableCell>
+                                <TableCell>Email</TableCell>
+                                <TableCell>Type</TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {instructors.map((inst) => (
+                                <TableRow key={inst.id} sx={{ bgcolor: inst.email ? undefined : 'warning.light' }}>
+                                    <TableCell>{inst.name}</TableCell>
+                                    <TableCell>
+                                        {inst.email ? (
+                                            inst.email
+                                        ) : (
+                                            <Typography variant="caption" color="warning.main">
+                                                Missing email
+                                            </Typography>
+                                        )}
+                                    </TableCell>
+                                    <TableCell>{inst.type}</TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </TableContainer>
+            </Paper>
 
             {/* Top Controls */}
             <Card sx={{ mb: 3, p: 3 }}>

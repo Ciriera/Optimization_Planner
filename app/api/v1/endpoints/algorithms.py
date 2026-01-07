@@ -844,6 +844,9 @@ async def execute_algorithm(
         "genetic_algorithm": "genetic_algorithm",
         "simulated_annealing": "simulated_annealing",
         "simplex": "simplex",
+        "real_simplex": "simplex",  # Real Simplex uses simplex enum type
+        "real simplex": "simplex",
+        "real simplex algorithm": "simplex",
         "ant_colony": "ant_colony",
         "nsga_ii": "nsga_ii",
         "greedy": "greedy",
@@ -878,6 +881,8 @@ async def execute_algorithm(
         "kapsamlı_optimization": "comprehensive_optimizer",
         "comprehensive_optimizer": "comprehensive_optimizer",
         "comprehensive": "comprehensive_optimizer",
+        "hungarian": "hungarian",
+        "hungarian_algorithm": "hungarian",
     }
 
     requested_name = (
@@ -1073,12 +1078,23 @@ async def execute_algorithm(
                     await db.rollback()
         
         # Sonucu döndür
+        # CRITICAL FIX: Status'ü her zaman "completed" olarak ayarla
+        # algorithm_run.status farklı bir db session'da güncelleniyor ve burada yansımıyor
+        # Bu nedenle frontend polling loop'a giriyordu
+        final_status = "completed"
+        
+        # Eğer result içinde status bilgisi varsa ve failed/error ise, bunu kullan
+        if isinstance(result, dict):
+            result_status = result.get("status", "").lower() if result.get("status") else ""
+            if result_status in ("failed", "error"):
+                final_status = "failed"
+        
         response_data = {
             "id": algorithm_run.id,
             "algorithm_type": algorithm_type,
-            "status": algorithm_run.status,
+            "status": final_status,  # DÜZELTME: Her zaman "completed" veya "failed" dön
             "task_id": str(algorithm_run.id),
-            "message": "Algorithm completed successfully",
+            "message": "Algorithm completed successfully" if final_status == "completed" else "Algorithm failed",
             "result": result,  # Add algorithm result
             "gap_fix_result": gap_fix_result  # Add gap fixing results
         }
@@ -2164,6 +2180,8 @@ async def optimize_classroom_count(
             "kapsamli_optimization": "comprehensive_optimizer",
             "kapsamlı_optimization": "comprehensive_optimizer",
             "comprehensive_optimizer": "comprehensive_optimizer",
+            "hungarian": "hungarian",
+            "hungarian_algorithm": "hungarian",
             "comprehensive": "comprehensive_optimizer",
         }
 

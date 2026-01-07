@@ -66,7 +66,8 @@ export const algorithmService = {
         'deep_search',
         'hybrid_cpsat_tabu_nsga',
         'lexicographic_advanced',
-        'comprehensive_optimizer'
+        'comprehensive_optimizer',
+        'hungarian'
       ];
     }
   },
@@ -502,6 +503,18 @@ export const algorithmService = {
           { name: 'generations', type: 'number', label: 'Nesil Sayısı', description: 'Optimizasyon nesil sayısı', defaultValue: 50, min: 20, max: 200 },
           { name: 'mutation_rate', type: 'range', label: 'Mutasyon Oranı', description: 'Gen mutasyon oranı', defaultValue: 0.1, min: 0.01, max: 0.3, step: 0.01 },
           { name: 'crossover_rate', type: 'range', label: 'Çaprazlama Oranı', description: 'Gen çaprazlama oranı', defaultValue: 0.8, min: 0.5, max: 1.0, step: 0.05 }
+        ]
+      },
+      hungarian: {
+        name: 'hungarian',
+        displayName: 'Hungarian Algorithm (Kuhn-Munkres)',
+        description: 'Klasik Hungarian (Kuhn-Munkres) algoritması ile atama problemlerini çözer. Çok kriterli ve çok kısıtlı akademik proje sınavı/jüri planlama için optimize edilmiştir.',
+        category: 'Mathematical',
+        complexity: 'Medium',
+        recommendedFor: ['Atama problemleri', 'Proje-slot eşleştirme', 'Jüri atama', 'Optimal eşleştirme'],
+        parameters: [
+          { name: 'max_iterations', type: 'number', label: 'Max Iterations', description: 'Maximum number of iterations', defaultValue: 1000, min: 100, max: 5000 },
+          { name: 'tolerance', type: 'range', label: 'Tolerance', description: 'Convergence tolerance', defaultValue: 0.001, min: 0.0001, max: 0.01, step: 0.0001 }
         ]
       }
     };

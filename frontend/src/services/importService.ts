@@ -85,7 +85,41 @@ export const importService = {
         link.remove();
         window.URL.revokeObjectURL(url);
     },
+
+    async downloadInstructorEmailTemplate(): Promise<void> {
+        const response = await api.get('/import/instructor-emails/template', {
+            responseType: 'blob',
+        });
+
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', 'instructor_email_template.xlsx');
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+    },
+
+    async validateInstructorEmails(file: File): Promise<any> {
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await api.post('/import/instructor-emails/validate', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
+    },
+
+    async executeInstructorEmails(file: File, dryRun: boolean = false): Promise<any> {
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await api.post(`/import/instructor-emails/execute?dry_run=${dryRun}`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
+    },
 };
+
 
 
 

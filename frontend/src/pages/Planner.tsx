@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -329,6 +329,28 @@ const Planner: React.FC = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<any>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number | ''>('');
+  // Manuel düzenleme için state'ler
+  const [editableResponsibleId, setEditableResponsibleId] = useState<number | ''>('');
+  const [editableJuryIds, setEditableJuryIds] = useState<number[]>([]);
+  // Drag-and-drop için state
+  const [draggedSchedule, setDraggedSchedule] = useState<any>(null);
+  const [dragOverCell, setDragOverCell] = useState<string | null>(null);
+  
+  // Dialog açıldığında state'leri initialize et
+  useEffect(() => {
+    if (openDialog && selectedTimeSlot?.project) {
+      const sch = schedules.find((s: any) => s.id === selectedTimeSlot.scheduleId);
+      const currentJury = sch ? getJuryForSchedule(sch) : [];
+      const currentJuryIds = currentJury.map((j: any) => j.id).filter((id: number) => id !== -1);
+      
+      setEditableResponsibleId(selectedTimeSlot.project.responsible_instructor_id || '');
+      setEditableJuryIds(currentJuryIds);
+    } else if (!openDialog) {
+      // Dialog kapandığında state'leri temizle
+      setEditableResponsibleId('');
+      setEditableJuryIds([]);
+    }
+  }, [openDialog, selectedTimeSlot, schedules]);
   // const [algorithmResults, setAlgorithmResults] = useState<any[]>([]);
   const [snack, setSnack] = useState<{ open: boolean; message: string; severity: 'success' | 'error' | 'warning' }>({ open: false, message: '', severity: 'success' });
   const [lastAlgorithmResult, setLastAlgorithmResult] = useState<any>(null);
@@ -778,14 +800,75 @@ const Planner: React.FC = () => {
   };
 
   // Animated session card with Collapse effect
-  const SessionCard: React.FC<{ proj: any; jury: any[]; color: string; onClick: () => void; delay?: number }> = ({ proj, jury, color, onClick, delay = 0 }) => {
+  const SessionCard: React.FC<{ 
+    proj: any; 
+    jury: any[]; 
+    color: string; 
+    onClick: () => void; 
+    delay?: number;
+    scheduleId?: number;
+    onDragStart?: (schedule: any) => void;
+  }> = ({ proj, jury, color, onClick, delay = 0, scheduleId, onDragStart }) => {
     // Jüri sayısına göre dinamik boyut
     const hasJury = jury && jury.length > 0;
     const juryCount = hasJury ? jury.length : 0;
     const cardHeight = hasJury ? Math.max(120, 96 + (juryCount * 20)) : 96; // Jüri sayısına göre yükseklik
     
+    const dragStartedRef = useRef(false);
+    
+    const handleDragStart = (e: React.DragEvent) => {
+      if (!scheduleId || !proj) {
+        e.preventDefault();
+        return;
+      }
+      
+      dragStartedRef.current = true;
+      const schedule = schedules.find((s: any) => s.id === scheduleId);
+      if (schedule && onDragStart) {
+        console.log('🚀 Drag started:', { scheduleId: schedule.id, projectId: proj.id });
+        onDragStart(schedule);
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.dropEffect = 'move';
+        e.dataTransfer.setData('text/plain', JSON.stringify({
+          scheduleId: schedule.id,
+          projectId: proj.id
+        }));
+      }
+    };
+    
+    const handleClick = (e: React.MouseEvent) => {
+      // Drag işlemi sırasında onClick'i engelle
+      if (!dragStartedRef.current) {
+        onClick();
+      }
+      dragStartedRef.current = false;
+    };
+    
     return (
-      <Box sx={{ width: 220, minHeight: cardHeight, cursor: 'pointer', position: 'relative', m: 1 }} onClick={onClick}>
+      <Box 
+        sx={{ 
+          width: 220, 
+          minHeight: cardHeight, 
+          cursor: proj && scheduleId ? 'grab' : 'pointer', 
+          position: 'relative', 
+          m: 1,
+          opacity: draggedSchedule?.id === scheduleId ? 0.5 : 1,
+          transition: 'opacity 0.2s',
+          userSelect: 'none',
+          pointerEvents: 'auto' // Drag event'lerinin çalışması için
+        }} 
+        onClick={handleClick}
+        draggable={!!proj && !!scheduleId}
+        onDragStart={handleDragStart}
+        onDrag={(e: React.DragEvent) => {
+          // Drag sırasında event'i durdurma - cell'e ulaşması için
+        }}
+        onDragEnd={() => {
+          dragStartedRef.current = false;
+          setDraggedSchedule(null);
+          setDragOverCell(null);
+        }}
+      >
         {viewMode === 'classroom' ? (
           /* Classroom View - slides from left */
           <Collapse in={true} orientation="horizontal" collapsedSize={0} sx={{ transitionDelay: `${delay}ms` }}>
@@ -802,14 +885,34 @@ const Planner: React.FC = () => {
                 p: 1.25,
                 overflow: 'hidden',
                 gap: 0.75,
+                pointerEvents: 'auto'
+              }}
+              onDragStart={(e) => {
+                // Child element'lerin drag'ini engelle - sadece parent Box drag edilebilir
+                if (e.target !== e.currentTarget && (e.target as HTMLElement).closest('button, [role="button"]')) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
               }}
             >
               {proj ? (
                 <>
                   {/* Üst kısım: Proje bilgileri */}
-                  <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, width: '100%' }}>
-                    <Box sx={{ width: 6, height: 48, bgcolor: color, borderRadius: 1, mt: 0.3, flexShrink: 0 }} />
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Box 
+                    sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, width: '100%' }}
+                    draggable={false}
+                    onDragStart={(e) => e.preventDefault()}
+                  >
+                    <Box 
+                      sx={{ width: 6, height: 48, bgcolor: color, borderRadius: 1, mt: 0.3, flexShrink: 0 }}
+                      draggable={false}
+                      onDragStart={(e) => e.preventDefault()}
+                    />
+                    <Box 
+                      sx={{ flex: 1, minWidth: 0 }}
+                      draggable={false}
+                      onDragStart={(e) => e.preventDefault()}
+                    >
                       <Tooltip title={proj.title} placement="top" arrow>
                         <Typography variant="body2" sx={{ fontWeight: 700, lineHeight: 1.25, fontSize: 15, color: 'text.primary' }}>
                           {proj.title || `Proje ${proj.id}`}
@@ -824,23 +927,60 @@ const Planner: React.FC = () => {
                         </Typography>
                       </Tooltip>
                     </Box>
-                    <Box sx={{ display: 'flex', gap: 0.5 }}>
+                    <Box 
+                      sx={{ display: 'flex', gap: 0.5 }}
+                      draggable={false}
+                      onDragStart={(e) => e.preventDefault()}
+                      onMouseDown={(e) => e.stopPropagation()} // IconButton'lara tıklamayı engelleme
+                    >
                       <Tooltip title="Projeyi görüntüle" arrow>
-                        <IconButton size="small" onClick={onClick} aria-label="Projeyi görüntüle"><Info fontSize="inherit" /></IconButton>
+                        <IconButton 
+                          size="small" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onClick();
+                          }} 
+                          aria-label="Projeyi görüntüle"
+                          onMouseDown={(e) => e.stopPropagation()}
+                          draggable={false}
+                          onDragStart={(e) => e.preventDefault()}
+                        >
+                          <Info fontSize="inherit" />
+                        </IconButton>
                       </Tooltip>
                       <Tooltip title="Projeyi düzenle" arrow>
-                        <IconButton size="small" onClick={onClick} aria-label="Projeyi düzenle"><Edit fontSize="inherit" /></IconButton>
+                        <IconButton 
+                          size="small" 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onClick();
+                          }} 
+                          aria-label="Projeyi düzenle"
+                          onMouseDown={(e) => e.stopPropagation()}
+                          draggable={false}
+                          onDragStart={(e) => e.preventDefault()}
+                        >
+                          <Edit fontSize="inherit" />
+                        </IconButton>
                       </Tooltip>
                     </Box>
                   </Box>
                   
                   {/* Alt kısım: Jüri üyeleri */}
                   {hasJury && (
-                    <Box sx={{ mt: 0.5, pt: 0.5, borderTop: '1px solid', borderColor: 'divider' }}>
+                    <Box 
+                      sx={{ mt: 0.5, pt: 0.5, borderTop: '1px solid', borderColor: 'divider' }}
+                      draggable={false}
+                      onDragStart={(e) => e.preventDefault()}
+                    >
                       <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', fontWeight: 600, mb: 0.5, display: 'block' }}>
                         🎯 Jüri Üyeleri:
                       </Typography>
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                      <Box 
+                        sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}
+                        draggable={false}
+                        onDragStart={(e) => e.preventDefault()}
+                      >
                         {jury.slice(0, 3).map((juryMember, index) => (
                           <Tooltip key={index} title={juryMember.name} placement="bottom" arrow>
                             <Typography 
@@ -855,13 +995,20 @@ const Planner: React.FC = () => {
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap'
                               }}
+                              draggable={false}
+                              onDragStart={(e) => e.preventDefault()}
                             >
                               • {juryMember.name}
                             </Typography>
                           </Tooltip>
                         ))}
                         {jury.length > 3 && (
-                          <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.disabled', fontStyle: 'italic' }}>
+                          <Typography 
+                            variant="caption" 
+                            sx={{ fontSize: '0.65rem', color: 'text.disabled', fontStyle: 'italic' }}
+                            draggable={false}
+                            onDragStart={(e) => e.preventDefault()}
+                          >
                             +{jury.length - 3} daha...
                           </Typography>
                         )}
@@ -1727,15 +1874,151 @@ const Planner: React.FC = () => {
               const jury = existing ? getJuryForSchedule(existing) : [];
               const color = getProjectColor(proj);
               const delay = roomIndex * 100; // Her sınıf için 100ms gecikme
+              const cellKey = `${room.id}-${slot}`;
+              const isDragOver = dragOverCell === cellKey;
+              
+              const handleDragEnter = (e: React.DragEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!existing && draggedSchedule) {
+                  console.log('📥 Drag enter:', cellKey, { room: room.name, slot });
+                  setDragOverCell(cellKey);
+                }
+              };
+              
+              const handleDragOver = (e: React.DragEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                if (!existing && draggedSchedule) {
+                  // Sadece boş cell'lere drop edilebilir
+                  e.dataTransfer.dropEffect = 'move';
+                  if (dragOverCell !== cellKey) {
+                    setDragOverCell(cellKey);
+                  }
+                } else {
+                  e.dataTransfer.dropEffect = 'none';
+                }
+              };
+              
+              const handleDragLeave = (e: React.DragEvent) => {
+                // Sadece gerçekten cell'den çıkıldığında tetikle
+                // (child element'lere geçildiğinde tetiklenmemesi için)
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                const x = e.clientX;
+                const y = e.clientY;
+                
+                // Eğer hala cell içindeyse, dragLeave'i yok say
+                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                  return;
+                }
+                
+                if (dragOverCell === cellKey) {
+                  console.log('📤 Drag leave:', cellKey);
+                  setDragOverCell(null);
+                }
+              };
+              
+              const handleDrop = async (e: React.DragEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('🎯 Drop event:', cellKey, { draggedSchedule, existing, room: room.name, slot });
+                setDragOverCell(null);
+                
+                if (!draggedSchedule) {
+                  console.log('❌ No dragged schedule');
+                  return;
+                }
+                
+                if (existing) {
+                  console.log('❌ Cell already has a project');
+                  return; // Zaten bir proje varsa drop edilemez
+                }
+                
+                try {
+                  console.log('🔄 Starting drop operation...');
+                  // Zaman dilimini database'den bul
+                  const ts = await resolveDbTimeslot(startTime, endTime);
+                  if (!ts?.id || !room?.id) {
+                    console.error('❌ Timeslot or room not found:', { ts, room });
+                    setSnack({ open: true, message: 'Zaman veya sınıf bulunamadı', severity: 'error' });
+                    return;
+                  }
+                  
+                  console.log('✅ Found timeslot and room:', { timeslotId: ts.id, roomId: room.id });
+                  
+                  // Schedule'ı güncelle
+                  const updatePayload = {
+                    classroom_id: room.id,
+                    timeslot_id: ts.id
+                  };
+                  
+                  console.log('📤 Updating schedule:', { scheduleId: draggedSchedule.id, payload: updatePayload });
+                  await api.put(`/schedules/${draggedSchedule.id}`, updatePayload);
+                  
+                  // Verileri yenile
+                  const refreshed = await api.get('/schedules/');
+                  setSchedules(refreshed.data || []);
+                  
+                  console.log('✅ Schedule updated successfully');
+                  setSnack({ open: true, message: 'Proje taşındı', severity: 'success' });
+                  setDraggedSchedule(null);
+                } catch (e: any) {
+                  console.error('❌ Drop error:', e);
+                  setSnack({ open: true, message: e?.response?.data?.detail || 'Taşıma başarısız', severity: 'error' });
+                  setDraggedSchedule(null);
+                }
+              };
+              
               return (
-                 <Box key={`cell-${room.id}-${slot}`} sx={{ position: 'relative', border: '1px dashed', borderColor: 'divider', borderRadius: 2, minHeight: 96, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                 <Box 
+                   key={cellKey}
+                   sx={{ 
+                     position: 'relative', 
+                     border: '2px dashed', 
+                     borderColor: isDragOver ? 'primary.main' : 'divider', 
+                     borderRadius: 2, 
+                     minHeight: 96, 
+                     display: 'flex', 
+                     alignItems: 'center', 
+                     justifyContent: 'center',
+                     bgcolor: isDragOver ? 'primary.light' : 'transparent',
+                     transition: 'all 0.2s',
+                     pointerEvents: 'auto' // Drop event'lerinin çalışması için
+                   }}
+                   onDragEnter={handleDragEnter}
+                   onDragOver={handleDragOver}
+                   onDragLeave={handleDragLeave}
+                   onDrop={handleDrop}
+                 >
+                  {proj ? (
                   <SessionCard 
                     proj={proj} 
                     jury={jury} 
                     color={color} 
                     onClick={() => handleTimeSlotClick(slot, room.name, proj, (existing as any)?.id)}
                     delay={delay}
-                  />
+                      scheduleId={(existing as any)?.id}
+                      onDragStart={setDraggedSchedule}
+                    />
+                  ) : (
+                    // Boş cell için drop zone göster
+                    <Box
+                      sx={{
+                        width: '100%',
+                        height: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minHeight: 96,
+                        pointerEvents: 'none' // Text'in drag event'lerini engelle
+                      }}
+                    >
+                      <Typography variant="caption" sx={{ color: isDragOver ? 'primary.main' : 'text.secondary', fontWeight: isDragOver ? 600 : 400 }}>
+                        {isDragOver ? 'Bırakın' : 'Boş'}
+                      </Typography>
+                    </Box>
+                  )}
                 </Box>
               );
             })}
@@ -1984,8 +2267,55 @@ const Planner: React.FC = () => {
                 <>
                   <TextField label="Proje Başlığı" value={selectedTimeSlot.project.title} fullWidth InputProps={{ readOnly: true }} />
                   <TextField label="Proje Türü" value={selectedTimeSlot.project.type === 'bitirme' ? 'Bitirme' : 'Ara'} fullWidth InputProps={{ readOnly: true }} />
-                  <TextField label="Sorumlu Öğretim Üyesi" value={getInstructorName(selectedTimeSlot.project.responsible_instructor_id) || selectedTimeSlot.project.responsible_instructor || selectedTimeSlot.project.instructor || ''} fullWidth InputProps={{ readOnly: true }} />
-                  <TextField label="Jüri Üyeleri" value={getJuryNamesForDialog(selectedTimeSlot)} fullWidth InputProps={{ readOnly: true }} />
+                  
+                  {/* Sorumlu Öğretim Üyesi - Editable */}
+                  <TextField
+                    select
+                    label="Sorumlu Öğretim Üyesi"
+                    fullWidth
+                    value={editableResponsibleId || selectedTimeSlot.project.responsible_instructor_id || ''}
+                    onChange={(e) => setEditableResponsibleId(Number(e.target.value) || '')}
+                    helperText="Sorumlu öğretim üyesini değiştirebilirsiniz"
+                  >
+                    {instructors.filter((i: any) => i.type === 'instructor').map((inst: any) => (
+                      <MenuItem key={inst.id} value={inst.id}>
+                        {inst.name}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  
+                  {/* Jüri Üyeleri - Editable (Multi-select) */}
+                  <TextField
+                    select
+                    label="Jüri Üyeleri"
+                    fullWidth
+                    SelectProps={{
+                      multiple: true,
+                      value: editableJuryIds.length > 0 ? editableJuryIds : (() => {
+                        const sch = schedules.find((s: any) => s.id === selectedTimeSlot.scheduleId);
+                        if (sch && sch.instructors) {
+                          const juryFromSchedule = getJuryForSchedule(sch);
+                          return juryFromSchedule.map((j: any) => j.id).filter((id: number) => id !== -1);
+                        }
+                        return [];
+                      })(),
+                      onChange: (e: any) => setEditableJuryIds(e.target.value),
+                      renderValue: (selected: any) => {
+                        if (!selected || selected.length === 0) return 'Jüri üyesi seçin';
+                        return selected.map((id: number) => {
+                          const inst = instructors.find((i: any) => i.id === id);
+                          return inst ? inst.name : `ID: ${id}`;
+                        }).join(', ');
+                      }
+                    }}
+                    helperText="Jüri üyelerini seçebilirsiniz (Çoklu seçim)"
+                  >
+                    {instructors.filter((i: any) => i.type === 'instructor' && i.id !== (editableResponsibleId || selectedTimeSlot.project.responsible_instructor_id)).map((inst: any) => (
+                      <MenuItem key={inst.id} value={inst.id}>
+                        {inst.name}
+                      </MenuItem>
+                    ))}
+                  </TextField>
                   {/* Katılımcı Detayları */}
                   <Paper variant="outlined" sx={{ p: 1.5 }}>
                     <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>Katılımcılar</Typography>
@@ -2059,11 +2389,75 @@ const Planner: React.FC = () => {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpenDialog(false)}>
+          <Button onClick={() => {
+            setOpenDialog(false);
+            setEditableResponsibleId('');
+            setEditableJuryIds([]);
+          }}>
             İptal
           </Button>
           {selectedTimeSlot?.project ? (
             <>
+              {/* Kaydet Butonu - Manuel Düzenleme */}
+              <Button 
+                variant="contained" 
+                color="primary"
+                onClick={async () => {
+                  try {
+                    if (!selectedTimeSlot?.scheduleId) {
+                      setSnack({ open: true, message: 'Schedule ID bulunamadı', severity: 'error' });
+                      return;
+                    }
+                    
+                    const updatePayload: any = {};
+                    
+                    // Sorumlu öğretim üyesi değiştiyse
+                    if (editableResponsibleId && editableResponsibleId !== selectedTimeSlot.project.responsible_instructor_id) {
+                      updatePayload.responsible_instructor_id = editableResponsibleId;
+                    }
+                    
+                    // Jüri üyeleri değiştiyse
+                    const sch = schedules.find((s: any) => s.id === selectedTimeSlot.scheduleId);
+                    const currentJury = sch ? getJuryForSchedule(sch) : [];
+                    const currentJuryIds = currentJury.map((j: any) => j.id).filter((id: number) => id !== -1);
+                    
+                    if (JSON.stringify(editableJuryIds.sort()) !== JSON.stringify(currentJuryIds.sort())) {
+                      // Jüri üyelerini formatla: [responsible_id, jury1_id, jury2_id, ...]
+                      // Responsible'ı ilk sıraya ekle
+                      const responsibleId = editableResponsibleId || selectedTimeSlot.project.responsible_instructor_id;
+                      const formattedInstructors = [
+                        { id: responsibleId, role: 'responsible' },
+                        ...editableJuryIds.map((id: number) => ({ id, role: 'jury' }))
+                      ];
+                      updatePayload.instructors = formattedInstructors;
+                    }
+                    
+                    // Eğer değişiklik varsa güncelle
+                    if (Object.keys(updatePayload).length > 0) {
+                      await api.put(`/schedules/${selectedTimeSlot.scheduleId}`, updatePayload);
+                      
+                      // Verileri yenile
+                      const refreshed = await api.get('/schedules/');
+                      setSchedules(refreshed.data || []);
+                      
+                      // Projects'i de yenile (responsible_id değişmiş olabilir)
+                      const projectsRefreshed = await api.get('/projects/');
+                      setProjects(projectsRefreshed.data || []);
+                      
+                      setSnack({ open: true, message: 'Değişiklikler kaydedildi', severity: 'success' });
+                      setOpenDialog(false);
+                      setEditableResponsibleId('');
+                      setEditableJuryIds([]);
+                    } else {
+                      setSnack({ open: true, message: 'Değişiklik yapılmadı', severity: 'warning' });
+                    }
+                  } catch (e: any) {
+                    setSnack({ open: true, message: e?.response?.data?.detail || 'Güncelleme yapılamadı', severity: 'error' });
+                  }
+                }}
+              >
+                Kaydet
+              </Button>
               <Button color="error" onClick={async ()=>{
                 try {
                   // mevcut programı kaldır

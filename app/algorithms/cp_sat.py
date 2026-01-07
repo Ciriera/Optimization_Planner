@@ -494,21 +494,25 @@ def _add_priority_constraints(
                 terms.append(t * mapping.assign[(p.id, s, t)])
         model.Add(slot_var == sum(terms))
     
-    # Separate projects by type
-    ara_projects = [p for p in projects if p.project_type == "ARA"]
-    bitirme_projects = [p for p in projects if p.project_type == "BITIRME"]
+    # Separate projects by type (case-insensitive)
+    ara_projects = [p for p in projects if str(p.project_type).upper() in ("ARA", "INTERIM")]
+    bitirme_projects = [p for p in projects if str(p.project_type).upper() in ("BITIRME", "FINAL")]
+    
+    logger.info(f"CP-SAT: Priority constraints - mode={priority_mode}, ara={len(ara_projects)}, bitirme={len(bitirme_projects)}")
     
     if priority_mode == "ARA_ONCE":
         # All ARA projects before all BITIRME projects
         for p_ara in ara_projects:
             for p_bit in bitirme_projects:
                 model.Add(slot_vars[p_ara.id] <= slot_vars[p_bit.id])
+        logger.info(f"CP-SAT: Added {len(ara_projects) * len(bitirme_projects)} ARA_ONCE priority constraints")
     
     elif priority_mode == "BITIRME_ONCE":
         # All BITIRME projects before all ARA projects
         for p_bit in bitirme_projects:
             for p_ara in ara_projects:
                 model.Add(slot_vars[p_bit.id] <= slot_vars[p_ara.id])
+        logger.info(f"CP-SAT: Added {len(ara_projects) * len(bitirme_projects)} BITIRME_ONCE priority constraints")
 
 
 def _add_workload_hard_constraints(
@@ -946,9 +950,25 @@ class CPSAT:
         """Build CPSATConfig from parameters dictionary."""
         config_params = {}
         
+        # CRITICAL: Frontend'den gelen project_priority parametresini priority_mode'a çevir
+        # Frontend: "midterm_priority", "final_exam_priority", "none"
+        # Backend: "ARA_ONCE", "BITIRME_ONCE", "ESIT"
+        project_priority = params.get("project_priority", "none")
+        if project_priority == "midterm_priority":
+            config_params["priority_mode"] = "ARA_ONCE"
+            logger.info("CP-SAT: Priority mode set to ARA_ONCE via params project_priority")
+        elif project_priority == "final_exam_priority":
+            config_params["priority_mode"] = "BITIRME_ONCE"
+            logger.info("CP-SAT: Priority mode set to BITIRME_ONCE via params project_priority")
+        elif "priority_mode" in params:
+            # Fallback: Eğer doğrudan priority_mode verilmişse onu kullan
+            config_params["priority_mode"] = params["priority_mode"]
+            logger.info(f"CP-SAT: Priority mode set to {params['priority_mode']} via params")
+        else:
+            logger.info("CP-SAT: Priority mode is ESIT (default/no priority)")
+        
         # Map common parameter names
         param_mapping = {
-            "priority_mode": "priority_mode",
             "time_penalty_mode": "time_penalty_mode",
             "workload_constraint_mode": "workload_constraint_mode",
             "weight_continuity": "weight_continuity",
@@ -975,6 +995,12 @@ class CPSAT:
         """Initialize with input data."""
         self.data = data
         
+        # CRITICAL: Check for params in data (AlgorithmService adds this)
+        if "params" in data:
+            params = data["params"]
+            # Rebuild config with params to get project_priority
+            self.config = self._build_config(params)
+        
         # Extract config from data if provided
         if "config" in data:
             cfg = data["config"]
@@ -987,11 +1013,16 @@ class CPSAT:
         if "class_count" in data and data["class_count"]:
             self.config.class_count_mode = "manual"
             self.config.given_z = data["class_count"]
+        elif "classroom_count" in data and data["classroom_count"]:
+            self.config.class_count_mode = "manual"
+            self.config.given_z = data["classroom_count"]
         elif "classrooms" in data and data["classrooms"]:
             classroom_count = len(data["classrooms"])
             if classroom_count in [5, 6, 7]:
                 self.config.class_count_mode = "manual"
                 self.config.given_z = classroom_count
+        
+        logger.info(f"CP-SAT initialized: priority_mode={self.config.priority_mode}, class_count={self.config.given_z}")
     
     def optimize(self) -> Dict[str, Any]:
         """Run optimization and return result."""

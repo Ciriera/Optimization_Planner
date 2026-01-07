@@ -17,6 +17,7 @@ class InstructorBase(BaseModel):
     name: Optional[str] = None
     type: Optional[str] = None  # Changed from role to type
     department: Optional[str] = None  # Added department
+    email: Optional[EmailStr] = None
     bitirme_count: Optional[int] = 0
     ara_count: Optional[int] = 0
     total_load: Optional[int] = 0

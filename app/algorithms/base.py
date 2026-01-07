@@ -52,18 +52,20 @@ class OptimizationAlgorithm(ABC):
         """
         pass
     
-    @abstractmethod
     def evaluate_fitness(self, solution: Dict[str, Any]) -> float:
         """
         Cozumun kalitesini degerlendirir.
+        
+        Default implementation - algoritmaların override etmesi opsiyonel.
 
         Args:
             solution: Degerlendirilecek cozum.
 
         Returns:
             float: Cozum kalitesi skoru.
-    """
-        pass
+        """
+        # Default: 0 döndür (algoritma kendi hesaplamasını yapabilir)
+        return 0.0
 
     def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """

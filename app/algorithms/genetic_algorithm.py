@@ -1488,6 +1488,8 @@ class GARepairMechanism:
         if self.config.priority_mode == PriorityMode.ESIT:
             return
         
+        reordered_count = 0
+        
         # Her sinif icin siralama kontrolu
         for class_id in range(individual.class_count):
             class_projects = individual.get_class_projects(class_id)
@@ -1495,17 +1497,25 @@ class GARepairMechanism:
             if not class_projects:
                 continue
             
-            # Projeleri turlerine gore ayir
+            # Projeleri turlerine gore ayir (case-insensitive)
             ara_projects = []
             bitirme_projects = []
             
             for a in class_projects:
                 project = self.projects.get(a.project_id)
                 if project:
-                    if project.type in ('interim', 'ara'):
+                    project_type = str(project.type).lower()
+                    if project_type in ('interim', 'ara'):
                         ara_projects.append(a)
-                    else:
+                    elif project_type in ('final', 'bitirme'):
                         bitirme_projects.append(a)
+                    else:
+                        # Diğer türler (bilinmeyen) - bitirme olarak kabul et
+                        bitirme_projects.append(a)
+            
+            # CRITICAL: Shuffle within same type to get different results each run
+            random.shuffle(ara_projects)
+            random.shuffle(bitirme_projects)
             
             # Siralama
             if self.config.priority_mode == PriorityMode.ARA_ONCE:
@@ -1515,12 +1525,14 @@ class GARepairMechanism:
                 # Bitirme once, sonra Ara
                 sorted_projects = bitirme_projects + ara_projects
             
-            # Siralari guncelle
+            # Siralari guncelle - DÜZELTME: break kaldırıldı, her proje için güncelleme yapılıyor
             for i, a in enumerate(sorted_projects):
                 for assignment in individual.assignments:
                     if assignment.project_id == a.project_id:
+                        if assignment.order_in_class != i:
+                            reordered_count += 1
                         assignment.order_in_class = i
-                break
+                        break  # Bu break doğru - iç döngüden çık
             
     def _repair_workload_hard_limit(self, individual: Individual) -> None:
         """
@@ -2161,8 +2173,10 @@ class GAInitializer:
             if ps_id in ps_to_class:
                 class_id = ps_to_class[ps_id]
             else:
-                # En az yuklu sinifi sec
-                class_id = min(range(self.config.class_count), key=lambda c: class_loads[c])
+                # CRITICAL: En az yuklu siniflari bul, esit yuklüler arasından rastgele sec
+                min_load = min(class_loads)
+                min_classes = [c for c in range(self.config.class_count) if class_loads[c] == min_load]
+                class_id = random.choice(min_classes)
                 ps_to_class[ps_id] = class_id
             
             class_assignments[class_id].append(project)
@@ -2211,11 +2225,15 @@ class GAInitializer:
                 ]
                 
                 if band_candidates:
-                    # Band icinde kalan en az yuklu hocayi sec
-                    j1_id = min(band_candidates, key=lambda x: workloads.get(x, 0))
+                    # CRITICAL: Band icinde kalan en az yuklu hocaLARI bul, aralarından rastgele sec
+                    min_load = min(workloads.get(x, 0) for x in band_candidates)
+                    min_candidates = [x for x in band_candidates if workloads.get(x, 0) == min_load]
+                    j1_id = random.choice(min_candidates)
                 else:
-                    # Band icinde kalan yok, en az yuklu hocayi sec
-                    j1_id = min(available_j1, key=lambda x: workloads.get(x, 0))
+                    # Band icinde kalan yok, en az yuklu hocaLARI bul, aralarından rastgele sec
+                    min_load = min(workloads.get(x, 0) for x in available_j1)
+                    min_candidates = [x for x in available_j1 if workloads.get(x, 0) == min_load]
+                    j1_id = random.choice(min_candidates)
             else:
                 j1_id = self.faculty_ids[0]
             
@@ -2300,11 +2318,10 @@ class GAInitializer:
                 class_id = min(unused_classes, key=lambda c: class_counts.get(c, 0))
                 used_classes.add(class_id)
             else:
-                # Tum siniflar kullanildi, en az yuklu sinifi sec
-                class_id = min(
-                    range(self.config.class_count), 
-                    key=lambda c: class_counts.get(c, 0)
-                )
+                # Tum siniflar kullanildi, en az yuklu siniflari bul, aralarından rastgele sec
+                min_load = min(class_counts.get(c, 0) for c in range(self.config.class_count))
+                min_classes = [c for c in range(self.config.class_count) if class_counts.get(c, 0) == min_load]
+                class_id = random.choice(min_classes)
             
             order = class_counts[class_id]
             class_counts[class_id] += 1
@@ -2323,9 +2340,14 @@ class GAInitializer:
                 ]
                 
                 if band_candidates:
-                    j1_id = min(band_candidates, key=lambda x: workloads.get(x, 0))
+                    # CRITICAL: Eşit yüklüler arasından rastgele seç
+                    min_load = min(workloads.get(x, 0) for x in band_candidates)
+                    min_candidates = [x for x in band_candidates if workloads.get(x, 0) == min_load]
+                    j1_id = random.choice(min_candidates)
                 else:
-                    j1_id = min(available_j1, key=lambda x: workloads.get(x, 0))
+                    min_load = min(workloads.get(x, 0) for x in available_j1)
+                    min_candidates = [x for x in available_j1 if workloads.get(x, 0) == min_load]
+                    j1_id = random.choice(min_candidates)
             else:
                 j1_id = self.faculty_ids[0]
             
@@ -2345,21 +2367,32 @@ class GAInitializer:
         return individual
     
     def _sort_projects_by_priority(self) -> List[Project]:
-        """Projeleri onceliklendirme moduna gore sirala"""
+        """Projeleri onceliklendirme moduna gore sirala (case-insensitive + randomized)"""
         if self.config.priority_mode == PriorityMode.ARA_ONCE:
             # Ara projeler once
-            ara = [p for p in self.projects if p.type in ('interim', 'ara')]
-            bitirme = [p for p in self.projects if p.type in ('final', 'bitirme')]
+            ara = [p for p in self.projects if str(p.type).lower() in ('interim', 'ara')]
+            bitirme = [p for p in self.projects if str(p.type).lower() in ('final', 'bitirme')]
+            # CRITICAL: Shuffle within same type to get different results each run
+            random.shuffle(ara)
+            random.shuffle(bitirme)
+            logger.debug(f"Sorting by ARA_ONCE: {len(ara)} ara (shuffled), {len(bitirme)} bitirme (shuffled)")
             return ara + bitirme
         
         elif self.config.priority_mode == PriorityMode.BITIRME_ONCE:
             # Bitirme projeleri once
-            bitirme = [p for p in self.projects if p.type in ('final', 'bitirme')]
-            ara = [p for p in self.projects if p.type in ('interim', 'ara')]
+            bitirme = [p for p in self.projects if str(p.type).lower() in ('final', 'bitirme')]
+            ara = [p for p in self.projects if str(p.type).lower() in ('interim', 'ara')]
+            # CRITICAL: Shuffle within same type to get different results each run
+            random.shuffle(bitirme)
+            random.shuffle(ara)
+            logger.debug(f"Sorting by BITIRME_ONCE: {len(bitirme)} bitirme (shuffled), {len(ara)} ara (shuffled)")
             return bitirme + ara
         
         else:  # ESIT
-            return list(self.projects)
+            # CRITICAL: Shuffle all projects for randomness
+            shuffled = list(self.projects)
+            random.shuffle(shuffled)
+            return shuffled
 
 
 # ============================================================================
@@ -2386,6 +2419,24 @@ class GeneticAlgorithm(OptimizationAlgorithm):
         super().__init__(params)
         params = params or {}
         
+        # CRITICAL: Frontend'den gelen project_priority parametresini priority_mode'a çevir
+        # Frontend: "midterm_priority", "final_exam_priority", "none"
+        # Backend: "ARA_ONCE", "BITIRME_ONCE", "ESIT"
+        project_priority = params.get("project_priority", "none")
+        if project_priority == "midterm_priority":
+            priority_mode_value = "ARA_ONCE"
+            logger.info("Priority mode set to ARA_ONCE via params project_priority")
+        elif project_priority == "final_exam_priority":
+            priority_mode_value = "BITIRME_ONCE"
+            logger.info("Priority mode set to BITIRME_ONCE via params project_priority")
+        else:
+            # Fallback: Eğer doğrudan priority_mode verilmişse onu kullan
+            priority_mode_value = params.get("priority_mode", "ESIT")
+            if priority_mode_value != "ESIT":
+                logger.info(f"Priority mode set to {priority_mode_value} via params priority_mode")
+            else:
+                logger.info("Priority mode is ESIT (default/no priority)")
+        
         # Konfigurasyon olustur
         self.config = GAConfig(
             population_size=params.get("population_size", 150),
@@ -2398,7 +2449,7 @@ class GeneticAlgorithm(OptimizationAlgorithm):
             tournament_size=params.get("tournament_size", 5),
             class_count=params.get("class_count", 6),
             auto_class_count=params.get("auto_class_count", True),
-            priority_mode=PriorityMode(params.get("priority_mode", "ESIT")),
+            priority_mode=PriorityMode(priority_mode_value),  # DÜZELTME: project_priority'den dönüştürülmüş değer
             time_penalty_mode=TimePenaltyMode(params.get("time_penalty_mode", "GAP_PROPORTIONAL")),
             workload_constraint_mode=WorkloadConstraintMode(
                 params.get("workload_constraint_mode", "SOFT_ONLY")

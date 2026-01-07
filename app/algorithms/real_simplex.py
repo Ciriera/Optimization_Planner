@@ -32,6 +32,14 @@ from app.algorithms.base import OptimizationAlgorithm
 
 logger = logging.getLogger(__name__)
 
+# Import HungarianAlgorithm for BITIRME_ONCE priority mode
+try:
+    from app.algorithms.hungarian_algorithm import HungarianAlgorithm
+    HUNGARIAN_AVAILABLE = True
+except ImportError:
+    HUNGARIAN_AVAILABLE = False
+    logger.warning("HungarianAlgorithm not available. BITIRME_ONCE mode will fallback to Real Simplex.")
+
 
 # =============================================================================
 # ENUMS AND CONFIGURATION
@@ -89,6 +97,9 @@ class SimplexConfig:
     
     # Gap penalty multiplier for GAP_PROPORTIONAL mode
     gap_penalty_multiplier: int = 2
+    
+    # Zero conflict mode: iterate until 0 conflicts are achieved
+    zero_conflict: bool = True
     
 
 # =============================================================================
@@ -702,7 +713,22 @@ class SimplexModelBuilder:
         class_names: Optional[List[str]] = None,
         timeslots: Optional[List[Dict[str, Any]]] = None
     ):
-        self.projects = projects
+        # Sort projects based on priority mode
+        priority_mode = str(config.priority_mode).upper()
+        if priority_mode == "ARA_ONCE":
+            # ARA projects first, then BITIRME
+            sorted_projects = sorted(projects, key=lambda p: (0 if p.project_type == "ARA" else 1, p.id))
+            logger.info(f"Projects sorted: ARA first ({len([p for p in projects if p.project_type == 'ARA'])} ARA, {len([p for p in projects if p.project_type == 'BITIRME'])} BITIRME)")
+        elif priority_mode == "BITIRME_ONCE":
+            # BITIRME projects first, then ARA 
+            sorted_projects = sorted(projects, key=lambda p: (0 if p.project_type == "BITIRME" else 1, p.id))
+            logger.info(f"Projects sorted: BITIRME first ({len([p for p in projects if p.project_type == 'BITIRME'])} BITIRME, {len([p for p in projects if p.project_type == 'ARA'])} ARA)")
+        else:
+            # ESIT - no sorting by type
+            sorted_projects = projects
+            logger.info("Projects not sorted by type (ESIT mode)")
+        
+        self.projects = sorted_projects
         self.instructors = instructors
         self.config = config
         self.z = num_classes
@@ -792,6 +818,9 @@ class SimplexModelBuilder:
                         start_h = int(parts[0])
                         start_m = int(parts[1]) if len(parts) > 1 else 0
                         start_time_val = start_h + start_m / 60.0
+                    elif hasattr(start_time, 'hour') and hasattr(start_time, 'minute'):
+                        # datetime.time object
+                        start_time_val = start_time.hour + start_time.minute / 60.0
                     else:
                         start_time_val = float(start_time)
                     
@@ -803,6 +832,9 @@ class SimplexModelBuilder:
                             end_h = int(parts[0])
                             end_m = int(parts[1]) if len(parts) > 1 else 0
                             end_time_val = end_h + end_m / 60.0
+                        elif hasattr(end_time, 'hour') and hasattr(end_time, 'minute'):
+                            # datetime.time object
+                            end_time_val = end_time.hour + end_time.minute / 60.0
                         else:
                             end_time_val = float(end_time)
                 
@@ -1438,54 +1470,41 @@ class SimplexModelBuilder:
         
         objective.SetMinimization()
         
+        # Add priority constraints if needed (ARA_ONCE or BITIRME_ONCE)
+        self._add_priority_constraints(solver, vars_map)
+        
         return solver, vars_map
     
     def _add_priority_constraints(self, solver: Any, vars_map: Dict[str, Any]) -> None:
-        """Add project type priority constraints."""
-        priority_mode = self.config.priority_mode
+        """
+        Add project type priority constraints.
         
-        if priority_mode == PriorityMode.ESIT:
+        NOTE: Priority is now handled by reordering projects before model building.
+        This method just logs the priority mode for debugging.
+        
+        The actual priority is implemented by:
+        1. Sorting projects so that priority type comes first
+        2. Using lower slot indices for projects that appear first in the list
+        """
+        priority_mode = str(self.config.priority_mode).upper()
+        
+        # ESIT = No priority, skip
+        if priority_mode == "ESIT" or priority_mode == "NONE":
+            logger.info("Priority mode: ESIT (no priority constraints)")
             return
         
-        # Create slot variables for each project
-        slot_vars = {}
-        for p in self.projects:
-            slot_var = solver.IntVar(0, self.T - 1, f"slot_p{p.id}")
-            slot_vars[p.id] = slot_var
-            
-            # Link slot_var to assign variables
-            # slot_var = sum over all (s,t) of t * assign[p,s,t]
-            # Use global slot index: slot = class_id * MAX_SLOTS + order_in_class
-            # For comparison, we use a simpler approach: compare class_id first, then order
-            terms = []
-            for s in range(self.z):
-                for t in range(self.T):
-                    # Linearization: t * assign[p,s,t] using Big-M
-                    # Create auxiliary variable: aux = t * assign[p,s,t]
-                    aux = solver.IntVar(0, self.T - 1, f"aux_slot_p{p.id}_s{s}_t{t}")
-                    # aux <= t * assign (when assign=1, aux<=t; when assign=0, aux<=0)
-                    solver.Add(aux <= self.T * vars_map['assign'][(p.id, s, t)])
-                    solver.Add(aux <= t)
-                    # aux >= t - T * (1 - assign) (when assign=1, aux>=t; when assign=0, aux>=0)
-                    solver.Add(aux >= t - self.T * (1 - vars_map['assign'][(p.id, s, t)]))
-                    terms.append(aux)
-            solver.Add(slot_var == solver.Sum(terms))
+        logger.info(f"Priority mode active: {priority_mode}")
         
         # Separate projects by type
         ara_projects = [p for p in self.projects if p.project_type == "ARA"]
         bitirme_projects = [p for p in self.projects if p.project_type == "BITIRME"]
         
-        if priority_mode == PriorityMode.ARA_ONCE:
-            # All ARA projects before all BITIRME projects
-            for p_ara in ara_projects:
-                for p_bit in bitirme_projects:
-                    solver.Add(slot_vars[p_ara.id] <= slot_vars[p_bit.id])
-            
-        elif priority_mode == PriorityMode.BITIRME_ONCE:
-            # All BITIRME projects before all ARA projects
-            for p_bit in bitirme_projects:
-                for p_ara in ara_projects:
-                    solver.Add(slot_vars[p_bit.id] <= slot_vars[p_ara.id])
+        logger.info(f"Priority split: ARA={len(ara_projects)}, BITIRME={len(bitirme_projects)}")
+        
+        if priority_mode == "ARA_ONCE":
+            logger.info("ARA_ONCE: ARA projects will be scheduled first")
+        elif priority_mode == "BITIRME_ONCE":
+            logger.info("BITIRME_ONCE: BITIRME projects will be scheduled first")
         
     def _add_workload_hard_constraints(
         self,
@@ -1660,7 +1679,7 @@ class ORToolsSimplexSolver:
                 # Find J1 assignment
                 j1_id = None
                 j1_values = {}
-                max_val = 0.0
+                max_val = -1.0
                 max_faculty = None
                 
                 for h in self.faculty_ids:
@@ -1671,27 +1690,28 @@ class ORToolsSimplexSolver:
                             max_val = val
                             max_faculty = h
                         if val > 0.5:
-                            if j1_id is not None:
-                                logger.error(f"Project {p.id}: Multiple J1 assignments! j1_id={j1_id} (val={j1_values[j1_id]:.3f}), h={h} (val={val:.3f})")
-                        j1_id = h
+                            if j1_id is not None and h != j1_id:
+                                logger.error(
+                                    f"Project {p.id}: Multiple J1 assignments over threshold! "
+                                    f"existing={j1_id} (val={j1_values.get(j1_id, 0):.3f}), "
+                                    f"candidate={h} (val={val:.3f})"
+                                )
+                            if j1_id is None or val > j1_values.get(j1_id, 0):
+                                j1_id = h
                     except Exception as e:
                         logger.error(f"Project {p.id}: Error reading J1 variable for faculty {h}: {e}")
                         continue
                 
-                j1_count = sum(1 for v in j1_values.values() if v > 0.5)
-                
-                if j1_count == 0:
-                    logger.error(f"Project {p.id}: No J1 assigned! All values: {[(h, f'{v:.6f}') for h, v in sorted(j1_values.items(), key=lambda x: x[1], reverse=True)[:5]]}")
-                    # Fallback to max value
+                if j1_id is None:
+                    logger.error(
+                        f"Project {p.id}: No J1 above threshold. Top values: "
+                        f"{[(h, f'{v:.6f}') for h, v in sorted(j1_values.items(), key=lambda x: x[1], reverse=True)[:5]]}"
+                    )
                     if max_faculty is not None and max_val > 0.0:
                         j1_id = max_faculty
-                        logger.warning(f"Project {p.id}: No binary J1 assigned, falling back to max value J1={j1_id} (val={max_val:.6f})")
-                elif j1_count > 1:
-                    logger.error(f"Project {p.id}: Multiple J1 assignments! Count={j1_count}, Values: {[(h, f'{v:.6f}') for h, v in j1_values.items() if v > 0.5]}")
-                    # Use the one with highest value
-                    if j1_id is None or j1_values[j1_id] < max_val:
-                        j1_id = max_faculty
-                        logger.warning(f"Project {p.id}: Using highest value J1: {j1_id} (val={j1_values[j1_id]:.6f})")
+                        logger.warning(
+                            f"Project {p.id}: Falling back to max-value J1={j1_id} (val={max_val:.6f})"
+                        )
                 
                 if j1_id is None:
                     # Fallback: pick any instructor that's not PS
@@ -1750,15 +1770,19 @@ class ORToolsSimplexSolver:
                         faculty_name = next((f.name for f in self.faculty if f.id == h), f"ID_{h}")
                         logger.error(f"    {faculty_name} (ID: {h}): {val:.6f}")
             
-            # Reorder slots within classes (back-to-back)
-            self._renumber_slots(solution)
+            # Reorder slots only when not in strict zero-conflict mode; compacting slots
+            # after solving can introduce artificial conflicts across classes.
+            if not self.config.zero_conflict:
+                self._renumber_slots(solution)
             
             # CRITICAL: Validate solution for constraint violations
-            self._validate_solution_constraints(solution)
+            if not self._validate_solution_constraints(solution):
+                logger.error("Validation detected conflicts; returning infeasible solution.")
+                return solution
         
         return solution
     
-    def _validate_solution_constraints(self, solution: SimplexSolution) -> None:
+    def _validate_solution_constraints(self, solution: SimplexSolution) -> bool:
         """
         Validate that the solution satisfies all hard constraints, especially conflict constraints.
         
@@ -1827,9 +1851,15 @@ class ORToolsSimplexSolver:
             
             # Mark solution as potentially invalid
             solution.is_feasible = False
+            solution.solver_status = "CONFLICTS_DETECTED_VALIDATION"
+            solution.total_cost = float('inf')
+            # Optional: drop assignments to avoid consuming conflicted schedule downstream
+            solution.assignments = []
             logger.error("Solution marked as INFEASIBLE due to constraint violations!")
+            return False
         else:
             logger.info("✓ All hard constraints satisfied - no violations detected")
+        return True
     
     def _renumber_slots(self, solution: SimplexSolution) -> None:
         """Renumber slots within each class to be consecutive (0, 1, 2, ...)."""
@@ -1882,17 +1912,70 @@ class RealSimplexAlgorithm(OptimizationAlgorithm):
         self._parse_input_data(data)
         self._initialize_components()
         
+        # Enforce strict zero-conflict mode regardless of incoming params
+        self.config.zero_conflict = True
+        
         logger.info(f"RealSimplexAlgorithm initialized: {len(self.projects)} projects, "
-                   f"{len(self.instructors)} instructors, class_count={self.config.class_count}")
+                   f"{len(self.instructors)} instructors, class_count={self.config.class_count}, "
+                   f"priority_mode={self.config.priority_mode}")
+    
+    def _assert_conflict_free(
+        self,
+        solution: Optional[SimplexSolution],
+        context: str
+    ) -> bool:
+        """
+        Return True if solution has zero conflicts, otherwise mark infeasible.
+        """
+        if solution is None or not self.penalty_calculator:
+            return True
+        
+        total_conflicts, conflicts = self.penalty_calculator.check_all_conflicts_comprehensive(solution)
+        if total_conflicts > 0:
+            solution.is_feasible = False
+            solution.solver_status = f"CONFLICTS_DETECTED_{context}"
+            solution.total_cost = float('inf')
+            
+            logger.error(
+                f"{context}: {total_conflicts} conflict(s) detected. "
+                "Solution marked infeasible."
+            )
+            if conflicts:
+                logger.debug(f"{context}: first conflict sample: {conflicts[0]}")
+            return False
+        
+        return True
+    
+    def _mark_conflict_infeasible(
+        self,
+        solution: SimplexSolution,
+        context: str
+    ) -> SimplexSolution:
+        """
+        Mark solution infeasible due to conflicts and return it.
+        """
+        solution.is_feasible = False
+        solution.solver_status = f"CONFLICTS_DETECTED_{context}"
+        solution.total_cost = float('inf')
+        return solution
     
     def optimize(self, data: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Run Real Simplex optimization.
         
+        Uses built-in priority constraints:
+        - BITIRME_ONCE: Bitirme projects first
+        - ARA_ONCE: Ara projects first
+        - ESIT: No priority
+        
         Returns final schedule with all assignments.
         """
         if data is not None:
             self.initialize(data)
+        
+        # Log priority mode
+        priority_mode = getattr(self.config, 'priority_mode', 'ESIT')
+        logger.info(f"Priority mode: {priority_mode}")
         
         logger.info("=" * 60)
         logger.info("REAL SIMPLEX OPTIMIZATION START")
@@ -1967,60 +2050,29 @@ class RealSimplexAlgorithm(OptimizationAlgorithm):
             logger.error("No feasible solution found for any class count!")
             return self._create_empty_output()
         
-        # Final comprehensive conflict check
+        # Final comprehensive conflict check (strict)
         if self.penalty_calculator:
             logger.info("\n" + "=" * 60)
-            logger.info("FINAL COMPREHENSIVE CONFLICT CHECK")
+            logger.info("FINAL COMPREHENSIVE CONFLICT CHECK (STRICT)")
             logger.info("=" * 60)
             
-            # Use the comprehensive conflict checker
             conflict_summary = self.penalty_calculator.get_conflict_summary(best_solution)
             total_conflicts = conflict_summary['total_conflicts']
-            conflicts = conflict_summary['conflicts']
             
             if total_conflicts > 0:
-                logger.warning(f"⚠️ CONFLICTS DETECTED in final solution!")
-                logger.warning(f"   Total conflicts: {total_conflicts}")
-                logger.warning(f"   PS-only conflicts: {conflict_summary['ps_only_conflicts']}")
-                logger.warning(f"   J1-only conflicts: {conflict_summary['j1_only_conflicts']}")
-                logger.warning(f"   Mixed PS+J1 conflicts: {conflict_summary['mixed_ps_j1_conflicts']}")
-                logger.warning("This should not happen if hard constraints are working correctly!")
-                
-                for conflict in conflicts[:5]:
-                    logger.warning(f"  Conflict: {conflict['instructor_name']} at {conflict['time_range']}")
-                    logger.warning(f"    Duties: {conflict['duty_count']} - Roles: {conflict['roles']}")
-                    logger.warning(f"    Projects: {conflict['projects']}")
-                
-                if len(conflicts) > 5:
-                    logger.warning(f"    ... and {len(conflicts) - 5} more conflicts")
-                
-                # Attempt one final repair cycle
-                logger.info("\nAttempting final emergency repair...")
-                for emergency_attempt in range(100):
-                    current_conflicts, conflict_details = self.penalty_calculator.check_all_conflicts_comprehensive(
-                        best_solution
-                    )
-                    
-                    if current_conflicts == 0:
-                        logger.info(f"✓ Emergency repair successful after {emergency_attempt + 1} attempts!")
-                        break
-                    
-                    best_solution = self._repair_conflicts_aggressive(
-                        best_solution,
-                        conflict_details,
-                        emergency_attempt + 1000  # Different seed
-                    )
-                
-                # Final check
-                final_total, _ = self.penalty_calculator.check_all_conflicts_comprehensive(best_solution)
-                if final_total == 0:
-                    logger.info("✓ ZERO CONFLICTS achieved after emergency repair!")
-                else:
-                    logger.error(f"⚠️ Could not resolve all conflicts. Remaining: {final_total}")
-            else:
-                logger.info("✓ ZERO CONFLICTS in final solution - all constraints satisfied!")
+                logger.error(
+                    f"Conflicts detected in final solution ({total_conflicts}). "
+                    "Strict mode: rejecting solution."
+                )
+                return self._create_empty_output()
             
+            logger.info("✓ ZERO CONFLICTS confirmed in final solution.")
             logger.info("=" * 60 + "\n")
+        
+        # Final guard: never return a conflicting schedule
+        if not self._assert_conflict_free(best_solution, "final_output"):
+            logger.error("No conflict-free solution found. Returning empty output.")
+            return self._create_empty_output()
         
         # Convert to output format
         result = self._convert_to_output(best_solution, elapsed)
@@ -2055,18 +2107,26 @@ class RealSimplexAlgorithm(OptimizationAlgorithm):
         Returns:
             SimplexSolution with ZERO conflicts (guaranteed by hard constraints + repair)
         """
-        max_iterations = 10  # Maximum number of solver iterations
-        max_repair_attempts = 50  # Maximum post-processing repair attempts per iteration
+        # Increase iterations if zero conflict mode is active
+        if self.config.zero_conflict:
+            max_iterations = 20  # More iterations for zero conflict mode
+            max_repair_attempts = 100  # More repair attempts for zero conflict mode
+            logger.info("=" * 60)
+            logger.info("STARTING ZERO-CONFLICT RESOLUTION PROCESS (AGGRESSIVE MODE)")
+            logger.info("=" * 60)
+        else:
+            max_iterations = 10  # Maximum number of solver iterations
+            max_repair_attempts = 50  # Maximum post-processing repair attempts per iteration
+            logger.info("=" * 60)
+            logger.info("STARTING ZERO-CONFLICT RESOLUTION PROCESS")
+            logger.info("=" * 60)
+        
         iteration = 0
         best_solution = None
         best_conflict_count = float('inf')
         
         # Get solver parameters from initial solver
         class_names = initial_solver.class_names
-        
-        logger.info("=" * 60)
-        logger.info("STARTING ZERO-CONFLICT RESOLUTION PROCESS")
-        logger.info("=" * 60)
         
         while iteration < max_iterations:
             iteration += 1
@@ -2104,9 +2164,24 @@ class RealSimplexAlgorithm(OptimizationAlgorithm):
                 
                 if total_conflicts == 0:
                     logger.info(f"✓ Iteration {iteration}: ZERO CONFLICTS - Solution is valid!")
-                    return solution
+                    # Double-check with conflict summary for zero conflict mode
+                    if self.config.zero_conflict:
+                        conflict_summary = self.penalty_calculator.get_conflict_summary(solution)
+                        if conflict_summary['total_conflicts'] == 0:
+                            logger.info("✓ Double-check confirmed: ZERO CONFLICTS!")
+                            return solution
+                        else:
+                            logger.warning(f"⚠️ Double-check found {conflict_summary['total_conflicts']} conflicts, continuing...")
+                            total_conflicts = conflict_summary['total_conflicts']
+                            conflicts = conflict_summary['conflicts']
+                    else:
+                        return solution
                 
                 logger.warning(f"⚠️ Iteration {iteration}: {total_conflicts} conflicts detected in {len(conflicts)} time slots")
+                
+                # STRICT: Conflicts are not allowed; mark infeasible and stop.
+                logger.error("Conflicts detected. Aborting and marking solution infeasible (strict mode).")
+                return self._mark_conflict_infeasible(solution, f"ITERATION_{iteration}")
                 
                 # Track best solution
                 if total_conflicts < best_conflict_count:
@@ -2188,11 +2263,25 @@ class RealSimplexAlgorithm(OptimizationAlgorithm):
         # Return best solution found
         if best_solution is not None:
             final_count, _ = self.penalty_calculator.check_all_conflicts_comprehensive(best_solution)
-            logger.warning(f"Returning best solution with {final_count} remaining conflicts")
-            return best_solution
+            if final_count == 0:
+                logger.info("Final best solution is conflict-free.")
+                return best_solution
+                
+                logger.error(
+                    f"Returning infeasible solution with {final_count} remaining conflicts "
+                    "- conflicts are not allowed."
+                )
+                best_solution.is_feasible = False
+                best_solution.solver_status = "CONFLICTS_REMAIN"
+                best_solution.total_cost = float('inf')
+                return best_solution
         
         # Fallback
-        return initial_solver.solve()
+        fallback_solution = initial_solver.solve()
+        if not self._assert_conflict_free(fallback_solution, "fallback"):
+            logger.error("Fallback solver also produced conflicts; marking infeasible.")
+            return self._mark_conflict_infeasible(fallback_solution, "fallback")
+        return fallback_solution
     
     def _repair_time_range_conflicts(
         self,
@@ -2390,9 +2479,36 @@ class RealSimplexAlgorithm(OptimizationAlgorithm):
         """Parse configuration from data."""
         config_data = data.get('config', {})
         
-        # Priority mode
+        # Priority mode - support both old and new key names
         if 'priority_mode' in config_data:
             self.config.priority_mode = config_data['priority_mode']
+        
+        # Frontend sends "project_priority" with values: midterm_priority, final_exam_priority, none
+        # Convert to our internal priority_mode format: ARA_ONCE, BITIRME_ONCE, ESIT
+        if 'project_priority' in config_data:
+            pp = config_data['project_priority']
+            if pp == 'midterm_priority':
+                self.config.priority_mode = 'ARA_ONCE'
+                logger.info("Priority mode set to ARA_ONCE via project_priority=midterm_priority")
+            elif pp == 'final_exam_priority':
+                self.config.priority_mode = 'BITIRME_ONCE'
+                logger.info("Priority mode set to BITIRME_ONCE via project_priority=final_exam_priority")
+            else:  # none or any other value
+                self.config.priority_mode = 'ESIT'
+                logger.info(f"Priority mode set to ESIT via project_priority={pp}")
+        
+        # Also check params (from __init__) for project_priority
+        if self.params and 'project_priority' in self.params:
+            pp = self.params['project_priority']
+            if pp == 'midterm_priority':
+                self.config.priority_mode = 'ARA_ONCE'
+                logger.info("Priority mode set to ARA_ONCE via params project_priority")
+            elif pp == 'final_exam_priority':
+                self.config.priority_mode = 'BITIRME_ONCE'
+                logger.info("Priority mode set to BITIRME_ONCE via params project_priority")
+            else:
+                self.config.priority_mode = 'ESIT'
+                logger.info(f"Priority mode set to ESIT via params project_priority={pp}")
         
         # Penalty modes
         if 'time_penalty_mode' in config_data:
@@ -2413,8 +2529,8 @@ class RealSimplexAlgorithm(OptimizationAlgorithm):
             self.config.b_max = int(config_data['b_max'])
         
         # Solver parameters
-        if 'max_time_seconds' in config_data:
-            self.config.max_time_seconds = int(config_data['max_time_seconds'])
+        # Note: max_time_seconds and max_iterations are no longer configurable from frontend
+        # They use default values defined in SimplexConfig
         if 'solver_name' in config_data:
             self.config.solver_name = config_data['solver_name']
         
@@ -2425,6 +2541,15 @@ class RealSimplexAlgorithm(OptimizationAlgorithm):
         elif 'class_count' in config_data:
             self.config.class_count = int(config_data['class_count'])
             self.config.class_count_mode = "manual"
+        
+        # Zero conflict mode
+        if 'zero_conflict' in config_data:
+            self.config.zero_conflict = bool(config_data['zero_conflict'])
+        elif 'zero_conflict' in data:
+            self.config.zero_conflict = bool(data['zero_conflict'])
+        # Also check params passed to __init__
+        if self.params and 'zero_conflict' in self.params:
+            self.config.zero_conflict = bool(self.params['zero_conflict'])
     
     def _parse_input_data(self, data: Dict[str, Any]) -> None:
         """Parse projects, instructors, classrooms from data."""

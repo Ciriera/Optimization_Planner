@@ -1502,9 +1502,15 @@ class SAInitialSolutionBuilder:
                 # Prefer unused classes first
                 unused = [c for c in range(self.config.class_count) if c not in used_classes]
                 if unused:
-                    class_id = min(unused, key=lambda c: class_loads[c])
+                    # CRITICAL: Eşit yüklüler arasından rastgele seç
+                    min_load = min(class_loads[c] for c in unused)
+                    min_classes = [c for c in unused if class_loads[c] == min_load]
+                    class_id = random.choice(min_classes)
                 else:
-                    class_id = min(range(self.config.class_count), key=lambda c: class_loads[c])
+                    # CRITICAL: Eşit yüklüler arasından rastgele seç
+                    min_load = min(class_loads)
+                    min_classes = [c for c in range(self.config.class_count) if class_loads[c] == min_load]
+                    class_id = random.choice(min_classes)
                 ps_to_class[ps_id] = class_id
             
             class_assignments[class_id].append(project)
@@ -1624,10 +1630,15 @@ class SAInitialSolutionBuilder:
                         if class_id not in j1_schedule[i][order]
                     ]
                     if free_j1:
-                        j1_id = min(free_j1, key=lambda x: workloads.get(x, 0))
+                        # CRITICAL: Eşit yüklüler arasından rastgele seç
+                        min_load = min(workloads.get(x, 0) for x in free_j1)
+                        min_candidates = [x for x in free_j1 if workloads.get(x, 0) == min_load]
+                        j1_id = random.choice(min_candidates)
                     else:
                         # All busy, pick least loaded (will be repaired later)
-                        j1_id = min(available_j1, key=lambda x: workloads.get(x, 0))
+                        min_load = min(workloads.get(x, 0) for x in available_j1)
+                        min_candidates = [x for x in available_j1 if workloads.get(x, 0) == min_load]
+                        j1_id = random.choice(min_candidates)
                 else:
                     j1_id = self.faculty_ids[j1_index % len(self.faculty_ids)]
                 
@@ -1848,13 +1859,20 @@ class SAInitialSolutionBuilder:
             return min(range(self.config.class_count), key=lambda c: class_loads[c])
     
     def _sort_by_priority(self) -> List[Project]:
-        """Sort projects by priority mode"""
-        interim = [p for p in self.projects if p.type in ["INTERIM", "interim", "ARA"]]
-        final = [p for p in self.projects if p.type in ["FINAL", "final", "BITIRME"]]
+        """Sort projects by priority mode (case-insensitive + randomized)"""
+        # Case-insensitive proje türü karşılaştırması
+        interim = [p for p in self.projects if str(p.type).lower() in ["interim", "ara"]]
+        final = [p for p in self.projects if str(p.type).lower() in ["final", "bitirme"]]
+        
+        # CRITICAL: Shuffle within same type to get different results each run
+        random.shuffle(interim)
+        random.shuffle(final)
         
         if self.config.priority_mode == PriorityMode.ARA_ONCE:
+            logger.debug(f"SA: Sorting by ARA_ONCE: {len(interim)} ara (shuffled), {len(final)} bitirme (shuffled)")
             return interim + final
         elif self.config.priority_mode == PriorityMode.BITIRME_ONCE:
+            logger.debug(f"SA: Sorting by BITIRME_ONCE: {len(final)} bitirme (shuffled), {len(interim)} ara (shuffled)")
             return final + interim
         else:
             # ESIT - random shuffle
@@ -2954,13 +2972,33 @@ def create_simulated_annealing(params: Dict[str, Any] = None) -> SimulatedAnneal
     config = SAConfig()
     
     if params:
+        # CRITICAL: Frontend'den gelen project_priority parametresini priority_mode'a çevir
+        # Frontend: "midterm_priority", "final_exam_priority", "none"
+        # Backend: "ARA_ONCE", "BITIRME_ONCE", "ESIT"
+        project_priority = params.get("project_priority", "none")
+        if project_priority == "midterm_priority":
+            config.priority_mode = PriorityMode.ARA_ONCE
+            logger.info("SA: Priority mode set to ARA_ONCE via params project_priority")
+        elif project_priority == "final_exam_priority":
+            config.priority_mode = PriorityMode.BITIRME_ONCE
+            logger.info("SA: Priority mode set to BITIRME_ONCE via params project_priority")
+        else:
+            # Fallback: Eğer doğrudan priority_mode verilmişse onu kullan
+            if "priority_mode" in params:
+                priority_mode_value = params.get("priority_mode", "ESIT")
+                if isinstance(priority_mode_value, str):
+                    config.priority_mode = PriorityMode(priority_mode_value)
+                else:
+                    config.priority_mode = priority_mode_value
+                logger.info(f"SA: Priority mode set to {config.priority_mode} via params priority_mode")
+            else:
+                logger.info("SA: Priority mode is ESIT (default/no priority)")
+        
         # Apply all config parameters
         for key, value in params.items():
-            if hasattr(config, key):
+            if hasattr(config, key) and key != "priority_mode":  # priority_mode already handled
                 # Handle enums
-                if key == "priority_mode" and isinstance(value, str):
-                    value = PriorityMode(value)
-                elif key == "time_penalty_mode" and isinstance(value, str):
+                if key == "time_penalty_mode" and isinstance(value, str):
                     value = TimePenaltyMode(value)
                 elif key == "workload_constraint_mode" and isinstance(value, str):
                     value = WorkloadConstraintMode(value)

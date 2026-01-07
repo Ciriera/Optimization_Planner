@@ -56,7 +56,8 @@ class ScheduleCreate(ScheduleBase):
     timeslot_id: int
 
 class ScheduleUpdate(ScheduleBase):
-    pass
+    instructors: Optional[List[Any]] = None  # Jüri üyeleri (instructor ID'leri veya dict formatında)
+    responsible_instructor_id: Optional[int] = None  # Proje sorumlusu (Project'in responsible_id'si)
 
 class ScheduleInDBBase(ScheduleBase):
     id: int

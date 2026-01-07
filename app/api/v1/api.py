@@ -110,6 +110,3 @@ api_router.include_router(notifications.router, prefix="/notification", tags=["n
 
 # Import endpoints
 api_router.include_router(import_endpoints.router, prefix="/import", tags=["import"])
-
-# Import endpoints
-api_router.include_router(import_endpoints.router, prefix="/import", tags=["import"]) 

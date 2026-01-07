@@ -1691,6 +1691,9 @@ class NSGA2Scheduler(OptimizationAlgorithm):
         """Parse configuration from data."""
         config = data.get('config', {})
         
+        # Also check params (frontend sends params directly)
+        params = data.get('params', {})
+        
         # Population and generations
         if 'population_size' in config:
             self.config.population_size = config['population_size']
@@ -1704,13 +1707,35 @@ class NSGA2Scheduler(OptimizationAlgorithm):
         elif 'class_count' in config:
             self.config.class_count = config['class_count']
             self.config.auto_class_count = False
+        elif 'class_count' in params:
+            self.config.class_count = params['class_count']
+            self.config.auto_class_count = False
         
-        # Priority mode
-        if 'priority_mode' in config:
+        # CRITICAL: Frontend'den gelen project_priority parametresini priority_mode'a çevir
+        # Frontend: "midterm_priority", "final_exam_priority", "none"
+        # Backend: "ARA_ONCE", "BITIRME_ONCE", "ESIT"
+        project_priority = params.get('project_priority', config.get('project_priority', 'none'))
+        if project_priority == 'midterm_priority':
+            self.config.priority_mode = PriorityMode.ARA_ONCE
+            logger.info("NSGA-II: Priority mode set to ARA_ONCE via params project_priority")
+        elif project_priority == 'final_exam_priority':
+            self.config.priority_mode = PriorityMode.BITIRME_ONCE
+            logger.info("NSGA-II: Priority mode set to BITIRME_ONCE via params project_priority")
+        elif 'priority_mode' in config:
+            # Fallback: Eğer doğrudan priority_mode verilmişse onu kullan
             try:
                 self.config.priority_mode = PriorityMode(config['priority_mode'])
+                logger.info(f"NSGA-II: Priority mode set to {self.config.priority_mode.value} via config")
             except ValueError:
-                pass
+                logger.info("NSGA-II: Priority mode is ESIT (default/no priority)")
+        elif 'priority_mode' in params:
+            try:
+                self.config.priority_mode = PriorityMode(params['priority_mode'])
+                logger.info(f"NSGA-II: Priority mode set to {self.config.priority_mode.value} via params")
+            except ValueError:
+                logger.info("NSGA-II: Priority mode is ESIT (default/no priority)")
+        else:
+            logger.info("NSGA-II: Priority mode is ESIT (default/no priority)")
         
         # Time penalty mode
         if 'time_penalty_mode' in config:

@@ -1431,37 +1431,52 @@ class InitialSolutionBuilder:
     
     def _enforce_priority_mode(self, solution: Solution) -> None:
         """Priority mode'u uygula."""
-        if self.config.priority_mode == PriorityMode.ESIT:
+        logger.info(f"_enforce_priority_mode called with priority_mode: {self.config.priority_mode}")
+        logger.info(f"Priority mode type: {type(self.config.priority_mode)}")
+        
+        # Enum karşılaştırması için string'e çevir
+        priority_mode_str = str(self.config.priority_mode.value) if hasattr(self.config.priority_mode, 'value') else str(self.config.priority_mode)
+        
+        if priority_mode_str == "ESIT" or priority_mode_str == PriorityMode.ESIT.value:
+            logger.info("Priority mode is ESIT, skipping priority enforcement")
             return  # Öncelik yok
         
+        logger.info(f"Enforcing priority mode: {priority_mode_str}")
+        
         # Her sınıf için
+        reordered_count = 0
         for class_id in range(solution.class_count):
             class_projects = solution.get_class_projects(class_id)
             
-            if self.config.priority_mode == PriorityMode.ARA_ONCE:
+            if priority_mode_str == "ARA_ONCE" or priority_mode_str == PriorityMode.ARA_ONCE.value:
                 # Ara projeler önce
                 ara = [a for a in class_projects
-                       if self.projects_dict[a.project_id].type in ('interim', 'ara')]
+                       if self.projects_dict[a.project_id].type.lower() in ('interim', 'ara')]
                 bitirme = [a for a in class_projects
-                          if self.projects_dict[a.project_id].type in ('final', 'bitirme')]
+                          if self.projects_dict[a.project_id].type.lower() in ('final', 'bitirme')]
                 sorted_projects = ara + bitirme
                 
-            elif self.config.priority_mode == PriorityMode.BITIRME_ONCE:
+            elif priority_mode_str == "BITIRME_ONCE" or priority_mode_str == PriorityMode.BITIRME_ONCE.value:
                 # Bitirme projeleri önce
                 bitirme = [a for a in class_projects
-                          if self.projects_dict[a.project_id].type in ('final', 'bitirme')]
+                          if self.projects_dict[a.project_id].type.lower() in ('final', 'bitirme')]
                 ara = [a for a in class_projects
-                       if self.projects_dict[a.project_id].type in ('interim', 'ara')]
+                       if self.projects_dict[a.project_id].type.lower() in ('interim', 'ara')]
                 sorted_projects = bitirme + ara
             else:
+                logger.warning(f"Unknown priority mode: {priority_mode_str}")
                 continue
             
             # Slot numaralarını güncelle
             for new_slot, assignment in enumerate(sorted_projects):
                 for a in solution.assignments:
                     if a.project_id == assignment.project_id:
+                        if a.slot_in_class != new_slot:
+                            reordered_count += 1
                         a.slot_in_class = new_slot
                         break
+        
+        logger.info(f"Priority enforcement complete: {reordered_count} projects reordered")
 
 
 # ============================================================================
@@ -1488,6 +1503,20 @@ class ComprehensiveOptimizer(OptimizationAlgorithm):
         super().__init__(params)
         params = params or {}
         
+        # Map project_priority to priority_mode
+        priority_mode_str = params.get("priority_mode", "ESIT")
+        if "project_priority" in params:
+            pp = params["project_priority"]
+            if pp == "midterm_priority":
+                priority_mode_str = "ARA_ONCE"
+                logger.info("ComprehensiveOptimizer: priority_mode set to ARA_ONCE via project_priority")
+            elif pp == "final_exam_priority":
+                priority_mode_str = "BITIRME_ONCE"
+                logger.info("ComprehensiveOptimizer: priority_mode set to BITIRME_ONCE via project_priority")
+            else:
+                priority_mode_str = "ESIT"
+                logger.info(f"ComprehensiveOptimizer: priority_mode set to ESIT via project_priority={pp}")
+        
         # Konfigürasyon oluştur
         self.config = ComprehensiveConfig(
             max_iterations=params.get("max_iterations", 1000),
@@ -1497,7 +1526,7 @@ class ComprehensiveOptimizer(OptimizationAlgorithm):
             neighborhood_size=params.get("neighborhood_size", 80),
             class_count=params.get("class_count", 6),
             auto_class_count=params.get("auto_class_count", True),
-            priority_mode=PriorityMode(params.get("priority_mode", "ESIT")),
+            priority_mode=PriorityMode(priority_mode_str),
             time_penalty_mode=TimePenaltyMode(
                 params.get("time_penalty_mode", "GAP_PROPORTIONAL")
             ),
@@ -1539,6 +1568,24 @@ class ComprehensiveOptimizer(OptimizationAlgorithm):
         Args:
             data: Algoritma giriş verileri
         """
+        # CRITICAL: Check for params in data (AlgorithmService adds this)
+        if "params" in data:
+            params = data["params"]
+            # Map project_priority to priority_mode
+            project_priority = params.get("project_priority", "none")
+            if project_priority == "midterm_priority":
+                self.config.priority_mode = PriorityMode.ARA_ONCE
+                logger.info("Comprehensive Optimizer: Priority mode set to ARA_ONCE via data params")
+            elif project_priority == "final_exam_priority":
+                self.config.priority_mode = PriorityMode.BITIRME_ONCE
+                logger.info("Comprehensive Optimizer: Priority mode set to BITIRME_ONCE via data params")
+            elif "priority_mode" in params:
+                try:
+                    self.config.priority_mode = PriorityMode(params["priority_mode"])
+                    logger.info(f"Comprehensive Optimizer: Priority mode set to {self.config.priority_mode.value} via data params")
+                except ValueError:
+                    pass
+        
         self._load_data(data)
         
         # CRITICAL: Ensure class_count matches actual classrooms after _load_data
@@ -1560,8 +1607,9 @@ class ComprehensiveOptimizer(OptimizationAlgorithm):
             self.projects, self.instructors, self.config
         )
         
-        # CRITICAL: Log final class_count to verify
-        logger.info(f"Comprehensive Optimizer initialize: Final class_count = {self.config.class_count}, classrooms = {len(self.classrooms)}")
+        # CRITICAL: Log final class_count and priority_mode to verify
+        logger.info(f"Comprehensive Optimizer initialize: Final class_count = {self.config.class_count}, "
+                   f"classrooms = {len(self.classrooms)}, priority_mode = {self.config.priority_mode.value}")
         
         # Tabu listesini temizle
         self.tabu_list = []
@@ -1830,6 +1878,13 @@ class ComprehensiveOptimizer(OptimizationAlgorithm):
         logger.info(f"  H2: {self.best_score_breakdown.h2_workload:.2f} (weighted: {self.best_score_breakdown.c2_h2:.2f})")
         logger.info(f"  H3: {self.best_score_breakdown.h3_class_change:.2f} (weighted: {self.best_score_breakdown.c3_h3:.2f})")
         logger.info(f"  H4: {self.best_score_breakdown.h4_class_load_balance:.2f} (weighted: {self.best_score_breakdown.c4_h4:.2f})")
+        
+        # CRITICAL: Re-apply priority mode AFTER Tabu Search completes
+        # Tabu Search may have changed slot ordering during optimization
+        if self.solution_builder:
+            logger.info("Re-applying priority mode after Tabu Search...")
+            self.solution_builder._enforce_priority_mode(self.best_solution)
+            logger.info("Priority mode re-applied to final solution")
         
         return {
             'solution': self.best_solution,

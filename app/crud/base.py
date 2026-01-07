@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base_class import Base
+import enum
 
 ModelType = TypeVar("ModelType", bound=Base)
 CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
@@ -34,7 +35,42 @@ class CRUDBase(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
 
     async def create(self, db: AsyncSession, *, obj_in: CreateSchemaType) -> ModelType:
         """Yeni kayıt oluştur."""
-        obj_in_data = jsonable_encoder(obj_in)
+        # Convert enum objects to their .value for PostgreSQL native enum
+        # jsonable_encoder converts enum to .name, but PostgreSQL needs .value
+        if hasattr(obj_in, 'model_dump'):
+            # Pydantic v2
+            obj_in_data = obj_in.model_dump()
+        else:
+            # Pydantic v1
+            obj_in_data = obj_in.dict()
+        
+        # Fix: Convert enum objects to their .value (string) for PostgreSQL native enum
+        for key, value in obj_in_data.items():
+            if isinstance(value, enum.Enum):
+                obj_in_data[key] = value.value
+            elif key == 'algorithm_type' and isinstance(value, str):
+                # Convert string to enum value (lowercase) for PostgreSQL
+                from app.models.algorithm import AlgorithmType
+                # Always convert to lowercase first (enum values are lowercase)
+                value_lower = value.lower()
+                try:
+                    # First, try to match by value (lowercase string)
+                    enum_obj = AlgorithmType(value_lower)
+                    obj_in_data[key] = enum_obj.value
+                except ValueError:
+                    # If not found by value, try to match by enum name (uppercase)
+                    # Example: "HUNGARIAN" -> find AlgorithmType.HUNGARIAN -> use .value which is "hungarian"
+                    found = False
+                    for enum_member in AlgorithmType:
+                        if enum_member.name.upper() == value.upper():
+                            obj_in_data[key] = enum_member.value  # Always use lowercase .value
+                            found = True
+                            break
+                    if not found:
+                        # If still not found, try direct lowercase assignment
+                        # This handles cases where the value might already be correct
+                        obj_in_data[key] = value_lower
+        
         db_obj = self.model(**obj_in_data)  # type: ignore
         db.add(db_obj)
         await db.commit()

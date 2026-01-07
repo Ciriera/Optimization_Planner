@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 import_service = ImportService()
+EMAIL_TEMPLATE_FILENAME = "instructor_email_template.xlsx"
 
 
 @router.post("/validate")
@@ -167,6 +168,111 @@ async def download_template(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error generating template: {str(e)}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Instructor Email Import/Export
+# ---------------------------------------------------------------------------
+
+@router.get("/instructor-emails/template")
+async def download_instructor_email_template(
+    current_user: User = Depends(deps.get_current_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """
+    Export instructor list with empty/filled email column as Excel template.
+    Columns:
+      - InstructorName
+      - Email (empty if not set)
+    """
+    try:
+        template_bytes = await import_service.generate_instructor_email_template(db)
+        return StreamingResponse(
+            io.BytesIO(template_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename={EMAIL_TEMPLATE_FILENAME}",
+            },
+        )
+    except Exception as e:
+        logger.error(f"Error generating instructor email template: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating instructor email template: {str(e)}",
+        )
+
+
+@router.post("/instructor-emails/validate")
+async def validate_instructor_email_file(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Any:
+    """
+    Validate instructor email Excel file.
+    """
+    try:
+        if not file.filename.endswith((".xlsx", ".xls")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid file format. Only .xlsx and .xls files are supported.",
+            )
+
+        file_content = await file.read()
+        if len(file_content) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File is empty.",
+            )
+
+        result = await import_service.validate_instructor_emails(file_content, db)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error validating instructor email file: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error validating file: {str(e)}",
+        )
+
+
+@router.post("/instructor-emails/execute")
+async def execute_instructor_email_import(
+    file: UploadFile = File(...),
+    dry_run: bool = False,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_user),
+) -> Any:
+    """
+    Import instructor emails into the database.
+    """
+    try:
+        if not file.filename.endswith((".xlsx", ".xls")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid file format. Only .xlsx and .xls files are supported.",
+            )
+
+        file_content = await file.read()
+        if len(file_content) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="File is empty.",
+            )
+
+        result = await import_service.execute_instructor_email_import(
+            file_content, db, dry_run=dry_run
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing instructor email import: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error executing import: {str(e)}",
         )
 
 

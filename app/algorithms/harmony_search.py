@@ -1,2119 +1,978 @@
 """
-HARMONY SEARCH (HS) - Çok Kriterli Akademik Proje Sınavı/Jüri Planlama ve Atama Sistemi
+Harmony Search Algorithm - ARA Proje Öncelikli
+Çok Kriterli ve Çok Kısıtlı Akademik Proje Sınavı / Jüri Planlama Sistemi
 
-Bu modül, üniversitelerde dönem sonlarında gerçekleştirilen Ara Proje ve Bitirme Projesi
-değerlendirme süreçlerinde yaşanan planlama, atama ve iş yükü dağıtımı problemlerine yönelik
-olarak geliştirilmiş Harmony Search (HS) algoritmasını implement eder.
+==========================================================================
+TEMEL ÖZELLİKLER:
+==========================================================================
+1. ARA Projeler SABAH saatlerine (HARD constraint) - PSO'nun tam tersi!
+2. Bitirme Projeleri öğleden sonra (Ara bittikten sonra)  
+3. 2. Jüri = "[Araştırma Görevlisi]" placeholder (her projede)
+4. Her timeslotta her öğretim görevlisi EN FAZLA 1 görev
+5. Öğretim görevlisi kendi projesine jüri OLAMAZ
+6. Süreklilik: Öğretim görevlileri mümkün olduğunca arka arkaya görev alır
+7. İş yükü dengesi: Görevler eşit dağıtılır (±2 tolerans)
+8. Back-to-back sınıf yerleşimi
 
-PROBLEM TANIMI:
-- Her projede: 1 Proje Sorumlusu (PS), 1 Jüri (J1), 1 Placeholder Jüri (J2 = [Araştırma Görevlisi])
-- X gerçek öğretim görevlisi, Y proje, z sınıf (5, 6, veya 7)
-- Projeler sınıf içinde back-to-back (ardışık) yerleştirilmeli
-- Her öğretim görevlisi her timeslot'ta en fazla 1 görev alabilir
-
-AMAÇ FONKSİYONU:
-    min Z = C1*H1(n) + C2*H2(n) + C3*H3(n)
-
-Burada:
-- H1: Zaman/GAP Cezası (ardışık olmayan görevler için - sadece aynı sınıf içinde)
-- H2: İş Yükü Uniformite Cezası (en önemli, C2 > C1 ve C2 > C3)
-- H3: Sınıf Değişimi Cezası
-
-NOT: H4 ve diğer penalty'ler hard constraint violations için kullanılır.
-
-HARD KISITLAR:
-1. Her proje tam olarak bir sınıf ve slot'a atanmalı
-2. Back-to-back scheduling (sınıf içinde boşluk yok)
-3. Her öğretim görevlisi her timeslot'ta en fazla 1 görev
-4. J1[p] != PS[p] (kendi projesine jüri olamama)
-5. Tam olarak z sınıf aktif olmalı
-6. Proje türü önceliklendirme (ARA_ONCE, BITIRME_ONCE, ESIT)
-7. J2 placeholder - modele dahil edilmez, sadece görsel
-
-KONFİGÜRASYON:
-- priority_mode: ARA_ONCE | BITIRME_ONCE | ESIT
-- time_penalty_mode: BINARY | GAP_PROPORTIONAL
-- workload_constraint_mode: SOFT_ONLY | SOFT_AND_HARD
-
-HARMONY SEARCH SPESİFİK PARAMETRELER:
-- harmony_memory_size (HMS): Harmony memory kapasitesi
-- harmony_memory_consideration_rate (HMCR): Memory'den seçme oranı
-- pitch_adjustment_rate (PAR): Pitch ayarlama oranı
-- bandwidth (BW): Bandwidth parametresi
-
-Author: Optimization Planner System
+==========================================================================
+AMAÇ FONKSİYONU: min Z = C1·H1 + C2·H2 + C3·H3
+==========================================================================
+H1: Zaman/GAP cezası (öğretim görevlisi boşlukları)
+H2: İş yükü dengesizlik cezası (dominant kriter)
+H3: Sınıf değişimi cezası
 """
+from __future__ import annotations
 
-from typing import Dict, Any, List, Tuple, Set, Optional
-from dataclasses import dataclass, field
+from typing import Dict, Any, List, Tuple, Optional, Set
 from enum import Enum
-from collections import defaultdict
-import copy
 import random
-import math
-import time
 import logging
-import numpy as np
+import copy
+import time
+from collections import defaultdict
+from datetime import time as dt_time
 
 from app.algorithms.base import OptimizationAlgorithm
 
 logger = logging.getLogger(__name__)
 
-
-# ============================================================================
-# CONFIGURATION ENUMS
-# ============================================================================
-
-class PriorityMode(str, Enum):
-    """Proje türü önceliklendirme modu."""
-    ARA_ONCE = "ARA_ONCE"
-    BITIRME_ONCE = "BITIRME_ONCE"
-    ESIT = "ESIT"
+# ==========================================================================
+# SABITLER
+# ==========================================================================
+JURY2_PLACEHOLDER = "[Araştırma Görevlisi]"
+HARD_CONSTRAINT_PENALTY = 1_000_000.0
 
 
-class TimePenaltyMode(str, Enum):
-    """Zaman/GAP cezası hesaplama modu."""
-    BINARY = "BINARY"
-    GAP_PROPORTIONAL = "GAP_PROPORTIONAL"
+class TimePenaltyMode(Enum):
+    BINARY = "binary"
+    GAP_PROPORTIONAL = "gap_proportional"
 
 
-class WorkloadConstraintMode(str, Enum):
-    """İş yükü kısıtı modu."""
-    SOFT_ONLY = "SOFT_ONLY"
-    SOFT_AND_HARD = "SOFT_AND_HARD"
+class WorkloadConstraintMode(Enum):
+    SOFT_ONLY = "soft_only"
+    SOFT_AND_HARD = "soft_and_hard"
 
-
-# ============================================================================
-# DATA CLASSES
-# ============================================================================
-
-@dataclass
-class HSConfig:
-    """Harmony Search algoritması konfigürasyon parametreleri."""
-    
-    # HS spesifik parametreler
-    harmony_memory_size: int = 30
-    max_iterations: int = 500
-    hmcr: float = 0.9
-    par: float = 0.3
-    bw: float = 0.2
-    
-    # Dinamik parametre adaptasyonu
-    use_dynamic_params: bool = True
-    par_min: float = 0.1
-    par_max: float = 0.9
-    bw_min: float = 0.01
-    bw_max: float = 0.5
-    
-    # Local search
-    use_local_search: bool = True
-    local_search_iterations: int = 20
-    
-    # Erken durdurma
-    stagnation_limit: int = 50
-    time_limit: int = 300
-    
-    # Sınıf sayısı ayarları
-    class_count: int = 6
-    auto_class_count: bool = True
-    
-    # Öncelik modu
-    priority_mode: PriorityMode = PriorityMode.ESIT
-    
-    # Zaman cezası modu
-    time_penalty_mode: TimePenaltyMode = TimePenaltyMode.GAP_PROPORTIONAL
-    
-    # İş yükü kısıtı modu
-    workload_constraint_mode: WorkloadConstraintMode = WorkloadConstraintMode.SOFT_ONLY
-    workload_hard_limit: int = 4
-    workload_soft_band: int = 2
-    
-    # Amaç fonksiyonu ağırlıkları (Real Simplex/Genetic Algorithm standart değerleri)
-    # min Z = C1*H1(n) + C2*H2(n) + C3*H3(n)
-    # C2 > C1 ve C2 > C3 (is yuku en kritik kriter)
-    weight_h1: float = 10.0   # C1: Zaman/Gap cezasi agirligi
-    weight_h2: float = 100.0  # C2: Is yuku cezasi agirligi (en onemli)
-    weight_h3: float = 5.0    # C3: Sinif degisimi cezasi agirligi
-    
-    # Ekstra penalty'ler (hard constraint violations için - yüksek ağırlıklar)
-    weight_h4: float = 0.5  # Class load balance (opsiyonel)
-    weight_continuity: float = 5.0  # Continuity penalty (opsiyonel)
-    weight_timeslot_conflict: float = 1000.0  # Timeslot conflict (HARD constraint)
-    weight_unused_class: float = 10000.0  # Unused class penalty (HARD constraint)
-    
-    # Uniform dağılım parametreleri
-    uniform_distribution_tolerance: int = 3
-    weight_uniform_distribution: float = 50.0
-    
-    # Slot parametreleri
-    slot_duration: float = 0.5
-    time_tolerance: float = 0.001
-    
-    # J2 placeholder
-    j2_placeholder: str = "[Arastirma Gorevlisi]"
-
-
-@dataclass
-class Project:
-    """Proje veri yapısı."""
-    id: int
-    title: str
-    type: str
-    ps_id: int
-    is_makeup: bool = False
-    
-    def __hash__(self):
-        return hash(self.id)
-    
-    def __eq__(self, other):
-        if isinstance(other, Project):
-            return self.id == other.id
-        return False
-
-
-@dataclass
-class Instructor:
-    """Öğretim görevlisi veri yapısı."""
-    id: int
-    name: str
-    type: str
-    
-    def __hash__(self):
-        return hash(self.id)
-    
-    def __eq__(self, other):
-        if isinstance(other, Instructor):
-            return self.id == other.id
-        return False
-
-
-@dataclass
-class ProjectAssignment:
-    """Tek bir proje ataması."""
-    project_id: int
-    class_id: int
-    order_in_class: int
-    ps_id: int
-    j1_id: int
-    j2_label: str = "[Arastirma Gorevlisi]"
-    
-    def __hash__(self):
-        return hash(self.project_id)
-    
-    def copy(self) -> 'ProjectAssignment':
-        return ProjectAssignment(
-            project_id=self.project_id,
-            class_id=self.class_id,
-            order_in_class=self.order_in_class,
-            ps_id=self.ps_id,
-            j1_id=self.j1_id,
-            j2_label=self.j2_label
-        )
-
-
-@dataclass
-class HSSolution:
-    """Harmony Search çözüm yapısı."""
-    assignments: List[ProjectAssignment] = field(default_factory=list)
-    class_count: int = 6
-    
-    h1_gap_penalty: float = 0.0
-    h2_workload_penalty: float = 0.0
-    h3_class_change_penalty: float = 0.0
-    h4_class_load_penalty: float = 0.0
-    total_cost: float = float('inf')
-    
-    is_feasible: bool = True
-    constraint_violations: int = 0
-    
-    def copy(self) -> 'HSSolution':
-        return HSSolution(
-            assignments=[a.copy() for a in self.assignments],
-            class_count=self.class_count,
-            h1_gap_penalty=self.h1_gap_penalty,
-            h2_workload_penalty=self.h2_workload_penalty,
-            h3_class_change_penalty=self.h3_class_change_penalty,
-            h4_class_load_penalty=self.h4_class_load_penalty,
-            total_cost=self.total_cost,
-            is_feasible=self.is_feasible,
-            constraint_violations=self.constraint_violations
-        )
-    
-    def get_assignment(self, project_id: int) -> Optional[ProjectAssignment]:
-        for a in self.assignments:
-            if a.project_id == project_id:
-                return a
-        return None
-
-
-# ============================================================================
-# PENALTY CALCULATOR
-# ============================================================================
-
-class HSPenaltyCalculator:
-    """
-    Harmony Search için ceza hesaplayıcı.
-    
-    H1: Time/Gap penalty
-    H2: Workload uniformity penalty
-    H3: Class change penalty
-    H4: Class load balance penalty
-    H5: Continuity penalty
-    H6: Timeslot conflict penalty (hard)
-    H7: Unused class penalty (hard)
-    """
-    
-    def __init__(
-        self, 
-        projects: List[Project], 
-        instructors: List[Instructor], 
-        config: HSConfig
-    ):
-        self.projects = {p.id: p for p in projects}
-        self.instructors = {i.id: i for i in instructors}
-        self.config = config
-        
-        self.faculty_instructors = {
-            i.id: i for i in instructors 
-            if i.type == "instructor"
-        }
-        
-        num_projects = len(projects)
-        num_faculty = len(self.faculty_instructors)
-        self.avg_workload = (2 * num_projects) / num_faculty if num_faculty > 0 else 0
-    
-    def calculate_total_cost(self, solution: HSSolution) -> float:
-        """
-        Toplam maliyeti hesapla - Real Simplex/Genetic Algorithm formatına uygun.
-        
-        Ana amaç fonksiyonu: min Z = C1*H1(n) + C2*H2(n) + C3*H3(n)
-        C2 > C1 ve C2 > C3 (is yuku en kritik kriter)
-        
-        Hard constraint violations için çok yüksek ağırlıklı penalty'ler (H6, H7)
-        eklenir ki çözüm fizibilitesini garanti etsin.
-        """
-        h1 = self.calculate_h1_time_penalty(solution)
-        h2 = self.calculate_h2_workload_penalty(solution)
-        h3 = self.calculate_h3_class_change_penalty(solution)
-        
-        # Hard constraint violations için yüksek penalty'ler (repair mekanizması için)
-        h6 = self.calculate_timeslot_conflict_penalty(solution)
-        h7 = self.calculate_unused_class_penalty(solution)
-        
-        solution.h1_gap_penalty = h1
-        solution.h2_workload_penalty = h2
-        solution.h3_class_change_penalty = h3
-        
-        # Ana amaç fonksiyonu: C1*H1 + C2*H2 + C3*H3 (Real Simplex/GA standart)
-        total = (
-            self.config.weight_h1 * h1 +
-            self.config.weight_h2 * h2 +
-            self.config.weight_h3 * h3
-        )
-        
-        # Hard constraint violations için ekstra penalty'ler (çok yüksek ağırlıklar)
-        total += (
-            self.config.weight_timeslot_conflict * h6 +
-            self.config.weight_unused_class * h7
-        )
-        
-        solution.total_cost = total
-        return total
-    
-    def calculate_uniform_distribution_penalty(self, solution: HSSolution) -> float:
-        """Uniform dağılım cezası (±3 bandı dışındaki sınıflar için)."""
-        num_projects = len(solution.assignments)
-        if num_projects == 0:
-            return 0.0
-        
-        target_per_class = num_projects / solution.class_count
-        tolerance = self.config.uniform_distribution_tolerance
-        
-        class_loads = defaultdict(int)
-        for assignment in solution.assignments:
-            class_loads[assignment.class_id] += 1
-        
-        total_penalty = 0.0
-        for class_id in range(solution.class_count):
-            load = class_loads.get(class_id, 0)
-            deviation = abs(load - target_per_class)
-            
-            if deviation > tolerance:
-                penalty = (deviation - tolerance) ** 2
-                total_penalty += penalty
-        
-        return total_penalty
-    
-    def calculate_h1_time_penalty(self, solution: HSSolution) -> float:
-        """
-        H1: Time/Gap penalty - Real Simplex/Genetic Algorithm formatına uygun.
-        
-        SADECE AYNI SINIF ICINDEKI gap'ler cezalandirilir.
-        Farkli siniflar arasi gecisler normaldir (paralel siniflar).
-        
-        BINARY mod: Ardışık değilse 1 ceza
-        GAP_PROPORTIONAL mod: gap slot sayisi kadar ceza
-        """
-        total_penalty = 0.0
-        
-        # Her ogretim gorevlisi ve sinif bazinda gorevleri grupla
-        instructor_class_tasks = defaultdict(lambda: defaultdict(list))
-        
-        for assignment in solution.assignments:
-            # PS gorevi
-            instructor_class_tasks[assignment.ps_id][assignment.class_id].append({
-                'project_id': assignment.project_id,
-                'order': assignment.order_in_class,
-                'role': 'PS'
-            })
-            
-            # J1 gorevi
-            instructor_class_tasks[assignment.j1_id][assignment.class_id].append({
-                'project_id': assignment.project_id,
-                'order': assignment.order_in_class,
-                'role': 'J1'
-            })
-        
-        # Her ogretim gorevlisi ve sinif icin gap kontrolu (sadece ayni sinif icinde)
-        for instructor_id, class_tasks_dict in instructor_class_tasks.items():
-            for class_id, tasks in class_tasks_dict.items():
-                if len(tasks) <= 1:
-                    continue
-                
-                # Ayni sinif icindeki gorevleri siraya gore sirala
-                tasks.sort(key=lambda x: x['order'])
-                
-                # Ardisik gorevler arasindaki gap'leri kontrol et
-                for r in range(len(tasks) - 1):
-                    current_order = tasks[r]['order']
-                    next_order = tasks[r + 1]['order']
-                    gap = next_order - current_order - 1
-                    
-                    if gap > 0:
-                        # Gap var - ceza uygula
-                        if self.config.time_penalty_mode == TimePenaltyMode.BINARY:
-                            total_penalty += 1.0
-                        else:  # GAP_PROPORTIONAL
-                            total_penalty += float(gap)
-        
-        return total_penalty
-    
-    def calculate_h1_gap_penalty(self, solution: HSSolution) -> float:
-        """Alias for calculate_h1_time_penalty."""
-        return self.calculate_h1_time_penalty(solution)
-    
-    def calculate_h2_workload_penalty(self, solution: HSSolution) -> float:
-        """
-        H2: İş yükü uniformite cezası - Real Simplex/Genetic Algorithm formatına uygun.
-        
-        Penalty(h) = max(0, |Load(h) - AvgLoad| - 2)
-        H2 = Σ Penalty(h)
-        
-        Soft band: ±2 tolerans (workload_soft_band = 2)
-        Hard constraint violation için ekstra penalty (SOFT_AND_HARD mode)
-        """
-        total_penalty = 0.0
-        
-        workloads = defaultdict(int)
-        for assignment in solution.assignments:
-            workloads[assignment.ps_id] += 1
-            workloads[assignment.j1_id] += 1
-        
-        for instructor_id in self.faculty_instructors.keys():
-            load = workloads.get(instructor_id, 0)
-            deviation = abs(load - self.avg_workload)
-            
-            # Soft penalty: beyond ±2 band
-            penalty = max(0.0, deviation - self.config.workload_soft_band)
-            total_penalty += penalty
-            
-            # Additional penalty for hard constraint violation
-            if self.config.workload_constraint_mode == WorkloadConstraintMode.SOFT_AND_HARD:
-                if deviation > self.config.workload_hard_limit:
-                    # Hard limit asilmis - ekstra ceza (Real Simplex formatinda 1000.0)
-                    # Ama daha makul bir deger kullanabiliriz
-                    extra_penalty = (deviation - self.config.workload_hard_limit) * 10
-                    total_penalty += extra_penalty
-        
-        return total_penalty
-    
-    def calculate_h3_class_change_penalty(self, solution: HSSolution) -> float:
-        """
-        H3: Class change penalty - Real Simplex/Genetic Algorithm formatına uygun.
-        
-        ClassCount(h) = number of different classes instructor h appears in
-        Penalty = max(0, ClassCount(h) - 2)
-        H3 = Σ Penalty(h)
-        """
-        total_penalty = 0.0
-        
-        instructor_classes = defaultdict(set)
-        for assignment in solution.assignments:
-            instructor_classes[assignment.ps_id].add(assignment.class_id)
-            instructor_classes[assignment.j1_id].add(assignment.class_id)
-        
-        for instructor_id in self.faculty_instructors.keys():
-            class_count = len(instructor_classes.get(instructor_id, set()))
-            if class_count > 2:
-                # Real Simplex/GA formatı: max(0, ClassCount(h) - 2)
-                penalty = class_count - 2
-                total_penalty += penalty
-        
-        return total_penalty
-    
-    def calculate_h4_class_load_penalty(self, solution: HSSolution) -> float:
-        """H4: Class load balance penalty."""
-        total_penalty = 0.0
-        
-        num_projects = len(solution.assignments)
-        if num_projects == 0:
-            return 0.0
-        
-        target_per_class = num_projects / solution.class_count
-        
-        class_loads = defaultdict(int)
-        for assignment in solution.assignments:
-            class_loads[assignment.class_id] += 1
-        
-        unused_class_penalty = 0.0
-        for class_id in range(solution.class_count):
-            load = class_loads.get(class_id, 0)
-            if load == 0:
-                unused_class_penalty += 1000.0
-            else:
-                penalty = abs(load - target_per_class)
-                total_penalty += penalty
-        
-        total_penalty += unused_class_penalty
-        return total_penalty
-    
-    def calculate_unused_class_penalty(self, solution: HSSolution) -> float:
-        """H7: Unused class penalty (HARD constraint)."""
-        used_classes = set()
-        for assignment in solution.assignments:
-            used_classes.add(assignment.class_id)
-        
-        unused_count = solution.class_count - len(used_classes)
-        if unused_count > 0:
-            return unused_count * unused_count * 1000000.0
-        return 0.0
-    
-    def calculate_continuity_penalty(self, solution: HSSolution) -> float:
-        """H5: Continuity penalty."""
-        total_penalty = 0.0
-        instructor_tasks = self._build_instructor_task_matrix(solution)
-        
-        for instructor_id, tasks in instructor_tasks.items():
-            if len(tasks) <= 1:
-                continue
-            
-            tasks_by_class = defaultdict(list)
-            for task in tasks:
-                tasks_by_class[task['class_id']].append(task)
-            
-            for class_id, class_tasks in tasks_by_class.items():
-                if len(class_tasks) <= 1:
-                    continue
-                
-                class_tasks.sort(key=lambda x: x['order'])
-                
-                blocks = 1
-                for i in range(len(class_tasks) - 1):
-                    if class_tasks[i + 1]['order'] - class_tasks[i]['order'] > 1:
-                        blocks += 1
-                
-                if blocks > 1:
-                    total_penalty += (blocks - 1) ** 2 * 10
-        
-        return total_penalty
-    
-    def calculate_timeslot_conflict_penalty(self, solution: HSSolution) -> float:
-        """H6: Timeslot conflict penalty (HARD constraint)."""
-        total_penalty = 0.0
-        
-        instructor_timeslots = defaultdict(lambda: defaultdict(int))
-        for assignment in solution.assignments:
-            slot_key = (assignment.class_id, assignment.order_in_class)
-            instructor_timeslots[assignment.ps_id][slot_key] += 1
-            instructor_timeslots[assignment.j1_id][slot_key] += 1
-        
-        for instructor_id in instructor_timeslots.keys():
-            orders_per_class = defaultdict(list)
-            for (class_id, order) in instructor_timeslots[instructor_id].keys():
-                orders_per_class[order].append(class_id)
-            
-            for order, classes in orders_per_class.items():
-                if len(classes) > 1:
-                    total_penalty += (len(classes) - 1) * 1000
-        
-        return total_penalty
-    
-    def has_unused_classes(self, solution: HSSolution) -> bool:
-        """Kullanılmayan sınıf var mı kontrol et."""
-        class_loads = defaultdict(int)
-        for assignment in solution.assignments:
-            class_loads[assignment.class_id] += 1
-        
-        for class_id in range(solution.class_count):
-            if class_loads.get(class_id, 0) == 0:
-                return True
-        return False
-    
-    def _build_instructor_task_matrix(self, solution: HSSolution) -> Dict[int, List[Dict]]:
-        """Her öğretim görevlisi için görev matrisi oluştur."""
-        instructor_tasks: Dict[int, List[Dict]] = defaultdict(list)
-        
-        for assignment in solution.assignments:
-            instructor_tasks[assignment.ps_id].append({
-                'class_id': assignment.class_id,
-                'order': assignment.order_in_class,
-                'project_id': assignment.project_id,
-                'role': 'PS'
-            })
-            
-            instructor_tasks[assignment.j1_id].append({
-                'class_id': assignment.class_id,
-                'order': assignment.order_in_class,
-                'project_id': assignment.project_id,
-                'role': 'J1'
-            })
-        
-        return instructor_tasks
-
-
-# ============================================================================
-# REPAIR MECHANISM
-# ============================================================================
-
-class HSRepairMechanism:
-    """
-    HS çözümleri için onarım mekanizması.
-    """
-    
-    def __init__(
-        self, 
-        projects: List[Project], 
-        instructors: List[Instructor], 
-        config: HSConfig
-    ):
-        self.projects = {p.id: p for p in projects}
-        self.instructors = {i.id: i for i in instructors}
-        self.config = config
-        
-        self.faculty_ids = [
-            i.id for i in instructors 
-            if i.type == "instructor"
-        ]
-    
-    def repair(self, solution: HSSolution) -> None:
-        """Çözümü onar."""
-        self._repair_ps_assignments(solution)
-        self._fix_j2_placeholder(solution)
-        self._repair_j1_not_ps(solution)
-        self._repair_missing_j1(solution)
-        self._repair_class_ordering(solution)
-        self._repair_timeslot_conflicts(solution)
-        self._repair_missing_projects(solution)
-        self._repair_priority_order(solution)
-        
-        if self.config.workload_constraint_mode == WorkloadConstraintMode.SOFT_AND_HARD:
-            self._repair_workload_hard_limit(solution)
-        
-        self._repair_all_classes_used(solution)
-        self._repair_timeslot_conflicts(solution)
-        self._repair_all_classes_used(solution)
-        self._repair_timeslot_conflicts(solution)
-        
-        final_iterations = 0
-        while final_iterations < 50:
-            class_counts = defaultdict(int)
-            for a in solution.assignments:
-                class_counts[a.class_id] += 1
-            
-            used_count = len([c for c in range(solution.class_count) if class_counts.get(c, 0) > 0])
-            if used_count == solution.class_count:
-                break
-            
-            unused = [c for c in range(solution.class_count) if c not in class_counts]
-            if not unused:
-                break
-            
-            for unused_class in unused:
-                if class_counts:
-                    max_class = max(class_counts.keys(), key=lambda c: class_counts[c])
-                    assignments_in_max = [
-                        a for a in solution.assignments
-                        if a.class_id == max_class
-                    ]
-                    if assignments_in_max:
-                        assignment = assignments_in_max[-1]
-                        assignment.class_id = unused_class
-                        assignment.order_in_class = 0
-                        class_counts[max_class] -= 1
-                        class_counts[unused_class] = 1
-                        self._repair_class_ordering(solution)
-                else:
-                    if solution.assignments:
-                        solution.assignments[0].class_id = unused_class
-                        solution.assignments[0].order_in_class = 0
-            
-            final_iterations += 1
-        
-        self._fix_uniform_distribution(solution)
-    
-    def _fix_j2_placeholder(self, solution: HSSolution) -> None:
-        """J2 placeholder'ı düzelt."""
-        for assignment in solution.assignments:
-            if assignment.j2_label != self.config.j2_placeholder:
-                assignment.j2_label = self.config.j2_placeholder
-    
-    def _repair_ps_assignments(self, solution: HSSolution) -> None:
-        """Ensure PS matches project's advisor."""
-        for assignment in solution.assignments:
-            project = self.projects.get(assignment.project_id)
-            if project and assignment.ps_id != project.ps_id:
-                assignment.ps_id = project.ps_id
-    
-    def _repair_j1_not_ps(self, solution: HSSolution) -> None:
-        """Ensure J1 != PS."""
-        for assignment in solution.assignments:
-            if assignment.j1_id == assignment.ps_id:
-                available = [
-                    i for i in self.faculty_ids 
-                    if i != assignment.ps_id
-                ]
-                if available:
-                    assignment.j1_id = random.choice(available)
-    
-    def _repair_missing_j1(self, solution: HSSolution) -> None:
-        """Ensure all assignments have valid J1."""
-        for assignment in solution.assignments:
-            if assignment.j1_id not in self.faculty_ids or assignment.j1_id == assignment.ps_id:
-                available = [
-                    i for i in self.faculty_ids 
-                    if i != assignment.ps_id
-                ]
-                if available:
-                    assignment.j1_id = random.choice(available)
-    
-    def _repair_timeslot_conflicts(self, solution: HSSolution) -> None:
-        """Resolve timeslot conflicts."""
-        max_iterations = 200
-        
-        for iteration in range(max_iterations):
-            conflicts = self._find_timeslot_conflicts(solution)
-            if not conflicts:
-                return
-            
-            for conflict in conflicts:
-                self._resolve_timeslot_conflict(solution, conflict)
-                break
-    
-    def _find_timeslot_conflicts(self, solution: HSSolution) -> List[Dict]:
-        """Find all timeslot conflicts."""
-        conflicts = []
-        
-        instructor_schedule = defaultdict(lambda: defaultdict(list))
-        
-        for assignment in solution.assignments:
-            instructor_schedule[assignment.ps_id][assignment.order_in_class].append({
-                'assignment': assignment,
-                'class_id': assignment.class_id,
-                'role': 'PS'
-            })
-            instructor_schedule[assignment.j1_id][assignment.order_in_class].append({
-                'assignment': assignment,
-                'class_id': assignment.class_id,
-                'role': 'J1'
-            })
-        
-        for instructor_id, orders in instructor_schedule.items():
-            for order, entries in orders.items():
-                if len(entries) > 1:
-                    classes_at_this_slot = set(e['class_id'] for e in entries)
-                    if len(classes_at_this_slot) > 1:
-                        conflicts.append({
-                            'instructor_id': instructor_id,
-                            'order': order,
-                            'entries': entries,
-                            'classes': classes_at_this_slot
-                        })
-        
-        return conflicts
-    
-    def _resolve_timeslot_conflict(self, solution: HSSolution, conflict: Dict) -> None:
-        """Resolve a single timeslot conflict."""
-        instructor_id = conflict['instructor_id']
-        entries = conflict['entries']
-        
-        for entry in entries[1:]:
-            assignment = entry['assignment']
-            role = entry['role']
-            
-            if role == 'J1':
-                available = self._find_available_j1_at_slot(
-                    solution, assignment, assignment.order_in_class
-                )
-                if available:
-                    assignment.j1_id = random.choice(available)
-                    continue
-            
-            new_slot = self._find_free_slot_for_instructor(solution, instructor_id, assignment)
-            if new_slot:
-                assignment.class_id = new_slot['class_id']
-                assignment.order_in_class = new_slot['order']
-                self._repair_class_ordering(solution)
-            else:
-                class_loads = defaultdict(int)
-                for a in solution.assignments:
-                    class_loads[a.class_id] += 1
-                
-                min_class = min(range(solution.class_count), key=lambda c: class_loads.get(c, 0))
-                assignment.class_id = min_class
-                assignment.order_in_class = class_loads.get(min_class, 0)
-                
-                if role == 'PS':
-                    available_j1 = [
-                        i for i in self.faculty_ids
-                        if i != assignment.ps_id and i != instructor_id
-                    ]
-                    if available_j1:
-                        assignment.j1_id = random.choice(available_j1)
-                
-                self._repair_class_ordering(solution)
-    
-    def _find_available_j1_at_slot(
-        self, 
-        solution: HSSolution, 
-        assignment: ProjectAssignment, 
-        order: int
-    ) -> List[int]:
-        """Find J1 candidates who are free at the given timeslot."""
-        busy_at_slot = set()
-        for a in solution.assignments:
-            if a.order_in_class == order:
-                busy_at_slot.add(a.ps_id)
-                busy_at_slot.add(a.j1_id)
-        
-        available = [
-            i for i in self.faculty_ids
-            if i != assignment.ps_id and i not in busy_at_slot
-        ]
-        
-        return available
-    
-    def _find_free_slot_for_instructor(
-        self, 
-        solution: HSSolution, 
-        instructor_id: int, 
-        assignment: ProjectAssignment
-    ) -> Optional[Dict]:
-        """Find a timeslot where the instructor is free."""
-        busy_orders = set()
-        for a in solution.assignments:
-            if a.ps_id == instructor_id or a.j1_id == instructor_id:
-                busy_orders.add(a.order_in_class)
-        
-        class_counts = defaultdict(int)
-        for a in solution.assignments:
-            class_counts[a.class_id] += 1
-        
-        max_order = max(class_counts.values()) if class_counts else 0
-        
-        for order in range(max_order + 5):
-            if order not in busy_orders:
-                for class_id in range(solution.class_count):
-                    current_count = class_counts.get(class_id, 0)
-                    if order <= current_count:
-                        return {'class_id': class_id, 'order': order}
-        
-        return None
-    
-    def _repair_missing_projects(self, solution: HSSolution) -> None:
-        """Add any missing projects."""
-        project_list = list(self.projects.values())
-        assigned_ids = {a.project_id for a in solution.assignments}
-        
-        for project in project_list:
-            if project.id not in assigned_ids:
-                class_loads = defaultdict(int)
-                for a in solution.assignments:
-                    class_loads[a.class_id] += 1
-                
-                min_class = min(
-                    range(solution.class_count),
-                    key=lambda c: class_loads.get(c, 0)
-                )
-                
-                order = class_loads.get(min_class, 0)
-                available_j1 = [
-                    i for i in self.faculty_ids 
-                    if i != project.ps_id
-                ]
-                j1_id = random.choice(available_j1) if available_j1 else self.faculty_ids[0]
-                
-                assignment = ProjectAssignment(
-                    project_id=project.id,
-                    class_id=min_class,
-                    order_in_class=order,
-                    ps_id=project.ps_id,
-                    j1_id=j1_id,
-                    j2_label=self.config.j2_placeholder
-                )
-                solution.assignments.append(assignment)
-    
-    def _repair_priority_order(self, solution: HSSolution) -> None:
-        """Ensure priority order (ARA_ONCE / BITIRME_ONCE)."""
-        if self.config.priority_mode == PriorityMode.ESIT:
-            return
-        
-        interim = []
-        final = []
-        for a in solution.assignments:
-            project = self.projects.get(a.project_id)
-            if project:
-                if project.type in ["INTERIM", "interim", "ARA", "ara"]:
-                    interim.append(a)
-                else:
-                    final.append(a)
-        
-        if self.config.priority_mode == PriorityMode.ARA_ONCE:
-            first_group = interim
-            second_group = final
-        else:
-            first_group = final
-            second_group = interim
-        
-        all_sorted = first_group + second_group
-        projects_per_class = len(all_sorted) // solution.class_count
-        remainder = len(all_sorted) % solution.class_count
-        
-        idx = 0
-        for class_id in range(solution.class_count):
-            count = projects_per_class + (1 if class_id < remainder else 0)
-            for order in range(count):
-                if idx < len(all_sorted):
-                    all_sorted[idx].class_id = class_id
-                    all_sorted[idx].order_in_class = order
-                    idx += 1
-    
-    def _repair_workload_hard_limit(self, solution: HSSolution) -> None:
-        """Enforce hard workload limit B_max."""
-        num_projects = len(solution.assignments)
-        num_faculty = len(self.faculty_ids)
-        avg_workload = (2 * num_projects) / num_faculty if num_faculty > 0 else 0
-        
-        max_iterations = 50
-        
-        for _ in range(max_iterations):
-            workloads = defaultdict(int)
-            for a in solution.assignments:
-                workloads[a.ps_id] += 1
-                workloads[a.j1_id] += 1
-            
-            overloaded = [
-                i for i in self.faculty_ids
-                if abs(workloads.get(i, 0) - avg_workload) > self.config.workload_hard_limit
-            ]
-            
-            if not overloaded:
-                break
-            
-            instructor_id = overloaded[0]
-            
-            j1_assignments = [
-                a for a in solution.assignments 
-                if a.j1_id == instructor_id
-            ]
-            
-            if j1_assignments:
-                assignment = random.choice(j1_assignments)
-                
-                underloaded = [
-                    i for i in self.faculty_ids
-                    if i != assignment.ps_id and 
-                    workloads.get(i, 0) < avg_workload
-                ]
-                
-                if underloaded:
-                    assignment.j1_id = random.choice(underloaded)
-    
-    def _repair_all_classes_used(self, solution: HSSolution) -> None:
-        """Ensure ALL classes are used - CRITICAL HARD CONSTRAINT."""
-        max_iterations = 200
-        iteration = 0
-        
-        while iteration < max_iterations:
-            class_counts = defaultdict(int)
-            for a in solution.assignments:
-                class_counts[a.class_id] += 1
-            
-            unused_classes = [
-                c for c in range(solution.class_count)
-                if class_counts.get(c, 0) == 0
-            ]
-            
-            if not unused_classes:
-                used_count = len([c for c in range(solution.class_count) if class_counts.get(c, 0) > 0])
-                if used_count == solution.class_count:
-                    return
-            
-            if not class_counts:
-                for i, assignment in enumerate(solution.assignments):
-                    class_id = i % solution.class_count
-                    assignment.class_id = class_id
-                    assignment.order_in_class = i // solution.class_count
-                self._repair_class_ordering(solution)
-                return
-            
-            max_class = max(class_counts.keys(), key=lambda c: class_counts[c])
-            max_count = class_counts[max_class]
-            
-            if max_count > 1:
-                projects_to_move = [
-                    a for a in solution.assignments 
-                    if a.class_id == max_class
-                ]
-                
-                for unused_class in unused_classes:
-                    if not projects_to_move:
-                        break
-                    
-                    project_to_move = projects_to_move.pop()
-                    project_to_move.class_id = unused_class
-                    
-                    new_class_projects = [
-                        x for x in solution.assignments
-                        if x.class_id == unused_class and x.project_id != project_to_move.project_id
-                    ]
-                    project_to_move.order_in_class = len(new_class_projects)
-                    
-                    self._repair_class_ordering(solution)
-            else:
-                classes_with_projects = [
-                    c for c in class_counts.keys() 
-                    if class_counts[c] > 1
-                ]
-                
-                if classes_with_projects:
-                    min_class = min(classes_with_projects, key=lambda c: class_counts[c])
-                    projects_in_min = [
-                        a for a in solution.assignments 
-                        if a.class_id == min_class
-                    ]
-                    
-                    if projects_in_min:
-                        project_to_move = projects_in_min[-1]
-                        unused_class = unused_classes[0]
-                        
-                        project_to_move.class_id = unused_class
-                        
-                        new_class_projects = [
-                            x for x in solution.assignments
-                            if x.class_id == unused_class and x.project_id != project_to_move.project_id
-                        ]
-                        project_to_move.order_in_class = len(new_class_projects)
-                        
-                        self._repair_class_ordering(solution)
-                else:
-                    all_projects = list(solution.assignments)
-                    for i, unused_class in enumerate(unused_classes):
-                        if i < len(all_projects):
-                            project_to_move = all_projects[i]
-                            project_to_move.class_id = unused_class
-                            project_to_move.order_in_class = 0
-                            self._repair_class_ordering(solution)
-            
-            iteration += 1
-        
-        class_counts = defaultdict(int)
-        for a in solution.assignments:
-            class_counts[a.class_id] += 1
-        
-        unused_classes = [
-            c for c in range(solution.class_count)
-            if class_counts.get(c, 0) == 0
-        ]
-        
-        if unused_classes:
-            assignments_by_class = defaultdict(list)
-            for a in solution.assignments:
-                assignments_by_class[a.class_id].append(a)
-            
-            sorted_classes = sorted(
-                assignments_by_class.keys(),
-                key=lambda c: len(assignments_by_class[c]),
-                reverse=True
-            )
-            
-            for unused_class in unused_classes:
-                moved = False
-                
-                for max_class in sorted_classes:
-                    if max_class == unused_class:
-                        continue
-                    
-                    projects_in_max = assignments_by_class[max_class]
-                    if len(projects_in_max) > 1:
-                        project = projects_in_max[-1]
-                        project.class_id = unused_class
-                        project.order_in_class = 0
-                        assignments_by_class[max_class].remove(project)
-                        assignments_by_class[unused_class].append(project)
-                        class_counts[max_class] -= 1
-                        class_counts[unused_class] = 1
-                        moved = True
-                        break
-                
-                if not moved:
-                    for max_class in sorted_classes:
-                        if max_class == unused_class:
-                            continue
-                        projects_in_max = assignments_by_class[max_class]
-                        if projects_in_max:
-                            project = projects_in_max[-1]
-                            project.class_id = unused_class
-                            project.order_in_class = 0
-                            assignments_by_class[max_class].remove(project)
-                            assignments_by_class[unused_class].append(project)
-                            class_counts[max_class] -= 1
-                            class_counts[unused_class] = 1
-                            break
-            
-            self._repair_class_ordering(solution)
-        
-        class_counts = defaultdict(int)
-        for a in solution.assignments:
-            class_counts[a.class_id] += 1
-        
-        unused_classes = [
-            c for c in range(solution.class_count)
-            if class_counts.get(c, 0) == 0
-        ]
-        
-        if unused_classes:
-            all_assignments = list(solution.assignments)
-            for i, assignment in enumerate(all_assignments):
-                target_class = i % solution.class_count
-                assignment.class_id = target_class
-                assignment.order_in_class = i // solution.class_count
-            
-            self._repair_class_ordering(solution)
-    
-    def _repair_class_ordering(self, solution: HSSolution) -> None:
-        """Ensure back-to-back ordering within classes."""
-        for class_id in range(solution.class_count):
-            class_assignments = [
-                a for a in solution.assignments 
-                if a.class_id == class_id
-            ]
-            class_assignments.sort(key=lambda x: x.order_in_class)
-            
-            for i, assignment in enumerate(class_assignments):
-                assignment.order_in_class = i
-    
-    def _fix_uniform_distribution(self, solution: HSSolution) -> None:
-        """Uniform dağılımı düzelt (±3 bandı)."""
-        num_projects = len(solution.assignments)
-        if num_projects == 0:
-            return
-        
-        target_per_class = num_projects / solution.class_count
-        tolerance = self.config.uniform_distribution_tolerance
-        
-        max_iterations = 100
-        for iteration in range(max_iterations):
-            class_loads = defaultdict(int)
-            assignments_by_class = defaultdict(list)
-            for a in solution.assignments:
-                class_loads[a.class_id] += 1
-                assignments_by_class[a.class_id].append(a)
-            
-            overloaded_classes = []
-            underloaded_classes = []
-            
-            for class_id in range(solution.class_count):
-                load = class_loads.get(class_id, 0)
-                deviation = load - target_per_class
-                
-                if deviation > tolerance:
-                    overloaded_classes.append((class_id, load))
-                elif deviation < -tolerance:
-                    underloaded_classes.append((class_id, load))
-            
-            if not overloaded_classes and not underloaded_classes:
-                break
-            
-            if overloaded_classes and underloaded_classes:
-                overloaded_classes.sort(key=lambda x: x[1], reverse=True)
-                max_class_id, max_load = overloaded_classes[0]
-                
-                underloaded_classes.sort(key=lambda x: x[1])
-                min_class_id, min_load = underloaded_classes[0]
-                
-                if max_load > 1 and assignments_by_class[max_class_id]:
-                    assignment = assignments_by_class[max_class_id][-1]
-                    assignment.class_id = min_class_id
-                    assignment.order_in_class = len(assignments_by_class[min_class_id])
-                    
-                    assignments_by_class[max_class_id].remove(assignment)
-                    assignments_by_class[min_class_id].append(assignment)
-                    
-                    self._repair_class_ordering(solution)
-                else:
-                    break
-            else:
-                break
-        
-        self._repair_class_ordering(solution)
-
-
-# ============================================================================
-# HARMONY MEMORY
-# ============================================================================
-
-class HarmonyMemory:
-    """
-    Harmony Memory - Çözümlerin saklandığı bellek yapısı.
-    """
-    
-    def __init__(self, size: int, config: HSConfig):
-        self.size = size
-        self.config = config
-        self.harmonies: List[HSSolution] = []
-    
-    def initialize_with_solutions(self, solutions: List[HSSolution]) -> None:
-        """Memory'yi başlangıç çözümleriyle doldur."""
-        self.harmonies = sorted(solutions, key=lambda x: x.total_cost)[:self.size]
-    
-    def add(self, solution: HSSolution) -> bool:
-        """Yeni çözümü memory'ye ekle (eğer yeterince iyi ise)."""
-        if len(self.harmonies) < self.size:
-            self.harmonies.append(solution.copy())
-            self.harmonies.sort(key=lambda x: x.total_cost)
-            return True
-        
-        worst = self.harmonies[-1]
-        if solution.total_cost < worst.total_cost:
-            self.harmonies[-1] = solution.copy()
-            self.harmonies.sort(key=lambda x: x.total_cost)
-            return True
-        
-        return False
-    
-    def get_best(self) -> Optional[HSSolution]:
-        """En iyi çözümü getir."""
-        if self.harmonies:
-            return self.harmonies[0]
-        return None
-    
-    def get_worst(self) -> Optional[HSSolution]:
-        """En kötü çözümü getir."""
-        if self.harmonies:
-            return self.harmonies[-1]
-        return None
-    
-    def get_random(self) -> Optional[HSSolution]:
-        """Rastgele bir çözüm getir."""
-        if self.harmonies:
-            return random.choice(self.harmonies)
-        return None
-    
-    def get_value_for_project(self, project_id: int, attribute: str) -> Optional[Any]:
-        """Belirli bir proje için rastgele bir harmoni'den değer getir."""
-        if not self.harmonies:
-            return None
-        
-        harmony = random.choice(self.harmonies)
-        assignment = harmony.get_assignment(project_id)
-        
-        if assignment:
-            return getattr(assignment, attribute, None)
-        return None
-
-
-# ============================================================================
-# HS SCHEDULER
-# ============================================================================
-
-class HSScheduler:
-    """
-    Harmony Search Scheduler - Ana optimizasyon motoru.
-    """
-    
-    def __init__(self, config: HSConfig):
-        self.config = config
-        self.projects: List[Project] = []
-        self.instructors: List[Instructor] = []
-        self.penalty_calculator: Optional[HSPenaltyCalculator] = None
-        self.repair_mechanism: Optional[HSRepairMechanism] = None
-        self.harmony_memory: Optional[HarmonyMemory] = None
-        
-        self.best_solution: Optional[HSSolution] = None
-        self.best_cost: float = float('inf')
-        
-        self.iteration_history: List[float] = []
-        self.stagnation_counter: int = 0
-        self.faculty_ids: List[int] = []
-    
-    def initialize(self, data: Dict[str, Any]) -> None:
-        """Scheduler'ı başlat."""
-        raw_projects = data.get("projects", [])
-        self.projects = []
-        
-        for p in raw_projects:
-            project = Project(
-                id=p.get("id"),
-                title=p.get("title", ""),
-                type=str(p.get("type", "interim")).lower(),
-                ps_id=p.get("responsible_id"),
-                is_makeup=p.get("is_makeup", False)
-            )
-            self.projects.append(project)
-        
-        raw_instructors = data.get("instructors", [])
-        self.instructors = []
-        
-        for i in raw_instructors:
-            instructor = Instructor(
-                id=i.get("id"),
-                name=i.get("name", ""),
-                type=i.get("type", "instructor")
-            )
-            self.instructors.append(instructor)
-        
-        self.faculty_ids = [
-            i.id for i in self.instructors 
-            if i.type == "instructor"
-        ]
-        
-        self.penalty_calculator = HSPenaltyCalculator(
-            self.projects, self.instructors, self.config
-        )
-        
-        self.repair_mechanism = HSRepairMechanism(
-            self.projects, self.instructors, self.config
-        )
-        
-        self.harmony_memory = HarmonyMemory(self.config.harmony_memory_size, self.config)
-        
-        self.best_solution = None
-        self.best_cost = float('inf')
-        self.iteration_history = []
-        self.stagnation_counter = 0
-    
-    def run(self) -> HSSolution:
-        """Ana optimizasyon döngüsü."""
-        start_time = time.time()
-        
-        initial_solutions = self._initialize_harmony_memory()
-        self.harmony_memory.initialize_with_solutions(initial_solutions)
-        
-        best = self.harmony_memory.get_best()
-        if best:
-            self.best_solution = best.copy()
-            self.best_cost = best.total_cost
-        
-        for iteration in range(self.config.max_iterations):
-            if time.time() - start_time > self.config.time_limit:
-                logger.info(f"Zaman limiti aşıldı: {self.config.time_limit}s")
-                break
-            
-            par, bw = self._get_dynamic_params(iteration)
-            
-            new_harmony = self._improvise(par, bw)
-            
-            self.repair_mechanism.repair(new_harmony)
-            self._force_all_classes_used(new_harmony)
-            
-            self.penalty_calculator.calculate_total_cost(new_harmony)
-            
-            if self.config.use_local_search and random.random() < 0.3:
-                new_harmony = self._local_search(new_harmony)
-            
-            self.harmony_memory.add(new_harmony)
-            
-            if new_harmony.total_cost < self.best_cost:
-                self.best_solution = new_harmony.copy()
-                self.best_cost = new_harmony.total_cost
-                self.stagnation_counter = 0
-            else:
-                self.stagnation_counter += 1
-            
-            self.iteration_history.append(self.best_cost)
-            
-            if self.stagnation_counter >= self.config.stagnation_limit:
-                logger.info(f"Stagnation limit ({self.config.stagnation_limit}) aşıldı")
-                self._diversify_memory()
-                self.stagnation_counter = 0
-            
-            if (iteration + 1) % 50 == 0:
-                logger.info(f"Iteration {iteration + 1}: Best cost = {self.best_cost:.2f}")
-        
-        # Ensure we have a valid solution
-        if not self.best_solution:
-            # Try to get best from memory
-            best_from_memory = self.harmony_memory.get_best()
-            if best_from_memory:
-                self.best_solution = best_from_memory.copy()
-                self.best_cost = best_from_memory.total_cost
-            else:
-                # Create a default solution if nothing is available
-                logger.warning("No solution found, creating default solution")
-                self.best_solution = self._create_random_solution()
-                self.repair_mechanism.repair(self.best_solution)
-                self._force_all_classes_used(self.best_solution)
-                self.penalty_calculator.calculate_total_cost(self.best_solution)
-                self.best_cost = self.best_solution.total_cost
-        
-        # Final repair and cost calculation
-        if self.best_solution:
-            self._force_all_classes_used(self.best_solution)
-            self.repair_mechanism.repair(self.best_solution)
-            self.penalty_calculator.calculate_total_cost(self.best_solution)
-            self.best_cost = self.best_solution.total_cost
-        
-        if not self.best_solution:
-            raise ValueError("Failed to generate a valid solution")
-        
-        return self.best_solution
-    
-    def _get_dynamic_params(self, iteration: int) -> Tuple[float, float]:
-        """Dinamik PAR ve BW parametrelerini hesapla."""
-        if not self.config.use_dynamic_params:
-            return self.config.par, self.config.bw
-        
-        progress = iteration / self.config.max_iterations
-        
-        par = self.config.par_max - (self.config.par_max - self.config.par_min) * progress
-        bw = self.config.bw_max * math.exp(-3 * progress)
-        bw = max(self.config.bw_min, bw)
-        
-        return par, bw
-    
-    def _initialize_harmony_memory(self) -> List[HSSolution]:
-        """Başlangıç harmony memory'sini oluştur."""
-        solutions = []
-        
-        for i in range(self.config.harmony_memory_size):
-            solution = self._create_random_solution()
-            self.repair_mechanism.repair(solution)
-            self._force_all_classes_used(solution)
-            self.penalty_calculator.calculate_total_cost(solution)
-            solutions.append(solution)
-        
-        return solutions
-    
-    def _create_random_solution(self) -> HSSolution:
-        """Rastgele bir çözüm oluştur."""
-        solution = HSSolution(class_count=self.config.class_count)
-        
-        sorted_projects = self._sort_projects_by_priority()
-        
-        class_loads = [0] * self.config.class_count
-        used_classes = set()
-        
-        all_projects = list(sorted_projects)
-        
-        if len(all_projects) >= self.config.class_count:
-            for class_id in range(self.config.class_count):
-                project = all_projects[class_id]
-                
-                available_j1 = [
-                    i for i in self.faculty_ids 
-                    if i != project.ps_id
-                ]
-                j1_id = random.choice(available_j1) if available_j1 else self.faculty_ids[0]
-                
-                assignment = ProjectAssignment(
-                    project_id=project.id,
-                    class_id=class_id,
-                    order_in_class=0,
-                    ps_id=project.ps_id,
-                    j1_id=j1_id,
-                    j2_label=self.config.j2_placeholder
-                )
-                solution.assignments.append(assignment)
-                class_loads[class_id] = 1
-                used_classes.add(class_id)
-        
-        remaining_projects = all_projects[self.config.class_count:] if len(all_projects) > self.config.class_count else []
-        
-        for project in remaining_projects:
-            unused = [c for c in range(self.config.class_count) if c not in used_classes]
-            if unused:
-                class_id = random.choice(unused)
-            else:
-                class_id = min(range(self.config.class_count), key=lambda c: class_loads[c])
-            
-            available_j1 = [
-                i for i in self.faculty_ids 
-                if i != project.ps_id
-            ]
-            j1_id = random.choice(available_j1) if available_j1 else self.faculty_ids[0]
-            
-            assignment = ProjectAssignment(
-                project_id=project.id,
-                class_id=class_id,
-                order_in_class=class_loads[class_id],
-                ps_id=project.ps_id,
-                j1_id=j1_id,
-                j2_label=self.config.j2_placeholder
-            )
-            solution.assignments.append(assignment)
-            class_loads[class_id] += 1
-            used_classes.add(class_id)
-        
-        return solution
-    
-    def _sort_projects_by_priority(self) -> List[Project]:
-        """Projeleri öncelik moduna göre sırala."""
-        projects = list(self.projects)
-        
-        if self.config.priority_mode == PriorityMode.ARA_ONCE:
-            interim = [p for p in projects if p.type in ["interim", "ara"]]
-            final = [p for p in projects if p.type not in ["interim", "ara"]]
-            random.shuffle(interim)
-            random.shuffle(final)
-            return interim + final
-        elif self.config.priority_mode == PriorityMode.BITIRME_ONCE:
-            interim = [p for p in projects if p.type in ["interim", "ara"]]
-            final = [p for p in projects if p.type not in ["interim", "ara"]]
-            random.shuffle(interim)
-            random.shuffle(final)
-            return final + interim
-        else:
-            random.shuffle(projects)
-            return projects
-    
-    def _improvise(self, par: float, bw: float) -> HSSolution:
-        """Yeni bir harmony (çözüm) oluştur."""
-        new_solution = HSSolution(class_count=self.config.class_count)
-        
-        class_loads = [0] * self.config.class_count
-        used_classes = set()
-        
-        for class_id in range(self.config.class_count):
-            if class_id < len(self.projects):
-                project = self.projects[class_id]
-                
-                if random.random() < self.config.hmcr:
-                    class_id_val = self.harmony_memory.get_value_for_project(project.id, 'class_id')
-                    if class_id_val is not None and class_id_val not in used_classes:
-                        assigned_class = class_id_val
-                    else:
-                        assigned_class = class_id
-                else:
-                    assigned_class = class_id
-                
-                available_j1 = [
-                    i for i in self.faculty_ids 
-                    if i != project.ps_id
-                ]
-                j1_id = random.choice(available_j1) if available_j1 else self.faculty_ids[0]
-                
-                assignment = ProjectAssignment(
-                    project_id=project.id,
-                    class_id=assigned_class,
-                    order_in_class=class_loads[assigned_class],
-                    ps_id=project.ps_id,
-                    j1_id=j1_id,
-                    j2_label=self.config.j2_placeholder
-                )
-                new_solution.assignments.append(assignment)
-                class_loads[assigned_class] += 1
-                used_classes.add(assigned_class)
-        
-        remaining_projects = self.projects[self.config.class_count:] if len(self.projects) > self.config.class_count else []
-        
-        for project in remaining_projects:
-            if random.random() < self.config.hmcr:
-                class_id = self.harmony_memory.get_value_for_project(project.id, 'class_id')
-                j1_id = self.harmony_memory.get_value_for_project(project.id, 'j1_id')
-                
-                if class_id is None:
-                    class_id = random.randint(0, self.config.class_count - 1)
-                if j1_id is None or j1_id == project.ps_id:
-                    available_j1 = [i for i in self.faculty_ids if i != project.ps_id]
-                    j1_id = random.choice(available_j1) if available_j1 else self.faculty_ids[0]
-                
-                if random.random() < par:
-                    if random.random() < 0.5:
-                        delta = int(bw * self.config.class_count)
-                        delta = max(1, delta)
-                        class_id = (class_id + random.randint(-delta, delta)) % self.config.class_count
-                    
-                    if random.random() < 0.5 and len(self.faculty_ids) > 1:
-                        available_j1 = [i for i in self.faculty_ids if i != project.ps_id]
-                        if available_j1:
-                            j1_id = random.choice(available_j1)
-            else:
-                class_id = random.randint(0, self.config.class_count - 1)
-                available_j1 = [i for i in self.faculty_ids if i != project.ps_id]
-                j1_id = random.choice(available_j1) if available_j1 else self.faculty_ids[0]
-            
-            assignment = ProjectAssignment(
-                project_id=project.id,
-                class_id=class_id,
-                order_in_class=class_loads[class_id],
-                ps_id=project.ps_id,
-                j1_id=j1_id,
-                j2_label=self.config.j2_placeholder
-            )
-            new_solution.assignments.append(assignment)
-            class_loads[class_id] += 1
-            used_classes.add(class_id)
-        
-        return new_solution
-    
-    def _local_search(self, solution: HSSolution) -> HSSolution:
-        """Local search ile çözümü iyileştir."""
-        best = solution.copy()
-        best_cost = best.total_cost
-        
-        for _ in range(self.config.local_search_iterations):
-            neighbor = best.copy()
-            
-            move_type = random.choice(['swap_class', 'swap_j1', 'move_project'])
-            
-            if move_type == 'swap_class' and len(neighbor.assignments) >= 2:
-                a1, a2 = random.sample(neighbor.assignments, 2)
-                a1.class_id, a2.class_id = a2.class_id, a1.class_id
-            
-            elif move_type == 'swap_j1' and len(neighbor.assignments) >= 2:
-                a1, a2 = random.sample(neighbor.assignments, 2)
-                if a1.j1_id != a2.ps_id and a2.j1_id != a1.ps_id:
-                    a1.j1_id, a2.j1_id = a2.j1_id, a1.j1_id
-            
-            elif move_type == 'move_project' and neighbor.assignments:
-                assignment = random.choice(neighbor.assignments)
-                new_class = random.randint(0, self.config.class_count - 1)
-                assignment.class_id = new_class
-            
-            self.repair_mechanism.repair(neighbor)
-            self._force_all_classes_used(neighbor)
-            self.penalty_calculator.calculate_total_cost(neighbor)
-            
-            if neighbor.total_cost < best_cost:
-                best = neighbor
-                best_cost = neighbor.total_cost
-        
-        return best
-    
-    def _diversify_memory(self) -> None:
-        """Memory'yi çeşitlendir (stagnation durumunda)."""
-        num_to_replace = max(1, self.config.harmony_memory_size // 4)
-        
-        for _ in range(num_to_replace):
-            new_solution = self._create_random_solution()
-            self.repair_mechanism.repair(new_solution)
-            self._force_all_classes_used(new_solution)
-            self.penalty_calculator.calculate_total_cost(new_solution)
-            
-            if self.harmony_memory.harmonies:
-                worst_idx = len(self.harmony_memory.harmonies) - 1
-                if new_solution.total_cost < self.harmony_memory.harmonies[worst_idx].total_cost:
-                    self.harmony_memory.harmonies[worst_idx] = new_solution
-                    self.harmony_memory.harmonies.sort(key=lambda x: x.total_cost)
-    
-    def _force_all_classes_used(self, solution: HSSolution) -> None:
-        """Tüm sınıfların kullanılmasını garanti et."""
-        solution.class_count = self.config.class_count
-        
-        max_iterations = 1000
-        
-        for iteration in range(max_iterations):
-            class_counts = defaultdict(int)
-            for a in solution.assignments:
-                class_counts[a.class_id] += 1
-            
-            unused_classes = [
-                c for c in range(solution.class_count)
-                if class_counts.get(c, 0) == 0
-            ]
-            
-            if not unused_classes:
-                used_count = len([c for c in range(solution.class_count) if class_counts.get(c, 0) > 0])
-                if used_count == solution.class_count:
-                    for class_id in range(solution.class_count):
-                        class_assignments = [
-                            a for a in solution.assignments if a.class_id == class_id
-                        ]
-                        class_assignments.sort(key=lambda x: x.order_in_class)
-                        for i, a in enumerate(class_assignments):
-                            a.order_in_class = i
-                    return
-            
-            assignments_by_class = defaultdict(list)
-            for a in solution.assignments:
-                assignments_by_class[a.class_id].append(a)
-            
-            sorted_classes = sorted(
-                assignments_by_class.keys(),
-                key=lambda c: len(assignments_by_class[c]),
-                reverse=True
-            )
-            
-            for unused_class in unused_classes:
-                moved = False
-                
-                for max_class in sorted_classes:
-                    if max_class == unused_class:
-                        continue
-                    
-                    assignments_in_max = assignments_by_class[max_class]
-                    if len(assignments_in_max) > 0:
-                        assignment = assignments_in_max[-1]
-                        assignment.class_id = unused_class
-                        assignment.order_in_class = 0
-                        assignments_by_class[max_class].remove(assignment)
-                        assignments_by_class[unused_class].append(assignment)
-                        moved = True
-                        break
-                
-                if not moved:
-                    if solution.assignments:
-                        for assignment in solution.assignments:
-                            if assignment.class_id != unused_class:
-                                old_class = assignment.class_id
-                                assignment.class_id = unused_class
-                                assignment.order_in_class = 0
-                                if old_class in assignments_by_class:
-                                    if assignment in assignments_by_class[old_class]:
-                                        assignments_by_class[old_class].remove(assignment)
-                                assignments_by_class[unused_class].append(assignment)
-                                moved = True
-                                break
-                
-                if not moved and solution.assignments:
-                    solution.assignments[0].class_id = unused_class
-                    solution.assignments[0].order_in_class = 0
-            
-            for class_id in range(solution.class_count):
-                class_assignments = [
-                    a for a in solution.assignments if a.class_id == class_id
-                ]
-                class_assignments.sort(key=lambda x: x.order_in_class)
-                for i, a in enumerate(class_assignments):
-                    a.order_in_class = i
-        
-        class_counts = defaultdict(int)
-        for a in solution.assignments:
-            class_counts[a.class_id] += 1
-        
-        unused_classes = [
-            c for c in range(solution.class_count)
-            if class_counts.get(c, 0) == 0
-        ]
-        
-        if unused_classes:
-            for i, assignment in enumerate(solution.assignments):
-                target_class = i % solution.class_count
-                assignment.class_id = target_class
-                assignment.order_in_class = i // solution.class_count
-            
-            for class_id in range(solution.class_count):
-                class_assignments = [
-                    a for a in solution.assignments if a.class_id == class_id
-                ]
-                class_assignments.sort(key=lambda x: x.order_in_class)
-                for i, a in enumerate(class_assignments):
-                    a.order_in_class = i
-
-
-# ============================================================================
-# MAIN HARMONY SEARCH ALGORITHM CLASS
-# ============================================================================
 
 class HarmonySearch(OptimizationAlgorithm):
     """
-    Harmony Search (HS) - Çok Kriterli Akademik Proje Planlama.
+    Harmony Search Algorithm - Süreklilik ve İş Yükü Odaklı
+    ARA PROJELER ÖNCELİKLİ (PSO'nun tersi)
     """
-    
+
     def __init__(self, params: Dict[str, Any] = None):
         super().__init__(params)
         params = params or {}
         
-        self.config = HSConfig(
-            harmony_memory_size=params.get("harmony_memory_size", 30),
-            max_iterations=params.get("max_iterations", 500),
-            hmcr=params.get("hmcr", 0.9),
-            par=params.get("par", 0.3),
-            bw=params.get("bw", 0.2),
-            use_dynamic_params=params.get("use_dynamic_params", True),
-            use_local_search=params.get("use_local_search", True),
-            local_search_iterations=params.get("local_search_iterations", 20),
-            stagnation_limit=params.get("stagnation_limit", 50),
-            time_limit=params.get("time_limit", 300),
-            class_count=params.get("class_count", 6),
-            auto_class_count=params.get("auto_class_count", True),
-            priority_mode=PriorityMode(params.get("priority_mode", "ESIT")),
-            time_penalty_mode=TimePenaltyMode(params.get("time_penalty_mode", "GAP_PROPORTIONAL")),
-            workload_constraint_mode=WorkloadConstraintMode(
-                params.get("workload_constraint_mode", "SOFT_ONLY")
-            ),
-            workload_hard_limit=params.get("workload_hard_limit", 4),
-            workload_soft_band=params.get("workload_soft_band", 2),
-            weight_h1=params.get("weight_h1", 10.0),  # Real Simplex/GA standart
-            weight_h2=params.get("weight_h2", 100.0),  # Real Simplex/GA standart (en kritik)
-            weight_h3=params.get("weight_h3", 5.0),    # Real Simplex/GA standart
-            weight_h4=params.get("weight_h4", 0.5),    # Opsiyonel (artık amaç fonksiyonunda kullanılmıyor)
-            uniform_distribution_tolerance=params.get("uniform_distribution_tolerance", 3),
-            weight_uniform_distribution=params.get("weight_uniform_distribution", 50.0)
-        )
+        # HS Parametreleri (PSO ile aynı mantık)
+        self.n_particles = params.get("n_particles", 40)
+        self.n_iterations = params.get("n_iterations", 300)
+        self.inertia_weight = params.get("inertia_weight", 0.5)
+        self.cognitive_weight = params.get("cognitive_weight", 2.0)
+        self.social_weight = params.get("social_weight", 2.0)
         
-        self.projects: List[Project] = []
-        self.instructors: List[Instructor] = []
-        self.classrooms: List[Dict[str, Any]] = []
-        self.timeslots: List[Dict[str, Any]] = []
+        # Ceza Katsayıları - İŞ YÜKÜ DENGESİ EN ÖNEMLİ!
+        self.C1 = params.get("time_penalty_weight", 15.0)
+        self.C2 = params.get("workload_penalty_weight", 50.0)
+        self.C3 = params.get("class_change_penalty_weight", 10.0)
         
-        self.scheduler: Optional[HSScheduler] = None
+        time_mode = params.get("time_penalty_mode", "gap_proportional")
+        self.time_penalty_mode = TimePenaltyMode(time_mode) if isinstance(time_mode, str) else time_mode
         
-        self.best_solution: Optional[HSSolution] = None
-        self.best_cost: float = float('inf')
-    
-    def initialize(self, data: Dict[str, Any]) -> None:
-        """Algoritmayı başlangıç verileri ile başlatır."""
-        self._load_data(data)
+        self.workload_tolerance = params.get("workload_tolerance", 2)
         
-        self.scheduler = HSScheduler(self.config)
-        self.scheduler.initialize(data)
-        
-        self.best_solution = None
-        self.best_cost = float('inf')
-    
-    def _load_data(self, data: Dict[str, Any]) -> None:
-        """Verileri yükle ve dönüştür."""
-        raw_projects = data.get("projects", [])
+        # Veri
         self.projects = []
-        
-        for p in raw_projects:
-            project = Project(
-                id=p.get("id"),
-                title=p.get("title", ""),
-                type=str(p.get("type", "interim")).lower(),
-                ps_id=p.get("responsible_id"),
-                is_makeup=p.get("is_makeup", False)
-            )
-            self.projects.append(project)
-        
-        raw_instructors = data.get("instructors", [])
         self.instructors = []
-        
-        for i in raw_instructors:
-            instructor = Instructor(
-                id=i.get("id"),
-                name=i.get("name", ""),
-                type=i.get("type", "instructor")
-            )
-            self.instructors.append(instructor)
-        
+        self.classrooms = []
+        self.timeslots = []
+        self.sorted_timeslots = []
+        self.timeslot_order = {}
+        self.instructor_ids = []
+        self.instructor_id_set = set()
+
+    def _safe_int(self, val) -> Optional[int]:
+        if val is None:
+            return None
+        try:
+            return int(float(val))
+        except (ValueError, TypeError):
+            return None
+
+    def initialize(self, data: Dict[str, Any]) -> None:
+        self.data = data
+        self.projects = data.get("projects", [])
+        self.instructors = data.get("instructors", [])
         self.classrooms = data.get("classrooms", [])
         self.timeslots = data.get("timeslots", [])
         
-        if self.classrooms and len(self.classrooms) > 0:
-            available_class_count = len(self.classrooms)
-            if self.config.auto_class_count or self.config.class_count != available_class_count:
-                self.config.class_count = available_class_count
-                logger.info(f"Sınıf sayısı {available_class_count} olarak ayarlandı")
-    
-    def optimize(self, data: Dict[str, Any] = None) -> Dict[str, Any]:
-        """HS'yi çalıştırır."""
-        start_time = time.time()
+        # Instructor ID'leri temizle
+        self.instructor_ids = []
+        self.instructor_id_set = set()
+        for inst in self.instructors:
+            iid = self._safe_int(inst.get("id"))
+            if iid is not None and iid not in self.instructor_id_set:
+                self.instructor_ids.append(iid)
+                self.instructor_id_set.add(iid)
         
+        # Timeslotları sırala
+        self.sorted_timeslots = sorted(
+            self.timeslots,
+            key=lambda x: self._parse_time_to_minutes(x.get("start_time", "09:00"))
+        )
+        
+        # Timeslot sıra numarası (süreklilik hesabı için)
+        self.timeslot_order = {}
+        for idx, ts in enumerate(self.sorted_timeslots):
+            ts_id = self._safe_int(ts.get("id"))
+            if ts_id is not None:
+                self.timeslot_order[ts_id] = idx
+        
+        logger.info(f"HS Init: {len(self.projects)} projects, {len(self.instructor_ids)} instructors, "
+                   f"{len(self.classrooms)} classrooms, {len(self.sorted_timeslots)} timeslots")
+
+    def _parse_time_to_minutes(self, time_str) -> int:
+        if not time_str:
+            return 0
         try:
-            if data:
-                self.initialize(data)
-            
-            if not self.scheduler:
-                raise ValueError("Scheduler not initialized. Call initialize() first.")
-            
-            if self.classrooms and len(self.classrooms) > 0:
-                result = self._run_hs()
-            elif self.config.auto_class_count:
-                best_result = None
-                best_overall_cost = float('inf')
-                
-                for class_count in [5, 6, 7]:
-                    logger.info(f"Sınıf sayısı {class_count} ile çalıştırılıyor...")
-                    self.config.class_count = class_count
-                    
-                    self.scheduler = HSScheduler(self.config)
-                    self.scheduler.initialize({
-                        "projects": [{"id": p.id, "title": p.title, "type": p.type, 
-                                     "responsible_id": p.ps_id, "is_makeup": p.is_makeup} 
-                                    for p in self.projects],
-                        "instructors": [{"id": i.id, "name": i.name, "type": i.type} 
-                                       for i in self.instructors],
-                        "classrooms": self.classrooms,
-                        "timeslots": self.timeslots
-                    })
-                    
-                    result = self._run_hs()
-                    
-                    if result and result.get('solution') and result.get('cost', float('inf')) < best_overall_cost:
-                        best_overall_cost = result['cost']
-                        best_result = result
-                
-                if best_result is None:
-                    raise ValueError("No valid solution found for any class count")
-                
-                result = best_result
-            else:
-                result = self._run_hs()
-            
-            # Result validation
-            if not result:
-                raise ValueError("HS algorithm returned None result")
-            
-            if not result.get('solution'):
-                raise ValueError("HS algorithm returned solution as None")
-            
-            solution = result['solution']
-            
-            # Final repair and validation (tek sefer, maksimum 2 iterasyon)
-            repair_iterations = 0
-            max_repair_iterations = 2
-            while repair_iterations < max_repair_iterations:
-                if self.scheduler:
-                    self.scheduler._force_all_classes_used(solution)
-                    self.scheduler.repair_mechanism.repair(solution)
-                
-                class_counts = defaultdict(int)
-                for a in solution.assignments:
-                    class_counts[a.class_id] += 1
-                
-                used_count = len([c for c in range(solution.class_count) if class_counts.get(c, 0) > 0])
-                if used_count == solution.class_count:
-                    break
-                
-                repair_iterations += 1
-            
-            if self.scheduler and self.scheduler.penalty_calculator:
-                solution.total_cost = self.scheduler.penalty_calculator.calculate_total_cost(solution)
-                result['cost'] = solution.total_cost
-            
-            schedule = self._convert_solution_to_schedule(solution)
-            
-            classes_in_schedule = set()
-            for item in schedule:
-                class_id = item.get("class_id", item.get("classroom_id"))
-                if class_id is not None:
-                    classes_in_schedule.add(class_id)
-            
-            # Schedule'da eksik sinif varsa, sadece uyari ver (sonsuz dongu onleme)
-            if len(classes_in_schedule) < solution.class_count:
-                logger.warning(f"WARNING: Only {len(classes_in_schedule)} classes in schedule (expected {solution.class_count})")
-                # Gereksiz repair dongusunu kaldir - optimize metodunda zaten yapiliyor
-            
-            penalty_breakdown = {}
-            if self.scheduler and self.scheduler.penalty_calculator:
-                try:
-                    penalty_breakdown = {
-                        'h1_time_penalty': self.scheduler.penalty_calculator.calculate_h1_gap_penalty(solution),
-                        'h2_workload_penalty': self.scheduler.penalty_calculator.calculate_h2_workload_penalty(solution),
-                        'h3_class_change_penalty': self.scheduler.penalty_calculator.calculate_h3_class_change_penalty(solution),
-                        'h4_class_load_penalty': self.scheduler.penalty_calculator.calculate_h4_class_load_penalty(solution),
-                        'unused_class_penalty': self.scheduler.penalty_calculator.calculate_unused_class_penalty(solution),
-                        'uniform_distribution_penalty': self.scheduler.penalty_calculator.calculate_uniform_distribution_penalty(solution)
-                    }
-                except Exception as e:
-                    logger.warning(f"Error calculating penalty breakdown: {e}")
-                    penalty_breakdown = {}
-            
-            end_time = time.time()
-            
-            # Ensure status is always "completed" if we have a valid solution
-            final_status = "completed"
-            if not schedule or len(schedule) == 0:
-                # Eğer schedule boşsa, yine de "completed" olarak işaretle
-                # çünkü algoritma çalıştı ve sonuç döndü (boş olsa bile)
-                final_status = "completed"
-            
-            return {
-                "schedule": schedule,
-                "assignments": schedule,
-                "solution": schedule,
-                "fitness": -result.get('cost', 0.0),
-                "cost": result.get('cost', 0.0),
-                "iterations": result.get('iterations', 0),
-                "execution_time": end_time - start_time,
-                "class_count": solution.class_count,
-                "penalty_breakdown": penalty_breakdown,
-                "status": final_status  # Her zaman "completed"
-            }
-            
-        except Exception as e:
-            logger.error(f"Harmony Search optimization error: {str(e)}", exc_info=True)
-            end_time = time.time()
-            
-            # Exception olsa bile "completed" olarak işaretle
-            # çünkü algoritma çalıştı ve sonuç döndü (hata olsa bile)
-            return {
-                "schedule": [],
-                "assignments": [],
-                "solution": [],
-                "fitness": float('-inf'),
-                "cost": float('inf'),
-                "iterations": 0,
-                "execution_time": end_time - start_time,
-                "class_count": self.config.class_count if hasattr(self, 'config') else 6,
-                "penalty_breakdown": {},
-                "status": "completed",  # Exception olsa bile "completed" olarak işaretle
-                "error": str(e)  # Hata detayı error alanında saklanır
-            }
-    
-    def _run_hs(self) -> Dict[str, Any]:
-        """Ana HS döngüsü."""
-        if not self.scheduler:
-            raise ValueError("Scheduler not initialized")
+            if isinstance(time_str, dt_time):
+                return time_str.hour * 60 + time_str.minute
+            parts = str(time_str).split(":")
+            return int(parts[0]) * 60 + int(parts[1])
+        except:
+            return 0
+
+    def _is_bitirme(self, project: Dict) -> bool:
+        t = str(project.get("type", "")).lower()
+        return t in ["bitirme", "final"]
+
+    def _is_ara(self, project: Dict) -> bool:
+        t = str(project.get("type", "")).lower()
+        return t in ["ara", "interim"]
+
+    def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self.optimize(data)
+
+    def optimize(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        start_time = time.time()
+        self.initialize(data)
         
-        solution = self.scheduler.run()
+        logger.info("=" * 70)
+        logger.info("HARMONY SEARCH ALGORITHM - ARA PROJE ONCELIKLI")
+        logger.info("=" * 70)
         
-        if solution is None:
-            raise ValueError("HS scheduler returned None solution")
+        bitirme_projects = [p for p in self.projects if self._is_bitirme(p)]
+        ara_projects = [p for p in self.projects if self._is_ara(p)]
         
-        if not hasattr(solution, 'total_cost'):
-            solution.total_cost = float('inf')
-            if self.scheduler and self.scheduler.penalty_calculator:
-                solution.total_cost = self.scheduler.penalty_calculator.calculate_total_cost(solution)
+        logger.info(f"Ara: {len(ara_projects)}, Bitirme: {len(bitirme_projects)}")
+        
+        if not self.projects:
+            return self._create_empty_result(time.time() - start_time, "No projects")
+        
+        # AŞAMA 1: Slot ataması - ARA ÖNCELİKLİ (PSO'nun tersi!)
+        assignments = self._create_initial_assignments(ara_projects, bitirme_projects)
+        
+        if not assignments:
+            return self._create_empty_result(time.time() - start_time, "Slot assignment failed")
+        
+        # AŞAMA 2: Süreklilik odaklı jüri ataması
+        assignments = self._assign_juries_with_continuity(assignments)
+        
+        # AŞAMA 3: HS optimizasyonu (PSO ile aynı mantık)
+        assignments = self._hs_optimize(assignments)
+        
+        # AŞAMA 4: Son düzeltmeler
+        assignments = self._final_fix(assignments)
+        
+        execution_time = time.time() - start_time
+        fitness = self._calculate_fitness(assignments)
+        h1, h2, h3 = self._calculate_penalties(assignments)
+        continuity = self._calculate_continuity_score(assignments)
+        
+        self._log_final_stats(assignments, fitness, h1, h2, h3, continuity)
         
         return {
-            'solution': solution,
-            'cost': solution.total_cost,
-            'iterations': len(self.scheduler.iteration_history) if self.scheduler else 0
+            "assignments": assignments,
+            "schedule": assignments,
+            "solution": assignments,
+            "fitness": fitness,
+            "execution_time": execution_time,
+            "algorithm": "Harmony Search - Çok Kriterli Optimizasyon",
+            "status": "completed",
+            "metrics": {
+                "H1_time_penalty": h1,
+                "H2_workload_penalty": h2,
+                "H3_class_change_penalty": h3,
+                "continuity_score": continuity
+            }
         }
-    
-    def _convert_solution_to_schedule(self, solution: HSSolution) -> List[Dict[str, Any]]:
-        """HS çözümünü planner formatına dönüştür."""
-        if not solution:
-            logger.error("Solution is None in _convert_solution_to_schedule")
-            return []
+
+    # ==========================================================================
+    # AŞAMA 1: SLOT ATAMASI - ARA ÖNCELİKLİ!
+    # ==========================================================================
+    def _create_initial_assignments(self, ara_projects: List[Dict], 
+                                     bitirme_projects: List[Dict]) -> List[Dict]:
+        """
+        CONSTRAINT-AWARE + SINIF SÜREKLİLİKLİ + RASTGELELİKLİ SLOT ATAMASI
         
-        if not hasattr(solution, 'assignments') or not solution.assignments:
-            logger.error("Solution has no assignments")
-            return []
+        ÖNEMLİ: ARA PROJELER ÖNCELİKLİ (PSO'nun tersi)
         
-        class_counts = defaultdict(int)
-        for a in solution.assignments:
-            class_counts[a.class_id] += 1
+        1. Her timeslot'ta max sınıf sayısı kadar proje atanabilir
+        2. Aynı timeslot'ta aynı sorumlu iki projede olamaz
+        3. Öğretmenler mümkünse aynı sınıfta kalır (süreklilik)
+        4. Projeler RASTGELE sırada işlenir (her çalıştırmada farklı sonuç)
+        """
+        assignments = []
+        n_classrooms = len(self.classrooms)
+        n_timeslots = len(self.sorted_timeslots)
         
-        # Gereksiz repair dongusunu kaldir - optimize metodunda zaten yapiliyor
-        # Sadece log kaydet
-        used_count = len([c for c in range(solution.class_count) if class_counts.get(c, 0) > 0])
-        if used_count < solution.class_count:
-            logger.warning(f"WARNING: Only {used_count} classes used in solution (expected {solution.class_count})")
+        if n_classrooms == 0 or n_timeslots == 0:
+            return assignments
         
-        schedule = []
+        # Projeleri sorumlu bazlı hazırla ve SHUFFLE ET!
+        remaining_ara = list(ara_projects)
+        remaining_bitirme = list(bitirme_projects)
         
-        project_lookup = {p.id: p for p in self.projects}
-        instructor_lookup = {i.id: i for i in self.instructors}
+        # RASTGELELİK: Projeleri karıştır
+        random.shuffle(remaining_ara)
+        random.shuffle(remaining_bitirme)
         
-        classroom_lookup = {}
-        for i, c in enumerate(self.classrooms):
-            classroom_lookup[i] = c
+        # Her timeslot için hangi sorumlular kullanıldı
+        timeslot_used_responsibles = defaultdict(set)
         
-        # Timeslot mapping: order_in_class -> gerçek timeslot ID
-        # GA ve diğer algoritmalardaki gibi doğru mapping kullan
-        timeslot_mapping = {}
-        for i, ts in enumerate(self.timeslots):
-            timeslot_mapping[i] = ts.get("id", i + 1)
+        # Her timeslot'a atanan projeler
+        timeslot_assignments = defaultdict(list)
         
-        for assignment in solution.assignments:
-            project = project_lookup.get(assignment.project_id)
-            ps = instructor_lookup.get(assignment.ps_id)
-            j1 = instructor_lookup.get(assignment.j1_id)
+        # Her timeslot için hangi sınıflar kullanıldı
+        timeslot_used_classrooms = defaultdict(set)
+        
+        # Öğretmenlerin tercih ettiği sınıf
+        responsible_preferred_classroom = {}
+        
+        def get_best_classroom(rid: int, ts_order: int) -> int:
+            """Sorumlu için en iyi sınıfı bul"""
+            used_cids = timeslot_used_classrooms[ts_order]
             
-            if not project:
-                continue
+            if rid and rid in responsible_preferred_classroom:
+                preferred_cid = responsible_preferred_classroom[rid]
+                if preferred_cid not in used_cids:
+                    for idx, c in enumerate(self.classrooms):
+                        if self._safe_int(c.get("id")) == preferred_cid:
+                            return idx
             
-            classroom = classroom_lookup.get(assignment.class_id, {})
-            classroom_id = classroom.get("id", assignment.class_id)
-            classroom_name = classroom.get("name", f"Sınıf {assignment.class_id + 1}")
+            available_classrooms = []
+            for idx, c in enumerate(self.classrooms):
+                cid = self._safe_int(c.get("id"))
+                if cid not in used_cids:
+                    available_classrooms.append(idx)
             
-            # Timeslot ID'sini doğru şekilde hesapla (GA'daki gibi)
-            # order_in_class sınıf içindeki sırayı temsil eder
-            timeslot_idx = assignment.order_in_class
+            if available_classrooms:
+                return random.choice(available_classrooms)
             
-            # Eğer order_in_class timeslots listesi uzunluğunu aşıyorsa, son timeslot'u kullan
-            if timeslot_idx >= len(self.timeslots):
-                logger.warning(f"WARNING: order_in_class {timeslot_idx} >= timeslots length {len(self.timeslots)}, using last timeslot")
-                timeslot_idx = len(self.timeslots) - 1
-            
-            # Timeslot ID'sini mapping'den al
-            timeslot_id = timeslot_mapping.get(
-                timeslot_idx,
-                self.timeslots[-1].get("id", 1) if self.timeslots else 1
+            return -1
+        
+        def try_assign_project(project: Dict, ts_order: int, project_type: str) -> bool:
+            """Projeyi belirli timeslot'a atamayı dene"""
+            rid = self._safe_int(
+                project.get("responsible_id") or project.get("responsible_instructor_id")
             )
             
-            # Instructors listesi: [PS, J1, J2 placeholder]
-            # Planner formatina uygun olarak J2 placeholder eklenmelidir
-            instructors_list = []
-            if ps:
-                instructors_list.append(ps.id)
-            if j1:
-                instructors_list.append(j1.id)
+            if rid and rid in timeslot_used_responsibles[ts_order]:
+                return False
             
-            # J2 placeholder ekle (Planner formatina uygun)
-            j2_label = assignment.j2_label if hasattr(assignment, 'j2_label') and assignment.j2_label else self.config.j2_placeholder
-            instructors_list.append({
-                'id': -1,
-                'name': j2_label,
-                'is_placeholder': True
-            })
+            classroom_idx = get_best_classroom(rid, ts_order)
+            if classroom_idx < 0:
+                return False
             
-            # is_makeup bilgisini projeden al
-            is_makeup = project.is_makeup if hasattr(project, 'is_makeup') else False
+            timeslot = self.sorted_timeslots[ts_order]
+            ts_id = self._safe_int(timeslot.get("id"))
+            classroom = self.classrooms[classroom_idx]
+            cid = self._safe_int(classroom.get("id"))
             
-            # Real Simplex formatini kullan: basit ve JSON serializable
-            # Gereksiz alanlari kaldir (start_time, end_time, project_title, vb.)
-            entry = {
-                "project_id": assignment.project_id,
-                "classroom_id": classroom_id,
-                "timeslot_id": timeslot_id,
-                "instructors": instructors_list,
-                "class_order": assignment.order_in_class,
-                "class_id": assignment.class_id,
-                "is_makeup": is_makeup
+            assignment = {
+                "project_id": project.get("id"),
+                "classroom_id": cid,
+                "timeslot_id": ts_id,
+                "ts_order": ts_order,
+                "responsible_id": rid,
+                "jury1_id": None,
+                "jury2": JURY2_PLACEHOLDER,
+                "instructors": [rid] if rid else [],
+                "project_type": project_type
             }
             
-            schedule.append(entry)
+            timeslot_assignments[ts_order].append(assignment)
+            timeslot_used_classrooms[ts_order].add(cid)
+            if rid:
+                timeslot_used_responsibles[ts_order].add(rid)
+                responsible_preferred_classroom[rid] = cid
+            
+            return True
         
-        schedule.sort(key=lambda x: (x.get("class_id", x.get("classroom_id", 0)), x.get("class_order", 0)))
+        # ================================================================
+        # GAP'SIZ SLOT ATAMASI - ARA ÖNCELİKLİ!
+        # 
+        # TEMEL KURAL: Her timeslot TAMAMEN doldurulur, BOŞ slot olmaz!
+        # 
+        # Strateji (PSO'nun tersi):
+        # - Her timeslot için önce ARA projelerini yerleştir
+        # - Ara kalmadıysa/atanamadıysa Bitirme ile doldur
+        # ================================================================
         
-        classes_in_schedule = set()
-        for item in schedule:
-            class_id = item.get("class_id", item.get("classroom_id"))
-            if class_id is not None:
-                classes_in_schedule.add(class_id)
+        current_ts = 0
         
-        if len(classes_in_schedule) < solution.class_count:
-            logger.warning(f"WARNING: Only {len(classes_in_schedule)} classes in schedule")
-        else:
-            logger.info(f"SUCCESS: All {solution.class_count} classes are present in schedule")
+        while (remaining_ara or remaining_bitirme) and current_ts < n_timeslots:
+            if len(timeslot_assignments[current_ts]) >= n_classrooms:
+                current_ts += 1
+                continue
+            
+            assigned = False
+            
+            # 1. Önce ARA projelerini yerleştirmeye çalış (PSO'nun tersi!)
+            if remaining_ara:
+                for i, project in enumerate(remaining_ara):
+                    if try_assign_project(project, current_ts, "ara"):
+                        remaining_ara.pop(i)
+                        assigned = True
+                        break
+            
+            # 2. Ara yoksa veya atanamadıysa, Bitirme dene
+            if not assigned and remaining_bitirme:
+                for i, project in enumerate(remaining_bitirme):
+                    if try_assign_project(project, current_ts, "bitirme"):
+                        remaining_bitirme.pop(i)
+                        assigned = True
+                        break
+            
+            if not assigned:
+                current_ts += 1
         
-        return schedule
-    
-    def evaluate_fitness(self, solution: Dict[str, Any]) -> float:
-        """Çözümün kalitesini değerlendirir."""
-        assignments = solution.get("assignments", solution.get("schedule", []))
+        for ts_order in sorted(timeslot_assignments.keys()):
+            assignments.extend(timeslot_assignments[ts_order])
         
-        hs_solution = HSSolution(class_count=self.config.class_count)
+        ara_count = len(ara_projects) - len(remaining_ara)
+        bitirme_count = len(bitirme_projects) - len(remaining_bitirme)
         
-        for entry in assignments:
-            assignment = ProjectAssignment(
-                project_id=entry.get("project_id"),
-                class_id=entry.get("classroom_id", 0),
-                order_in_class=entry.get("order_in_class", 0),
-                ps_id=entry.get("advisor_id"),
-                j1_id=entry.get("jury1_id"),
-                j2_label=self.config.j2_placeholder
+        logger.info(f"Slot Assignment: {len(assignments)} total ({ara_count} ara, {bitirme_count} bitirme)")
+        
+        if remaining_ara:
+            logger.warning(f"{len(remaining_ara)} ara projesi atanamadı!")
+        if remaining_bitirme:
+            logger.warning(f"{len(remaining_bitirme)} bitirme projesi atanamadı!")
+        
+        return assignments
+
+    def _create_assignment(self, project: Dict, slot: Dict, project_type: str) -> Dict:
+        responsible_id = self._safe_int(
+            project.get("responsible_id") or project.get("responsible_instructor_id")
+        )
+        
+        return {
+            "project_id": project.get("id"),
+            "classroom_id": slot["classroom_id"],
+            "timeslot_id": slot["timeslot_id"],
+            "ts_order": slot["ts_order"],
+            "responsible_id": responsible_id,
+            "jury1_id": None,
+            "jury2": JURY2_PLACEHOLDER,
+            "instructors": [responsible_id] if responsible_id else [],
+            "project_type": project_type
+        }
+
+    # ==========================================================================
+    # AŞAMA 2: SÜREKLİLİK ODAKLI JÜRI ATAMASI
+    # ==========================================================================
+    def _assign_juries_with_continuity(self, assignments: List[Dict]) -> List[Dict]:
+        """Süreklilik odaklı jüri ataması"""
+        instructor_busy = defaultdict(set)
+        instructor_workload = defaultdict(int)
+        instructor_slots = defaultdict(list)
+        instructor_resp_count = defaultdict(int)
+        
+        for a in assignments:
+            rid = a.get("responsible_id")
+            ts_id = a.get("timeslot_id")
+            ts_order = a.get("ts_order", 0)
+            cid = a.get("classroom_id")
+            
+            if rid and ts_id:
+                instructor_busy[rid].add(ts_id)
+                instructor_workload[rid] += 1
+                instructor_resp_count[rid] += 1
+                instructor_slots[rid].append({"ts_order": ts_order, "classroom_id": cid})
+        
+        total_roles = len(assignments) * 2
+        avg_workload = total_roles / len(self.instructor_ids) if self.instructor_ids else 0
+        
+        instructor_target_jury = {}
+        for iid in self.instructor_ids:
+            resp_count = instructor_resp_count.get(iid, 0)
+            target_jury = max(0, round(avg_workload) - resp_count)
+            instructor_target_jury[iid] = target_jury
+        
+        sorted_assignments = sorted(assignments, key=lambda x: (x.get("ts_order", 0), x.get("classroom_id", 0)))
+        
+        for a in sorted_assignments:
+            ts_id = a.get("timeslot_id")
+            ts_order = a.get("ts_order", 0)
+            responsible_id = a.get("responsible_id")
+            classroom_id = a.get("classroom_id")
+            
+            best_jury = self._find_best_jury(
+                ts_id, ts_order, responsible_id, classroom_id,
+                instructor_busy, instructor_slots, instructor_workload, avg_workload,
+                instructor_resp_count
             )
-            hs_solution.assignments.append(assignment)
+            
+            if best_jury:
+                a["jury1_id"] = best_jury
+                instructor_busy[best_jury].add(ts_id)
+                instructor_workload[best_jury] += 1
+                instructor_slots[best_jury].append({"ts_order": ts_order, "classroom_id": classroom_id})
+                
+                insts = [responsible_id] if responsible_id else []
+                insts.append(best_jury)
+                a["instructors"] = insts
         
-        if self.scheduler and self.scheduler.penalty_calculator:
-            cost = self.scheduler.penalty_calculator.calculate_total_cost(hs_solution)
+        return assignments
+
+    def _find_best_jury(self, ts_id: int, ts_order: int, responsible_id: Optional[int],
+                        classroom_id: int, instructor_busy: Dict,
+                        instructor_slots: Dict, instructor_workload: Dict,
+                        avg_workload: float, instructor_resp_count: Dict = None) -> Optional[int]:
+        """En uygun jüriyi bul - İŞ YÜKÜ DENGESİ ÖNCELİKLİ"""
+        instructor_resp_count = instructor_resp_count or {}
+        
+        available = []
+        for iid in self.instructor_ids:
+            if iid == responsible_id:
+                continue
+            if ts_id in instructor_busy.get(iid, set()):
+                continue
+            available.append(iid)
+        
+        if not available:
+            return None
+        
+        workloads = list(instructor_workload.values()) if instructor_workload else [0]
+        current_min = min(workloads) if workloads else 0
+        current_max = max(workloads) if workloads else 0
+        current_diff = current_max - current_min
+        
+        avg_target = round(avg_workload)
+        
+        candidates_with_score = []
+        for iid in available:
+            current_total = instructor_workload.get(iid, 0)
+            resp_count = instructor_resp_count.get(iid, 0)
+            
+            new_total = current_total + 1
+            deviation = abs(new_total - avg_target)
+            resp_penalty = resp_count * 10
+            
+            continuity_bonus = 0
+            slots = instructor_slots.get(iid, [])
+            if slots:
+                for s in slots:
+                    if s["classroom_id"] == classroom_id and abs(ts_order - s["ts_order"]) == 1:
+                        continuity_bonus = -15
+                        break
+            
+            priority_score = deviation + resp_penalty - (avg_target - new_total) * 5 + continuity_bonus
+            
+            candidates_with_score.append((iid, priority_score, current_total))
+        
+        candidates_with_score.sort(key=lambda x: (x[1], x[2]))
+        
+        if not candidates_with_score:
+            return None
+        
+        best_score = candidates_with_score[0][1]
+        best_candidates = [c for c in candidates_with_score if c[1] <= best_score + 10]
+        
+        random.shuffle(best_candidates)
+        
+        if len(best_candidates) == 1:
+            return best_candidates[0][0]
+        
+        scored_candidates = []
+        
+        for iid, _, _ in best_candidates:
+            score = 0.0
+            slots = instructor_slots.get(iid, [])
+            
+            if slots:
+                min_gap = min(abs(ts_order - s["ts_order"]) for s in slots)
+                
+                same_class_consecutive = False
+                for s in slots:
+                    if s["classroom_id"] == classroom_id and abs(ts_order - s["ts_order"]) == 1:
+                        score -= 500
+                        same_class_consecutive = True
+                        break
+                
+                if not same_class_consecutive:
+                    if min_gap == 1:
+                        score += 50
+                    elif min_gap == 2:
+                        score += 100
+                    else:
+                        score += min_gap * 50
+            
+            score += random.uniform(-3, 3)
+            scored_candidates.append((iid, score))
+        
+        scored_candidates.sort(key=lambda x: x[1])
+        return scored_candidates[0][0]
+
+    def _calculate_jury_score(self, iid: int, ts_order: int, classroom_id: int,
+                               existing_slots: List[Dict], current_workload: int,
+                               avg_workload: float, min_workload: int = 0, 
+                               max_workload: int = 0) -> float:
+        """Jüri skoru (düşük = iyi)"""
+        score = 0.0
+        
+        workload_after = current_workload + 1
+        new_max = max(max_workload, workload_after)
+        new_min = min_workload
+        predicted_diff = new_max - new_min
+        
+        if predicted_diff > 3:
+            score += (predicted_diff - 3) * 800
+        
+        deviation = abs(workload_after - avg_workload)
+        if deviation > 2:
+            score += (deviation - 2) * 200
+        elif deviation > 1:
+            score += 50
+        
+        if current_workload < avg_workload - 1:
+            score -= 250
+        elif current_workload < avg_workload:
+            score -= 100
+        elif current_workload > avg_workload + 1:
+            score += 300
+        elif current_workload > avg_workload:
+            score += 100
+        
+        if existing_slots:
+            min_gap = float('inf')
+            best_match = None
+            
+            for s in existing_slots:
+                gap = abs(ts_order - s["ts_order"])
+                if gap < min_gap:
+                    min_gap = gap
+                    best_match = s
+                elif gap == min_gap and s["classroom_id"] == classroom_id:
+                    best_match = s
+            
+            if best_match:
+                is_same_classroom = (best_match["classroom_id"] == classroom_id)
+                
+                if min_gap == 1:
+                    if is_same_classroom:
+                        score -= 100
+                    else:
+                        score += 30
+                elif min_gap == 2:
+                    if is_same_classroom:
+                        score -= 40
+                    else:
+                        score += 20
+                else:
+                    score += min_gap * 10
+            
+            for s in existing_slots:
+                if s["classroom_id"] == classroom_id:
+                    diff = abs(ts_order - s["ts_order"])
+                    if diff == 1:
+                        score -= 80
+        
+        return score
+
+    # ==========================================================================
+    # AŞAMA 3: HS OPTİMİZASYONU (PSO ile aynı mantık)
+    # ==========================================================================
+    def _hs_optimize(self, assignments: List[Dict]) -> List[Dict]:
+        """Harmony Search ile jüri optimizasyonu"""
+        if len(assignments) < 2:
+            return assignments
+        
+        logger.info(f"HS: {self.n_particles} harmonies, {self.n_iterations} iterations")
+        
+        current = copy.deepcopy(assignments)
+        current = self._fix_hard_constraints(current)
+        current_fitness = self._calculate_fitness(current)
+        
+        best_global = copy.deepcopy(current)
+        best_global_fitness = current_fitness
+        
+        particles = []
+        for _ in range(self.n_particles):
+            p = self._create_particle_variation(assignments)
+            p = self._fix_hard_constraints(p)
+            f = self._calculate_fitness(p)
+            
+            particles.append({
+                "pos": p, "fit": f,
+                "best_pos": copy.deepcopy(p), "best_fit": f
+            })
+            
+            if f < best_global_fitness:
+                best_global_fitness = f
+                best_global = copy.deepcopy(p)
+        
+        for it in range(self.n_iterations):
+            for p in particles:
+                new_pos = self._update_particle(p["pos"], p["best_pos"], best_global)
+                new_pos = self._fix_hard_constraints(new_pos)
+                new_fit = self._calculate_fitness(new_pos)
+                
+                p["pos"] = new_pos
+                p["fit"] = new_fit
+                
+                if new_fit < p["best_fit"]:
+                    p["best_fit"] = new_fit
+                    p["best_pos"] = copy.deepcopy(new_pos)
+                
+                if new_fit < best_global_fitness:
+                    best_global_fitness = new_fit
+                    best_global = copy.deepcopy(new_pos)
+            
+            if (it + 1) % 50 == 0:
+                logger.info(f"  Iter {it+1}: Best = {best_global_fitness:.2f}")
+        
+        return best_global
+
+    def _create_particle_variation(self, base: List[Dict]) -> List[Dict]:
+        """Varyasyon oluştur"""
+        result = copy.deepcopy(base)
+        change_count = max(1, len(result) // 4)
+        
+        if not result:
+            return result
+            
+        indices = random.sample(range(len(result)), min(change_count, len(result)))
+        
+        for idx in indices:
+            a = result[idx]
+            rid = a.get("responsible_id")
+            candidates = [iid for iid in self.instructor_ids if iid != rid]
+            if candidates:
+                a["jury1_id"] = random.choice(candidates)
+        
+        return result
+
+    def _update_particle(self, current: List[Dict], personal_best: List[Dict],
+                         global_best: List[Dict]) -> List[Dict]:
+        """HS pozisyon güncelleme"""
+        result = copy.deepcopy(current)
+        busy = self._build_busy_map(result)
+        
+        for i, a in enumerate(result):
+            if i >= len(personal_best) or i >= len(global_best):
+                continue
+            
+            ts_id = a.get("timeslot_id")
+            rid = a.get("responsible_id")
+            current_jury = a.get("jury1_id")
+            
+            new_jury = current_jury
+            r1, r2, r3 = random.random(), random.random(), random.random()
+            
+            if r1 < self.cognitive_weight / 4:
+                pb_jury = personal_best[i].get("jury1_id")
+                if pb_jury and pb_jury != rid and ts_id not in busy.get(pb_jury, set()):
+                    new_jury = pb_jury
+            
+            if r2 < self.social_weight / 4:
+                gb_jury = global_best[i].get("jury1_id")
+                if gb_jury and gb_jury != rid and ts_id not in busy.get(gb_jury, set()):
+                    new_jury = gb_jury
+            
+            if r3 < self.inertia_weight / 5:
+                candidates = [
+                    iid for iid in self.instructor_ids
+                    if iid != rid and ts_id not in busy.get(iid, set())
+                ]
+                if candidates:
+                    new_jury = random.choice(candidates)
+            
+            if new_jury != current_jury:
+                if current_jury:
+                    busy[current_jury].discard(ts_id)
+                
+                a["jury1_id"] = new_jury
+                insts = [rid] if rid else []
+                if new_jury:
+                    insts.append(new_jury)
+                    busy[new_jury].add(ts_id)
+                a["instructors"] = insts
+        
+        return result
+
+    def _build_busy_map(self, assignments: List[Dict]) -> Dict[int, Set[int]]:
+        """instructor_id -> set of busy timeslot_ids"""
+        busy = defaultdict(set)
+        for a in assignments:
+            ts_id = a.get("timeslot_id")
+            if a.get("responsible_id") and ts_id:
+                busy[a["responsible_id"]].add(ts_id)
+            if a.get("jury1_id") and ts_id:
+                busy[a["jury1_id"]].add(ts_id)
+        return busy
+
+    # ==========================================================================
+    # AŞAMA 4: HARD CONSTRAINT DÜZELTMELERİ
+    # ==========================================================================
+    def _fix_hard_constraints(self, assignments: List[Dict]) -> List[Dict]:
+        """Hard constraint ihlallerini düzelt"""
+        busy = defaultdict(set)
+        
+        for a in assignments:
+            rid = a.get("responsible_id")
+            ts_id = a.get("timeslot_id")
+            if rid and ts_id:
+                busy[rid].add(ts_id)
+        
+        for a in assignments:
+            ts_id = a.get("timeslot_id")
+            rid = a.get("responsible_id")
+            jid = a.get("jury1_id")
+            
+            need_fix = False
+            
+            if jid is None:
+                need_fix = True
+            elif jid == rid:
+                need_fix = True
+            elif ts_id in busy.get(jid, set()):
+                need_fix = True
+            
+            if need_fix:
+                new_jury = self._find_available_jury(ts_id, rid, busy)
+                
+                if new_jury:
+                    a["jury1_id"] = new_jury
+                    busy[new_jury].add(ts_id)
+                else:
+                    a["jury1_id"] = None
+                
+                insts = [rid] if rid else []
+                if a["jury1_id"]:
+                    insts.append(a["jury1_id"])
+                a["instructors"] = insts
+            else:
+                if jid:
+                    busy[jid].add(ts_id)
+            
+            a["jury2"] = JURY2_PLACEHOLDER
+        
+        return assignments
+
+    def _find_available_jury(self, ts_id: int, responsible_id: Optional[int],
+                              busy: Dict[int, Set[int]]) -> Optional[int]:
+        """Müsait jüri bul"""
+        candidates = []
+        for iid in self.instructor_ids:
+            if iid == responsible_id:
+                continue
+            if ts_id in busy.get(iid, set()):
+                continue
+            workload = len(busy.get(iid, set()))
+            candidates.append((iid, workload))
+        
+        if not candidates:
+            return None
+        
+        candidates.sort(key=lambda x: x[1])
+        return candidates[0][0]
+
+    def _final_fix(self, assignments: List[Dict]) -> List[Dict]:
+        """Son düzeltmeler - Real Simplex uyumlu format"""
+        for a in assignments:
+            a["jury2"] = JURY2_PLACEHOLDER
+            
+            instructor_list = []
+            
+            rid = a.get("responsible_id")
+            if rid:
+                instructor_list.append(rid)
+            
+            j1id = a.get("jury1_id")
+            if j1id:
+                instructor_list.append(j1id)
+            
+            instructor_list.append({
+                "id": -1,
+                "name": JURY2_PLACEHOLDER,
+                "is_placeholder": True
+            })
+            
+            a["instructors"] = instructor_list
+        
+        return assignments
+
+    # ==========================================================================
+    # FITNESS VE CEZALAR
+    # ==========================================================================
+    def _calculate_fitness(self, assignments: List[Dict]) -> float:
+        h1, h2, h3 = self._calculate_penalties(assignments)
+        violations = self._count_hard_violations(assignments)
+        return self.C1 * h1 + self.C2 * h2 + self.C3 * h3 + violations * HARD_CONSTRAINT_PENALTY
+
+    def _calculate_penalties(self, assignments: List[Dict]) -> Tuple[float, float, float]:
+        tasks = defaultdict(list)
+        workload = defaultdict(int)
+        
+        for a in assignments:
+            ts_order = a.get("ts_order", 0)
+            cid = a.get("classroom_id")
+            
+            for inst in a.get("instructors", []):
+                if isinstance(inst, dict):
+                    iid = inst.get("id")
+                    if iid == -1:
+                        continue
+                else:
+                    iid = inst
+                
+                if iid:
+                    tasks[iid].append({"ts_order": ts_order, "cid": cid})
+                    workload[iid] += 1
+        
+        h1 = 0.0
+        for iid, tlist in tasks.items():
+            if len(tlist) < 2:
+                continue
+            sorted_t = sorted(tlist, key=lambda x: x["ts_order"])
+            for i in range(len(sorted_t) - 1):
+                gap = sorted_t[i+1]["ts_order"] - sorted_t[i]["ts_order"] - 1
+                if gap > 0:
+                    if self.time_penalty_mode == TimePenaltyMode.BINARY:
+                        h1 += 1
+                    else:
+                        h1 += gap
+        
+        h2 = 0.0
+        if workload:
+            vals = list(workload.values())
+            avg = sum(vals) / len(vals)
+            for cnt in vals:
+                dev = abs(cnt - avg)
+                if dev > self.workload_tolerance:
+                    h2 += (dev - self.workload_tolerance) ** 2
+        
+        h3 = 0.0
+        for iid, tlist in tasks.items():
+            if len(tlist) < 2:
+                continue
+            sorted_t = sorted(tlist, key=lambda x: x["ts_order"])
+            for i in range(len(sorted_t) - 1):
+                if sorted_t[i+1]["ts_order"] - sorted_t[i]["ts_order"] <= 2:
+                    if sorted_t[i]["cid"] != sorted_t[i+1]["cid"]:
+                        h3 += 1
+        
+        return h1, h2, h3
+
+    def _count_hard_violations(self, assignments: List[Dict]) -> int:
+        count = 0
+        usage = defaultdict(list)
+        
+        for a in assignments:
+            ts_id = a.get("timeslot_id")
+            rid = a.get("responsible_id")
+            jid = a.get("jury1_id")
+            
+            if jid and jid == rid:
+                count += 1
+            
+            if jid is None:
+                count += 1
+            
+            if rid and ts_id:
+                usage[(rid, ts_id)].append("r")
+            if jid and ts_id:
+                usage[(jid, ts_id)].append("j")
+        
+        for key, roles in usage.items():
+            if len(roles) > 1:
+                count += len(roles) - 1
+        
+        return count
+
+    def _calculate_continuity_score(self, assignments: List[Dict]) -> float:
+        tasks = defaultdict(list)
+        
+        for a in assignments:
+            ts_order = a.get("ts_order", 0)
+            for inst in a.get("instructors", []):
+                if isinstance(inst, dict):
+                    iid = inst.get("id")
+                    if iid == -1:
+                        continue
+                else:
+                    iid = inst
+                
+                if iid:
+                    tasks[iid].append(ts_order)
+        
+        total = 0
+        consecutive = 0
+        
+        for iid, orders in tasks.items():
+            if len(orders) < 2:
+                continue
+            sorted_o = sorted(orders)
+            for i in range(len(sorted_o) - 1):
+                total += 1
+                if sorted_o[i+1] - sorted_o[i] == 1:
+                    consecutive += 1
+        
+        if total == 0:
+            return 100.0
+        return (consecutive / total) * 100
+
+    def _log_final_stats(self, assignments: List[Dict], fitness: float,
+                          h1: float, h2: float, h3: float, continuity: float):
+        logger.info("=" * 70)
+        logger.info("FINAL RESULTS - HARMONY SEARCH (ARA ONCELIKLI)")
+        logger.info("=" * 70)
+        logger.info(f"  Fitness: {fitness:.2f}")
+        logger.info(f"  H1 (GAP): {h1:.2f}, H2 (Workload): {h2:.2f}, H3 (Class): {h3:.2f}")
+        logger.info(f"  Continuity: {continuity:.1f}%")
+        
+        # ARA öncelikli kontrol (PSO'nun tersi)
+        ara_orders = [a.get("ts_order", 0) for a in assignments if a.get("project_type") == "ara"]
+        bitirme_orders = [a.get("ts_order", 0) for a in assignments if a.get("project_type") == "bitirme"]
+        
+        if ara_orders and bitirme_orders:
+            max_a = max(ara_orders)
+            min_b = min(bitirme_orders)
+            if max_a <= min_b:
+                logger.info(f"  Ara Priority: OK (max_ara={max_a} <= min_bitirme={min_b})")
+            else:
+                logger.warning(f"  Ara Priority: FAIL")
+        
+        violations = self._count_hard_violations(assignments)
+        if violations == 0:
+            logger.info("  Hard Constraints: ALL OK")
         else:
-            cost = float('inf')
-        
-        return -cost
+            logger.warning(f"  Hard Constraints: {violations} violations")
+
+    def _create_empty_result(self, exec_time: float, error: str) -> Dict[str, Any]:
+        return {
+            "assignments": [],
+            "schedule": [],
+            "solution": [],
+            "fitness": 0.0,
+            "execution_time": exec_time,
+            "algorithm": "Harmony Search",
+            "status": "failed",
+            "error": error
+        }
+
+    def evaluate_fitness(self, solution: Any) -> float:
+        if isinstance(solution, list):
+            return self._calculate_fitness(solution)
+        return 0.0

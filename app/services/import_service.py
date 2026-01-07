@@ -26,6 +26,7 @@ class ImportService:
 
     def __init__(self):
         self.required_columns = ["InstructorName", "ProjectType", "ProjectDescription"]
+        self.email_required_columns = ["InstructorName", "Email"]
         self.project_type_mapping = {
             "ara proje": ProjectType.INTERIM,
             "ara projesi": ProjectType.INTERIM,
@@ -33,6 +34,187 @@ class ImportService:
             "bitirme projesi": ProjectType.FINAL,
             "bitirme": ProjectType.FINAL,
             "final": ProjectType.FINAL,
+        }
+
+    # ------------------------------------------------------------------
+    # Instructor Email Template & Import
+    # ------------------------------------------------------------------
+
+    async def generate_instructor_email_template(self, db: AsyncSession) -> bytes:
+        """
+        Export current instructors with their emails (if any) as Excel template.
+        Columns: InstructorName, Email
+        """
+        from openpyxl import Workbook
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Instructors"
+        ws.append(self.email_required_columns)
+
+        # Fetch instructors
+        result = await db.execute(select(Instructor).order_by(Instructor.name))
+        instructors = result.scalars().all()
+
+        for inst in instructors:
+            ws.append([inst.name, inst.email or ""])
+
+        stream = BytesIO()
+        wb.save(stream)
+        return stream.getvalue()
+
+    def _validate_email_format(self, email: str) -> bool:
+        if not email:
+            return True  # allow empty (means no update)
+        email_regex = r"^[\\w\\.-]+@[\\w\\.-]+\\.[a-zA-Z]{2,}$"
+        return re.match(email_regex, email) is not None
+
+    async def validate_instructor_emails(self, file_content: bytes, db: AsyncSession) -> Dict[str, Any]:
+        """
+        Validate instructor email Excel file.
+        """
+        try:
+            wb = load_workbook(filename=BytesIO(file_content), data_only=True)
+            sheet = wb.active
+
+            header_row = self._find_header_row(sheet, required=self.email_required_columns)
+            if header_row is None:
+                return {
+                    "success": False,
+                    "error": f"Could not find header row. Expected columns: {', '.join(self.email_required_columns)}",
+                    "rows": [],
+                    "total_rows": 0,
+                    "valid_rows": 0,
+                    "invalid_rows": 0,
+                }
+
+            headers = [cell.value for cell in sheet[header_row]]
+            header_validation = self._validate_headers(headers, required=self.email_required_columns)
+            if not header_validation["valid"]:
+                return {
+                    "success": False,
+                    "error": header_validation["error"],
+                    "rows": [],
+                    "total_rows": 0,
+                    "valid_rows": 0,
+                    "invalid_rows": 0,
+                }
+
+            column_map = self._map_columns(headers, required=self.email_required_columns)
+
+            result = await db.execute(select(Instructor))
+            instructors = result.scalars().all()
+            instructor_lookup = {inst.name.lower(): inst for inst in instructors}
+
+            rows = []
+            total_rows = 0
+            valid_rows = 0
+            invalid_rows = 0
+
+            for row_idx in range(header_row + 1, sheet.max_row + 1):
+                instructor_name = sheet.cell(row=row_idx, column=column_map["InstructorName"]).value
+                email_val = sheet.cell(row=row_idx, column=column_map["Email"]).value
+
+                if not instructor_name and not email_val:
+                    continue
+
+                total_rows += 1
+                row_errors = []
+
+                name_norm = self._normalize_text(instructor_name) if instructor_name else None
+                email_norm = email_val.strip() if isinstance(email_val, str) else email_val
+
+                if not name_norm:
+                    row_errors.append("InstructorName is required")
+                inst = instructor_lookup.get(name_norm or "")
+                if not inst:
+                    row_errors.append(f"Instructor not found: {instructor_name}")
+
+                if email_norm and not self._validate_email_format(email_norm):
+                    row_errors.append(f"Invalid email: {email_norm}")
+
+                row_data = {
+                    "row_number": row_idx,
+                    "instructor_name": instructor_name,
+                    "email": email_norm or "",
+                    "instructor_id": inst.id if inst else None,
+                    "errors": row_errors,
+                }
+
+                if row_errors:
+                    invalid_rows += 1
+                else:
+                    valid_rows += 1
+
+                rows.append(row_data)
+
+            success = invalid_rows == 0
+            return {
+                "success": success,
+                "rows": rows,
+                "total_rows": total_rows,
+                "valid_rows": valid_rows,
+                "invalid_rows": invalid_rows,
+                "error": None if success else "Some rows contain errors",
+            }
+        except Exception as e:
+            logger.error(f"validate_instructor_emails error: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "rows": [],
+                "total_rows": 0,
+                "valid_rows": 0,
+                "invalid_rows": 0,
+            }
+
+    async def execute_instructor_email_import(self, file_content: bytes, db: AsyncSession, dry_run: bool = False) -> Dict[str, Any]:
+        """
+        Import instructor emails (update Instructor.email).
+        """
+        validation = await self.validate_instructor_emails(file_content, db)
+        if not validation.get("success"):
+            return {
+                "success": False,
+                "error": validation.get("error"),
+                "statistics": {},
+                "errors": [row for row in validation.get("rows", []) if row.get("errors")],
+                "dry_run": dry_run,
+                "timestamp": datetime.now().isoformat(),
+            }
+
+        updated = 0
+        errors = []
+
+        if not dry_run:
+            for row in validation.get("rows", []):
+                if row.get("errors"):
+                    errors.append(row)
+                    continue
+                inst_id = row.get("instructor_id")
+                if not inst_id:
+                    continue
+                email_val = row.get("email") or None
+                await db.execute(
+                    Instructor.__table__.update()
+                    .where(Instructor.id == inst_id)
+                    .values(email=email_val)
+                )
+                updated += 1
+            await db.commit()
+
+        return {
+            "success": True,
+            "error": None,
+            "statistics": {
+                "updated": updated,
+                "total_rows": validation.get("total_rows", 0),
+                "valid_rows": validation.get("valid_rows", 0),
+                "invalid_rows": validation.get("invalid_rows", 0),
+            },
+            "errors": errors,
+            "dry_run": dry_run,
+            "timestamp": datetime.now().isoformat(),
         }
 
     def parse_excel_file(self, file_content: bytes) -> Dict[str, Any]:
@@ -409,32 +591,34 @@ class ImportService:
                 "statistics": statistics,
             }
 
-    def _find_header_row(self, sheet) -> Optional[int]:
+    def _find_header_row(self, sheet, required: Optional[List[str]] = None) -> Optional[int]:
         """Find the row containing headers."""
+        required_cols = required or self.required_columns
         for row_idx in range(1, min(10, sheet.max_row + 1)):  # Check first 10 rows
             row_values = [cell.value for cell in sheet[row_idx]]
             row_lower = [str(v).lower() if v else "" for v in row_values]
             
             # Check if this row contains all required headers
             found_headers = []
-            for header in self.required_columns:
+            for header in required_cols:
                 header_lower = header.lower()
                 for val in row_lower:
                     if header_lower in val or val in header_lower:
                         found_headers.append(header)
                         break
             
-            if len(found_headers) >= len(self.required_columns):
+            if len(found_headers) >= len(required_cols):
                 return row_idx
         
         return None
 
-    def _validate_headers(self, headers: List[Any]) -> Dict[str, Any]:
+    def _validate_headers(self, headers: List[Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
         """Validate that all required headers are present."""
+        required_cols = required or self.required_columns
         headers_lower = [str(h).lower() if h else "" for h in headers]
         missing = []
         
-        for required in self.required_columns:
+        for required in required_cols:
             required_lower = required.lower()
             found = False
             for header in headers_lower:
@@ -452,12 +636,13 @@ class ImportService:
         
         return {"valid": True}
 
-    def _map_columns(self, headers: List[Any]) -> Dict[str, int]:
+    def _map_columns(self, headers: List[Any], required: Optional[List[str]] = None) -> Dict[str, int]:
         """Map column names to column indices (1-based)."""
+        required_cols = required or self.required_columns
         column_map = {}
         headers_lower = [str(h).lower() if h else "" for h in headers]
         
-        for required in self.required_columns:
+        for required in required_cols:
             required_lower = required.lower()
             for idx, header in enumerate(headers_lower, start=1):
                 if required_lower in header or header in required_lower:
