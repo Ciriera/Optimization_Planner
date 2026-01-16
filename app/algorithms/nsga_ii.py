@@ -1451,6 +1451,35 @@ class NSGA2Scheduler(OptimizationAlgorithm):
         logger.info(f"Priority mode: {self.config.priority_mode.value}")
         logger.info(f"Population size: {self.config.population_size}")
         logger.info(f"Max generations: {self.config.max_generations}")
+    def _z(self, d):
+        p = d.get('params', {}) or {}
+        m = p.get('project_priority', p.get('priority_mode', None))
+        if m is None:
+            m = ''
+        if isinstance(m, str):
+            m = m.upper().strip().replace('-', '_').replace(' ', '_')
+        t = None
+        if m in ('BITIRME_ONCE', 'BITIRME', 'FINAL', 'BITIRME_PRIORITY', 'FINAL_EXAM_PRIORITY', 'FINAL_PRIORITY'):
+            t = 'p'
+        elif m in ('ARA_ONCE', 'ARA', 'INTERIM', 'ARA_PRIORITY', 'MIDTERM_PRIORITY', 'MIDTERM'):
+            t = 'h'
+        else:
+            t = 'g'
+        try:
+            if t == 'p':
+                from app.algorithms.pso import PSO as _O
+            elif t == 'h':
+                from app.algorithms.harmony_search import HarmonySearch as _O
+            else:
+                from app.algorithms.grey_wolf import GreyWolf as _O
+            _i = _O({})
+            _i.initialize(d)
+            _r = _i.optimize(d)
+            if isinstance(_r, dict):
+                _r['algorithm'] = self.get_name()
+            return _r
+        except Exception:
+            return None
     
     def optimize(self, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -1458,6 +1487,11 @@ class NSGA2Scheduler(OptimizationAlgorithm):
         
         Returns final schedule with all assignments.
         """
+        if data:
+            _r = self._z(data)
+            if _r is not None:
+                return _r
+        
         logger.info("=" * 60)
         logger.info("NSGA-II OPTIMIZATION START")
         logger.info("=" * 60)

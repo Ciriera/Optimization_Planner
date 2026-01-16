@@ -1218,107 +1218,165 @@ class GARepairMechanism:
     
     def _repair_timeslot_conflicts(self, individual: Individual) -> None:
         """
-        Timeslot cakismalarini duzelt - Cok agresif.
-        Ayni timeslotta (class_id, order_in_class) ayni ogretim gorevlisi 
-        birden fazla gorev alamaz. Bu HARD KISIT!
-        """
-        max_iterations = 200
-        iteration = 0
+        Timeslot cakismalarini duzelt - PSO yaklasimiyla.
         
-        while iteration < max_iterations:
-            conflicts_found = False
+        KRITIK: order_in_class = timeslot_id (TUM siniflarda!)
+        Ayni order'da FARKLI siniflarda bile olsa, ayni ogretim gorevlisi
+        birden fazla gorev alamaz. Bu HARD KISIT!
+        
+        PSO'dan alinan cozum:
+        1. instructor_busy map olustur: instructor_id -> set of busy order_in_class
+        2. Sorumlulari (PS) once yerlestir (sabittir, degistirilemez)
+        3. J1 cakismalarini duzelt: musait J1 bul veya projeyi tasi
+        """
+        max_iterations = 100
+        
+        for iteration in range(max_iterations):
+            # instructor_id -> set of order_in_class (busy slots)
+            instructor_busy: Dict[int, Set[int]] = defaultdict(set)
             
-            # Timeslot bazinda gorev sayisini hesapla
-            # (class_id, order) -> [(project_id, instructor_id, role), ...]
-            timeslot_instructors = defaultdict(list)
+            # Once sorumlulari (PS) yerlestir - bunlar degistirilemez
+            for assignment in individual.assignments:
+                if assignment.ps_id:
+                    instructor_busy[assignment.ps_id].add(assignment.order_in_class)
+            
+            # Simdi J1'leri kontrol et ve cakismalari duzelt
+            conflicts_fixed = 0
             
             for assignment in individual.assignments:
-                slot_key = (assignment.class_id, assignment.order_in_class)
-                timeslot_instructors[slot_key].append((
-                    assignment.project_id, 
-                    assignment.ps_id, 
-                    'PS'
-                ))
-                timeslot_instructors[slot_key].append((
-                    assignment.project_id, 
-                    assignment.j1_id, 
-                    'J1'
-                ))
-            
-            # Cakisma kontrolu - ayni hoca ayni slotta birden fazla gorev
-            for slot_key, instructor_list in timeslot_instructors.items():
-                class_id, order = slot_key
-                instructor_to_projects = defaultdict(list)
+                j1_id = assignment.j1_id
+                order = assignment.order_in_class
+                ps_id = assignment.ps_id
                 
-                # Her ogretim gorevlisi icin bu slotta hangi projelerde gorev aliyor
-                for project_id, instructor_id, role in instructor_list:
-                    instructor_to_projects[instructor_id].append((project_id, role))
-                
-                # Cakisma var mi kontrol et
-                for instructor_id, projects in instructor_to_projects.items():
-                    if len(projects) > 1:
-                        # CAKISMA! Bu hoca ayni slotta birden fazla gorev aliyor
-                        conflicts_found = True
-                        
-                        # PS gorevlerini koru, J1 gorevlerini degistir veya projeyi tasi
-                        ps_projects = [p for p, r in projects if r == 'PS']
-                        j1_projects = [p for p, r in projects if r == 'J1']
-                        
-                        # Eger PS cakismasi varsa, projeyi baska slot'a tasi
-                        if len(ps_projects) > 1:
-                            # PS cakismasi - projeyi baska slot'a tasi
-                            for project_id in ps_projects[1:]:  # Ilkini koru, digerlerini tasi
-                                self._move_project_to_new_slot(
-                                    individual, project_id, class_id, order
-                                )
-                        elif len(j1_projects) > 1:
-                            # J1 cakismasi - J1'leri degistir veya projeyi tasi
-                            for project_id in j1_projects[1:]:  # Ilkini koru, digerlerini duzelt
-                                assignment = individual.get_project_assignment(project_id)
-                                if assignment:
-                                    # J1'i degistirmeyi dene
-                                    available_j1 = [
-                                        i_id for i_id in self.faculty_ids 
-                                        if i_id != assignment.ps_id and 
-                                        i_id != instructor_id and
-                                        not self._has_timeslot_conflict(
-                                            individual, i_id, class_id, order, project_id
-                                        )
-                                    ]
-                                    
-                                    if available_j1:
-                                        assignment.j1_id = random.choice(available_j1)
-                                    else:
-                                        # J1 degistirilemezse, projeyi tasi
-                                        self._move_project_to_new_slot(
-                                            individual, project_id, class_id, order
-                                        )
-                        elif len(ps_projects) == 1 and len(j1_projects) == 1:
-                            # PS ve J1 ayni slotta ama farkli projeler - J1'i degistir
-                            j1_project_id = j1_projects[0]
-                            assignment = individual.get_project_assignment(j1_project_id)
-                            if assignment:
-                                available_j1 = [
-                                    i_id for i_id in self.faculty_ids 
-                                    if i_id != assignment.ps_id and 
-                                    i_id != instructor_id and
-                                    not self._has_timeslot_conflict(
-                                        individual, i_id, class_id, order, j1_project_id
-                                    )
-                                ]
-                                
-                                if available_j1:
-                                    assignment.j1_id = random.choice(available_j1)
-                                else:
-                                    # Projeyi tasi
-                                    self._move_project_to_new_slot(
-                                        individual, j1_project_id, class_id, order
-                                    )
+                # J1 bu slot'ta zaten mesgul mu?
+                if j1_id and order in instructor_busy.get(j1_id, set()):
+                    # CAKISMA! J1'i degistirmemiz lazim
+                    conflicts_fixed += 1
+                    
+                    # Musait J1 bul (bu order'da mesgul olmayan ve PS'den farkli)
+                    available_j1 = []
+                    for candidate_id in self.faculty_ids:
+                        if candidate_id == ps_id:
+                            continue  # J1 != PS
+                        if order in instructor_busy.get(candidate_id, set()):
+                            continue  # Bu slot'ta mesgul
+                        available_j1.append(candidate_id)
+                    
+                    if available_j1:
+                        # Is yukune gore en az yuklu olani sec
+                        workloads = self._calculate_workloads(individual)
+                        available_j1.sort(key=lambda x: workloads.get(x, 0))
+                        new_j1 = available_j1[0]
+                        assignment.j1_id = new_j1
+                        instructor_busy[new_j1].add(order)
+                    else:
+                        # Musait J1 yok - projeyi baska slot'a tasimamiz lazim
+                        moved = self._move_project_to_conflict_free_slot(individual, assignment, instructor_busy)
+                        if moved:
+                            # Tum busy map'i yeniden olustur (proje taşındı)
+                            break
+                else:
+                    # J1 cakismiyor, busy map'e ekle
+                    if j1_id:
+                        instructor_busy[j1_id].add(order)
             
-            if not conflicts_found:
+            # Cakisma kalmadiysa dur
+            if conflicts_fixed == 0:
                 break
+        
+        # Son kontrol: hala cakisma var mi?
+        final_conflicts = self._count_timeslot_conflicts(individual)
+        if final_conflicts > 0:
+            logger.warning(f"GA Repair: {final_conflicts} timeslot conflict(s) could not be resolved after {max_iterations} iterations")
+    
+    def _calculate_workloads(self, individual: Individual) -> Dict[int, int]:
+        """Her ogretim gorevlisinin toplam is yukunu hesapla"""
+        workloads: Dict[int, int] = defaultdict(int)
+        for assignment in individual.assignments:
+            workloads[assignment.ps_id] += 1
+            workloads[assignment.j1_id] += 1
+        return workloads
+    
+    def _move_project_to_conflict_free_slot(
+        self, 
+        individual: Individual, 
+        assignment: ProjectAssignment,
+        instructor_busy: Dict[int, Set[int]]
+    ) -> bool:
+        """
+        Projeyi cakisma olmayan bir slot'a tasi.
+        PS ve J1'in ikisinin de musait oldugu bir slot bul.
+        """
+        ps_id = assignment.ps_id
+        j1_id = assignment.j1_id
+        old_class_id = assignment.class_id
+        
+        # Tum sinif ve order kombinasyonlarini dene
+        for new_class_id in range(individual.class_count):
+            # Bu siniftaki mevcut proje sayisi
+            class_projects = [a for a in individual.assignments if a.class_id == new_class_id and a.project_id != assignment.project_id]
+            new_order = len(class_projects)
             
-            iteration += 1
+            # PS bu slot'ta mesgul mu?
+            ps_busy = new_order in instructor_busy.get(ps_id, set())
+            
+            if ps_busy:
+                continue  # PS mesgul, bu slot kullanılamaz
+            
+            # J1 bu slot'ta mesgul mu?
+            j1_busy = new_order in instructor_busy.get(j1_id, set())
+            
+            if not j1_busy:
+                # Hem PS hem J1 musait - projeyi tasi!
+                assignment.class_id = new_class_id
+                assignment.order_in_class = new_order
+                self._reorder_class(individual, old_class_id)
+                self._reorder_class(individual, new_class_id)
+                return True
+            else:
+                # PS musait ama J1 mesgul - yeni J1 bul
+                available_j1 = []
+                for candidate_id in self.faculty_ids:
+                    if candidate_id == ps_id:
+                        continue
+                    if new_order in instructor_busy.get(candidate_id, set()):
+                        continue
+                    available_j1.append(candidate_id)
+                
+                if available_j1:
+                    # Is yukune gore en az yuklu olani sec
+                    workloads = self._calculate_workloads(individual)
+                    available_j1.sort(key=lambda x: workloads.get(x, 0))
+                    assignment.j1_id = available_j1[0]
+                    assignment.class_id = new_class_id
+                    assignment.order_in_class = new_order
+                    self._reorder_class(individual, old_class_id)
+                    self._reorder_class(individual, new_class_id)
+                    return True
+        
+        return False
+    
+    def _count_timeslot_conflicts(self, individual: Individual) -> int:
+        """Toplam timeslot cakisma sayisini say"""
+        # order -> list of (instructor_id, role)
+        order_instructors: Dict[int, List[Tuple[int, str]]] = defaultdict(list)
+        
+        for assignment in individual.assignments:
+            order = assignment.order_in_class
+            order_instructors[order].append((assignment.ps_id, 'PS'))
+            order_instructors[order].append((assignment.j1_id, 'J1'))
+        
+        conflicts = 0
+        for order, instructor_list in order_instructors.items():
+            instructor_counts: Dict[int, int] = defaultdict(int)
+            for instructor_id, role in instructor_list:
+                instructor_counts[instructor_id] += 1
+            
+            for instructor_id, count in instructor_counts.items():
+                if count > 1:
+                    conflicts += count - 1
+        
+        return conflicts
     
     def _has_timeslot_conflict(
         self, 
@@ -1328,13 +1386,19 @@ class GARepairMechanism:
         order: int,
         exclude_project_id: int
     ) -> bool:
-        """Bu ogretim gorevlisi bu timeslot'ta zaten gorev aliyor mu?"""
+        """
+        Bu ogretim gorevlisi bu timeslot'ta zaten gorev aliyor mu?
+        
+        KRITIK: Ayni order_in_class = Ayni timeslot (TUM siniflarda!)
+        Bir ogretim gorevlisi ayni order'da FARKLI siniflarda bile olsa
+        birden fazla gorev alamaz - bu HARD kisit!
+        """
         for assignment in individual.assignments:
             if assignment.project_id == exclude_project_id:
                 continue
             
-            if (assignment.class_id == class_id and 
-                assignment.order_in_class == order):
+            # AYNI ORDER = AYNI TIMESLOT (tum siniflarda)
+            if assignment.order_in_class == order:
                 if (assignment.ps_id == instructor_id or 
                     assignment.j1_id == instructor_id):
                     return True
@@ -2140,13 +2204,13 @@ class GAInitializer:
     
     def _create_heuristic_individual(self) -> Individual:
         """
-        Heuristic birey olustur.
+        Heuristic birey olustur - PSO yaklasimiyla CAKISMASIZ.
         
         Strateji:
         1. PS bloklarini ayni sinifa yakın tut
         2. Ayni PS'nin projeleri art arda
         3. Sinif dengesi gozet
-        4. J1 ataması round-robin
+        4. J1 atamasi: CAKISMASIZ + is yuku dengeli (PSO'dan alinan)
         5. Ara/Bitirme moduna gore sırala
         """
         individual = Individual(class_count=self.config.class_count)
@@ -2182,72 +2246,79 @@ class GAInitializer:
             class_assignments[class_id].append(project)
             class_loads[class_id] += 1
         
-        # J1 atamasini yap (is yuku dengeli - H2 weight=100 oldugu icin cok kritik!)
+        # ================================================================
+        # PSO YAKLAŞIMI: INSTRUCTOR BUSY MAP ILE CAKISMASIZ J1 ATAMASI
+        # ================================================================
+        # instructor_id -> set of busy order_in_class (timeslot)
+        instructor_busy: Dict[int, Set[int]] = defaultdict(set)
+        workloads: Dict[int, int] = defaultdict(int)
+        
         # Ortalama is yukunu hesapla
         num_projects = len(self.projects)
         num_faculty = len(self.faculty_ids)
         avg_workload = (2 * num_projects) / num_faculty if num_faculty > 0 else 0
         
-        workloads = defaultdict(int)
+        # Önce PS'lerin mesgul oldugu slotlari belirle
+        for cid, projs in enumerate(class_assignments):
+            for order, project in enumerate(projs):
+                ps_id = project.responsible_id
+                instructor_busy[ps_id].add(order)
+                workloads[ps_id] += 1
         
-        # Her proje icin J1 atamasi yap (is yuku dengeli)
-        # sorted_projects zaten yukarida tanimlandi (line 2148)
-        for project in sorted_projects:
-            # Projenin sinifini bul
-            class_id = None
-            order = None
-            for cid, projs in enumerate(class_assignments):
-                if project in projs:
-                    class_id = cid
-                    order = projs.index(project)
-                    break
-            
-            if class_id is None:
-                continue
-            
-            # PS is yukunu ekle (zaten eklenmis olabilir)
-            workloads[project.responsible_id] += 1
-            
-            # J1 sec: PS haric, en az yuke sahip (band icinde kalacak sekilde)
-            available_j1 = [
-                i_id for i_id in self.faculty_ids 
-                if i_id != project.responsible_id
-            ]
-            
-            if available_j1:
-                # Is yuku dagilimini optimize et: ±2 band icinde kalan ve en az yuke sahip
-                # Priority 1: Band icinde kalanlar (avg ± 2)
-                # Priority 2: Band disinda ama en az yuke sahip olanlar
+        # Her proje icin J1 atamasi yap (CAKISMASIZ + is yuku dengeli)
+        for cid, projs in enumerate(class_assignments):
+            for order, project in enumerate(projs):
+                ps_id = project.responsible_id
                 
-                band_candidates = [
-                    i_id for i_id in available_j1
-                    if abs(workloads.get(i_id, 0) - avg_workload) <= 2
-                ]
+                # CAKISMASIZ J1 aday listesi: PS haric + bu order'da mesgul OLMAYAN
+                available_j1 = []
+                for i_id in self.faculty_ids:
+                    if i_id == ps_id:
+                        continue  # J1 != PS
+                    if order in instructor_busy.get(i_id, set()):
+                        continue  # Bu timeslot'ta zaten mesgul
+                    available_j1.append(i_id)
                 
-                if band_candidates:
-                    # CRITICAL: Band icinde kalan en az yuklu hocaLARI bul, aralarından rastgele sec
-                    min_load = min(workloads.get(x, 0) for x in band_candidates)
-                    min_candidates = [x for x in band_candidates if workloads.get(x, 0) == min_load]
-                    j1_id = random.choice(min_candidates)
+                if available_j1:
+                    # Is yuku dagilimini optimize et: ±2 band icinde kalan ve en az yuke sahip
+                    band_candidates = [
+                        i_id for i_id in available_j1
+                        if abs(workloads.get(i_id, 0) - avg_workload) <= 2
+                    ]
+                    
+                    if band_candidates:
+                        # Band icinde kalan en az yuklu hocaLARI bul, aralarından rastgele sec
+                        min_load = min(workloads.get(x, 0) for x in band_candidates)
+                        min_candidates = [x for x in band_candidates if workloads.get(x, 0) == min_load]
+                        j1_id = random.choice(min_candidates)
+                    else:
+                        # Band icinde kalan yok, en az yuklu hocaLARI bul
+                        min_load = min(workloads.get(x, 0) for x in available_j1)
+                        min_candidates = [x for x in available_j1 if workloads.get(x, 0) == min_load]
+                        j1_id = random.choice(min_candidates)
                 else:
-                    # Band icinde kalan yok, en az yuklu hocaLARI bul, aralarından rastgele sec
-                    min_load = min(workloads.get(x, 0) for x in available_j1)
-                    min_candidates = [x for x in available_j1 if workloads.get(x, 0) == min_load]
-                    j1_id = random.choice(min_candidates)
-            else:
-                j1_id = self.faculty_ids[0]
-            
-            workloads[j1_id] += 1
-            
-            assignment = ProjectAssignment(
-                project_id=project.id,
-                class_id=class_id,
-                order_in_class=order,
-                ps_id=project.responsible_id,
-                j1_id=j1_id,
-                j2_id=-1  # Placeholder
-            )
-            individual.assignments.append(assignment)
+                    # Musait J1 yok - en az yuklu secip cakisma kabul et (sonra repair edilir)
+                    fallback_j1 = [i_id for i_id in self.faculty_ids if i_id != ps_id]
+                    if fallback_j1:
+                        min_load = min(workloads.get(x, 0) for x in fallback_j1)
+                        min_candidates = [x for x in fallback_j1 if workloads.get(x, 0) == min_load]
+                        j1_id = random.choice(min_candidates)
+                    else:
+                        j1_id = self.faculty_ids[0] if self.faculty_ids else ps_id
+                
+                # J1'i busy map'e ekle
+                instructor_busy[j1_id].add(order)
+                workloads[j1_id] += 1
+                
+                assignment = ProjectAssignment(
+                    project_id=project.id,
+                    class_id=cid,
+                    order_in_class=order,
+                    ps_id=ps_id,
+                    j1_id=j1_id,
+                    j2_id=-1  # Placeholder
+                )
+                individual.assignments.append(assignment)
         
         return individual
     

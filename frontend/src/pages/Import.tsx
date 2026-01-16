@@ -37,9 +37,11 @@ import {
     Cancel,
     Refresh,
     Info,
+    Transform,
 } from '@mui/icons-material';
 import { useDropzone } from 'react-dropzone';
 import { importService, ImportRow, ValidateResponse, ExecuteResponse } from '../services/importService';
+import * as XLSX from 'xlsx';
 
 const Import: React.FC = () => {
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -61,6 +63,147 @@ const Import: React.FC = () => {
     const [emailImportResult, setEmailImportResult] = useState<any>(null);
     const [emailValidating, setEmailValidating] = useState(false);
     const [emailImporting, setEmailImporting] = useState(false);
+
+    // Format converter states
+    const [converterFile, setConverterFile] = useState<File | null>(null);
+    const [converting, setConverting] = useState(false);
+    const [conversionPreview, setConversionPreview] = useState<any[]>([]);
+
+    // Format converter function - Hoca/Ara/Bitirme format to InstructorName/ProjectType/ProjectDescription
+    const handleConvertFormat = async () => {
+        if (!converterFile) {
+            showSnack('Lütfen önce bir Excel dosyası seçin', 'warning');
+            return;
+        }
+
+        setConverting(true);
+        try {
+            const data = await converterFile.arrayBuffer();
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+            // Convert each row to the new format
+            const convertedRows: any[] = [];
+
+            jsonData.forEach((row: any) => {
+                // Get instructor name - check various possible column names
+                const instructorName = row['Hoca'] || row['hoca'] || row['HOCA'] ||
+                    row['İsim'] || row['isim'] || row['Name'] ||
+                    row['Öğretim Üyesi'] || '';
+
+                // Get Ara and Bitirme counts
+                const araCount = parseInt(row['Ara'] || row['ara'] || row['ARA'] || '0') || 0;
+                const bitirmeCount = parseInt(row['Bitirme'] || row['bitirme'] || row['BITIRME'] || '0') || 0;
+
+                if (!instructorName) return;
+
+                // Create Ara projects
+                for (let i = 1; i <= araCount; i++) {
+                    convertedRows.push({
+                        InstructorName: instructorName,
+                        ProjectType: 'Ara Proje',
+                        ProjectDescription: `Ara Proje ${i} - ${instructorName}`
+                    });
+                }
+
+                // Create Bitirme projects
+                for (let i = 1; i <= bitirmeCount; i++) {
+                    convertedRows.push({
+                        InstructorName: instructorName,
+                        ProjectType: 'Bitirme Projesi',
+                        ProjectDescription: `Bitirme Projesi ${i} - ${instructorName}`
+                    });
+                }
+            });
+
+            setConversionPreview(convertedRows);
+
+            if (convertedRows.length > 0) {
+                showSnack(`${convertedRows.length} proje satırı oluşturuldu. İndirmek için butona tıklayın.`, 'success');
+            } else {
+                showSnack('Dönüştürülecek veri bulunamadı. Excel formatınızı kontrol edin.', 'warning');
+            }
+        } catch (error: any) {
+            console.error('Conversion error:', error);
+            showSnack('Excel dosyası dönüştürülürken hata oluştu: ' + error.message, 'error');
+        } finally {
+            setConverting(false);
+        }
+    };
+
+    // Download converted file
+    const handleDownloadConverted = () => {
+        if (conversionPreview.length === 0) {
+            showSnack('Önce dosyayı dönüştürün', 'warning');
+            return;
+        }
+
+        const worksheet = XLSX.utils.json_to_sheet(conversionPreview);
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Converted');
+
+        // Set column widths
+        worksheet['!cols'] = [
+            { wch: 30 }, // InstructorName
+            { wch: 15 }, // ProjectType
+            { wch: 50 }, // ProjectDescription
+        ];
+
+        XLSX.writeFile(workbook, 'converted_import_data.xlsx');
+        showSnack('Dönüştürülmüş dosya indirildi!', 'success');
+    };
+
+    // Import converted data directly
+    const handleImportConverted = async () => {
+        if (conversionPreview.length === 0) {
+            showSnack('Önce dosyayı dönüştürün', 'warning');
+            return;
+        }
+
+        try {
+            // Create Excel file from converted data
+            const worksheet = XLSX.utils.json_to_sheet(conversionPreview);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'Import');
+
+            // Convert to array buffer and create File object
+            const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+            const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const file = new File([blob], 'converted_import_data.xlsx', {
+                type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            });
+
+            // Set as selected file and trigger validation
+            setSelectedFile(file);
+            setValidatedData(null);
+            setImportResult(null);
+
+            showSnack('Dönüştürülmüş dosya yüklendi! Şimdi validate butonuna tıklayabilirsiniz.', 'success');
+
+            // Auto-validate after setting file
+            setValidating(true);
+            try {
+                const result = await importService.validateFile(file);
+                setValidatedData(result);
+
+                if (result.success) {
+                    showSnack(`Dosya doğrulandı! ${result.valid_rows} geçerli satır bulundu. Import için hazır.`, 'success');
+                } else {
+                    showSnack(`Doğrulama başarısız: ${result.error}`, 'error');
+                }
+            } catch (error: any) {
+                console.error('Error validating file:', error);
+                showSnack(error.response?.data?.detail || 'Dosya doğrulanırken hata oluştu', 'error');
+            } finally {
+                setValidating(false);
+            }
+        } catch (error: any) {
+            console.error('Error importing converted data:', error);
+            showSnack('Dönüştürülmüş veri import edilirken hata oluştu: ' + error.message, 'error');
+        }
+    };
 
     const showSnack = useCallback((message: string, severity: 'success' | 'error' | 'warning' | 'info') => {
         setSnack({ open: true, message, severity });
@@ -98,7 +241,7 @@ const Import: React.FC = () => {
         try {
             const result = await importService.validateFile(selectedFile);
             setValidatedData(result);
-            
+
             if (result.success) {
                 showSnack(`File validated successfully. ${result.valid_rows} valid rows found.`, 'success');
             } else {
@@ -127,7 +270,7 @@ const Import: React.FC = () => {
         try {
             const result = await importService.executeImport(selectedFile, dryRun);
             setImportResult(result);
-            
+
             if (result.success) {
                 const stats = result.statistics;
                 showSnack(
@@ -596,73 +739,207 @@ const Import: React.FC = () => {
                         )}
                     </CardContent>
                 </Card>
-            </Box>
 
-            {/* Preview Table */}
-            {validatedData && validatedData.rows.length > 0 && (
-                <Box sx={{ mt: 3 }}>
-                        <Card>
-                            <CardContent>
-                                <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
-                                    File Preview
+                {/* Excel Format Converter */}
+                <Card sx={{ gridColumn: { md: 'span 2' } }}>
+                    <CardContent>
+                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                            <Transform sx={{ mr: 1, color: 'secondary.main' }} />
+                            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                                Excel Format Dönüştürücü
+                            </Typography>
+                        </Box>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                            <strong>Hoca | Ara | Bitirme | Toplam</strong> formatındaki Excel dosyasını sisteme uygun formata dönüştürün.
+                            Her öğretim üyesi için Ara ve Bitirme proje sayısı kadar ayrı satır oluşturulur.
+                        </Typography>
+
+                        <Alert severity="info" sx={{ mb: 2 }}>
+                            <Typography variant="body2">
+                                <strong>Beklenen Format:</strong> Excel'de "Hoca", "Ara", "Bitirme" sütunları olmalıdır.
+                                Örnek: "Prof. Dr. Ahmet Yılmaz | 3 | 2 | 5" → 3 Ara + 2 Bitirme = 5 proje satırı oluşturulur.
+                            </Typography>
+                        </Alert>
+
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
+                            <Button
+                                variant="contained"
+                                component="label"
+                                startIcon={<CloudUpload />}
+                                color="secondary"
+                            >
+                                Excel Dosyası Seç
+                                <input
+                                    type="file"
+                                    accept=".xlsx,.xls"
+                                    hidden
+                                    onChange={(e) => {
+                                        setConverterFile(e.target.files?.[0] || null);
+                                        setConversionPreview([]);
+                                    }}
+                                />
+                            </Button>
+                            <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center' }}>
+                                {converterFile ? `📄 ${converterFile.name} (${(converterFile.size / 1024).toFixed(1)} KB)` : 'Dosya seçilmedi'}
+                            </Typography>
+                        </Stack>
+
+                        <Stack direction="row" spacing={2}>
+                            <Button
+                                variant="contained"
+                                color="primary"
+                                startIcon={converting ? <CircularProgress size={20} /> : <Transform />}
+                                onClick={handleConvertFormat}
+                                disabled={!converterFile || converting}
+                            >
+                                {converting ? 'Dönüştürülüyor...' : 'Dönüştür'}
+                            </Button>
+                            {conversionPreview.length > 0 && (
+                                <>
+                                    <Button
+                                        variant="contained"
+                                        color="success"
+                                        startIcon={validating ? <CircularProgress size={20} /> : <PlayArrow />}
+                                        onClick={handleImportConverted}
+                                        disabled={validating}
+                                    >
+                                        {validating ? 'Doğrulanıyor...' : 'Doğrudan Import Et'}
+                                    </Button>
+                                    <Button
+                                        variant="outlined"
+                                        color="secondary"
+                                        startIcon={<Download />}
+                                        onClick={handleDownloadConverted}
+                                    >
+                                        İndir
+                                    </Button>
+                                </>
+                            )}
+                            {converterFile && (
+                                <Button
+                                    variant="outlined"
+                                    color="error"
+                                    startIcon={<Cancel />}
+                                    onClick={() => {
+                                        setConverterFile(null);
+                                        setConversionPreview([]);
+                                    }}
+                                >
+                                    Temizle
+                                </Button>
+                            )}
+                        </Stack>
+
+                        {/* Conversion Preview Table */}
+                        {conversionPreview.length > 0 && (
+                            <Box sx={{ mt: 3 }}>
+                                <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 1 }}>
+                                    Dönüşüm Önizleme ({conversionPreview.length} satır)
                                 </Typography>
-                                <TableContainer sx={{ maxHeight: 600 }}>
-                                    <Table stickyHeader>
+                                <TableContainer component={Paper} sx={{ maxHeight: 400 }}>
+                                    <Table size="small" stickyHeader>
                                         <TableHead>
                                             <TableRow>
-                                                <TableCell>Row</TableCell>
-                                                <TableCell>Instructor Name</TableCell>
-                                                <TableCell>Project Type</TableCell>
-                                                <TableCell>Project Description</TableCell>
-                                                <TableCell>Status</TableCell>
-                                                <TableCell>Instructor</TableCell>
-                                                <TableCell>Project</TableCell>
+                                                <TableCell>#</TableCell>
+                                                <TableCell>InstructorName</TableCell>
+                                                <TableCell>ProjectType</TableCell>
+                                                <TableCell>ProjectDescription</TableCell>
                                             </TableRow>
                                         </TableHead>
                                         <TableBody>
-                                            {validatedData.rows.map((row: ImportRow) => (
-                                                <TableRow key={row.row_number}>
-                                                    <TableCell>{row.row_number}</TableCell>
-                                                    <TableCell>{row.instructor_name}</TableCell>
-                                                    <TableCell>{row.project_type}</TableCell>
-                                                    <TableCell>{row.project_description}</TableCell>
-                                                    <TableCell>
-                                                        {getStatusIcon(row.status) ? (
-                                                            <Chip
-                                                                icon={getStatusIcon(row.status)}
-                                                                label={row.status || 'unknown'}
-                                                                color={getStatusColor(row.status)}
-                                                                size="small"
-                                                            />
-                                                        ) : (
-                                                            <Chip
-                                                                label={row.status || 'unknown'}
-                                                                color={getStatusColor(row.status)}
-                                                                size="small"
-                                                            />
-                                                        )}
-                                                    </TableCell>
+                                            {conversionPreview.slice(0, 50).map((row, index) => (
+                                                <TableRow key={index} hover>
+                                                    <TableCell>{index + 1}</TableCell>
+                                                    <TableCell>{row.InstructorName}</TableCell>
                                                     <TableCell>
                                                         <Chip
-                                                            label={row.instructor_status || 'N/A'}
-                                                            color={row.instructor_status === 'new' ? 'success' : 'info'}
+                                                            label={row.ProjectType}
                                                             size="small"
+                                                            color={row.ProjectType === 'Bitirme Projesi' ? 'primary' : 'secondary'}
                                                         />
                                                     </TableCell>
-                                                    <TableCell>
-                                                        <Chip
-                                                            label={row.project_status || 'N/A'}
-                                                            color={row.project_status === 'new' ? 'success' : 'info'}
-                                                            size="small"
-                                                        />
-                                                    </TableCell>
+                                                    <TableCell>{row.ProjectDescription}</TableCell>
                                                 </TableRow>
                                             ))}
                                         </TableBody>
                                     </Table>
                                 </TableContainer>
-                            </CardContent>
-                        </Card>
+                                {conversionPreview.length > 50 && (
+                                    <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                                        ... ve {conversionPreview.length - 50} satır daha (toplam: {conversionPreview.length})
+                                    </Typography>
+                                )}
+                            </Box>
+                        )}
+                    </CardContent>
+                </Card>
+            </Box>
+
+            {/* Preview Table */}
+            {validatedData && validatedData.rows.length > 0 && (
+                <Box sx={{ mt: 3 }}>
+                    <Card>
+                        <CardContent>
+                            <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+                                File Preview
+                            </Typography>
+                            <TableContainer sx={{ maxHeight: 600 }}>
+                                <Table stickyHeader>
+                                    <TableHead>
+                                        <TableRow>
+                                            <TableCell>Row</TableCell>
+                                            <TableCell>Instructor Name</TableCell>
+                                            <TableCell>Project Type</TableCell>
+                                            <TableCell>Project Description</TableCell>
+                                            <TableCell>Status</TableCell>
+                                            <TableCell>Instructor</TableCell>
+                                            <TableCell>Project</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {validatedData.rows.map((row: ImportRow) => (
+                                            <TableRow key={row.row_number}>
+                                                <TableCell>{row.row_number}</TableCell>
+                                                <TableCell>{row.instructor_name}</TableCell>
+                                                <TableCell>{row.project_type}</TableCell>
+                                                <TableCell>{row.project_description}</TableCell>
+                                                <TableCell>
+                                                    {getStatusIcon(row.status) ? (
+                                                        <Chip
+                                                            icon={getStatusIcon(row.status)}
+                                                            label={row.status || 'unknown'}
+                                                            color={getStatusColor(row.status)}
+                                                            size="small"
+                                                        />
+                                                    ) : (
+                                                        <Chip
+                                                            label={row.status || 'unknown'}
+                                                            color={getStatusColor(row.status)}
+                                                            size="small"
+                                                        />
+                                                    )}
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Chip
+                                                        label={row.instructor_status || 'N/A'}
+                                                        color={row.instructor_status === 'new' ? 'success' : 'info'}
+                                                        size="small"
+                                                    />
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Chip
+                                                        label={row.project_status || 'N/A'}
+                                                        color={row.project_status === 'new' ? 'success' : 'info'}
+                                                        size="small"
+                                                    />
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        </CardContent>
+                    </Card>
                 </Box>
             )}
 

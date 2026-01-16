@@ -218,7 +218,7 @@ const Notifications: React.FC = () => {
                 });
                 return;
             }
-            
+
             setConfirmAction(() => async () => {
                 setSending(true);
                 try {
@@ -307,7 +307,7 @@ const Notifications: React.FC = () => {
     };
 
     return (
-        <Box sx={{ p: 3 }}>
+        <Box sx={{ p: 3, width: '100%' }}>
             {/* Header */}
             <Box sx={{ mb: 4 }}>
                 <Typography variant="h4" sx={{ fontWeight: 700, mb: 1 }}>
@@ -404,7 +404,7 @@ const Notifications: React.FC = () => {
                                 return `${option.name || ''} ${option.email ? `(${option.email})` : ''}`;
                             }}
                             value={
-                                isTestAdmin 
+                                isTestAdmin
                                     ? { id: 'TEST_ADMIN', name: 'TEST_ADMIN', email: '', isTestAdmin: true }
                                     : instructors.find((i) => i.id === selectedInstructorId) || null
                             }
@@ -515,13 +515,13 @@ const Notifications: React.FC = () => {
                                             <Box sx={{ p: 1.5, bgcolor: idx % 2 === 0 ? 'grey.50' : 'white', border: '1px solid', borderColor: 'divider', borderRadius: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, minHeight: 80 }}>
                                                 <Typography variant="body2" sx={{ fontWeight: 700 }}>{timeSlot}</Typography>
                                             </Box>
-                                            
+
                                             {/* Project cells for each class */}
                                             {globalPreview.planner_data.classes.map((cls: string) => {
                                                 const projectsForSlot = globalPreview.planner_data.projects.filter(
                                                     (p: any) => p.class === cls && p.time === timeSlot
                                                 );
-                                                
+
                                                 return (
                                                     <Box
                                                         key={`cell-${cls}-${timeSlot}`}
@@ -548,11 +548,11 @@ const Notifications: React.FC = () => {
                                                                         borderLeft: `3px solid ${proj.color || 'grey.400'}`,
                                                                     }}
                                                                 >
-                                                                    <Typography 
-                                                                        variant="caption" 
-                                                                        sx={{ 
-                                                                            fontWeight: 700, 
-                                                                            display: 'block', 
+                                                                    <Typography
+                                                                        variant="caption"
+                                                                        sx={{
+                                                                            fontWeight: 700,
+                                                                            display: 'block',
                                                                             mb: 0.8,
                                                                             fontSize: '0.75rem',
                                                                             color: 'text.primary',
@@ -561,11 +561,11 @@ const Notifications: React.FC = () => {
                                                                     >
                                                                         {proj.projectTitle || 'N/A'}
                                                                     </Typography>
-                                                                    <Typography 
-                                                                        variant="caption" 
-                                                                        sx={{ 
-                                                                            fontSize: '0.72rem', 
-                                                                            display: 'block', 
+                                                                    <Typography
+                                                                        variant="caption"
+                                                                        sx={{
+                                                                            fontSize: '0.72rem',
+                                                                            display: 'block',
                                                                             color: 'text.primary',
                                                                             fontWeight: 600,
                                                                             mb: 0.3
@@ -579,14 +579,14 @@ const Notifications: React.FC = () => {
                                                                             const juryMember = proj.jury && proj.jury[juryIdx];
                                                                             const displayText = juryMember || '[Araştırma Görevlisi]';
                                                                             const isPlaceholder = !juryMember;
-                                                                            
+
                                                                             return (
-                                                                                <Typography 
+                                                                                <Typography
                                                                                     key={`jury-${juryIdx}`}
-                                                                                    variant="caption" 
-                                                                                    sx={{ 
-                                                                                        fontSize: '0.72rem', 
-                                                                                        display: 'block', 
+                                                                                    variant="caption"
+                                                                                    sx={{
+                                                                                        fontSize: '0.72rem',
+                                                                                        display: 'block',
                                                                                         color: isPlaceholder ? 'text.secondary' : 'text.primary',
                                                                                         fontStyle: 'normal',
                                                                                         fontWeight: isPlaceholder ? 600 : 600,
@@ -601,9 +601,9 @@ const Notifications: React.FC = () => {
                                                                     <Chip
                                                                         label={proj.type || 'N/A'}
                                                                         size="small"
-                                                                        sx={{ 
-                                                                            mt: 0.8, 
-                                                                            height: 20, 
+                                                                        sx={{
+                                                                            mt: 0.8,
+                                                                            height: 20,
                                                                             fontSize: '0.7rem',
                                                                             fontWeight: 600
                                                                         }}

@@ -265,7 +265,6 @@ const Algorithms: React.FC = () => {
 
           // WebSocket bağlantısını kontrol et
           if (!isConnected) {
-            setSnack({ open: true, message: 'WebSocket baglantisi yok, baglanmaya calisiliyor...', severity: 'error' });
             // Kullanıcı ID'sini al (auth context'ten)
             const userId = user?.id || 1; // Fallback to 1 if user not available
             await connect(userId);
@@ -350,7 +349,6 @@ const Algorithms: React.FC = () => {
 
       // WebSocket bağlantısını kontrol et
       if (!isConnected) {
-        setSnack({ open: true, message: 'WebSocket baglantisi yok, baglanmaya calisiliyor...', severity: 'error' });
         // Kullanıcı ID'sini al (auth context'ten)
         const userId = user?.id || 1; // Fallback to 1 if user not available
         await connect(userId);
@@ -546,33 +544,56 @@ const Algorithms: React.FC = () => {
     }
   };
 
+  // Algorithms to exclude from the UI
+  const excludedAlgorithms = ['SIMPLEX_ARA', 'simplex_ara', 'hungarian', 'bitirme_priority_scheduler'];
+
+  // Filter out excluded algorithms
+  const availableAlgorithms = algorithms.filter(a =>
+    !excludedAlgorithms.includes(a.name) &&
+    !excludedAlgorithms.includes(a.type || '')
+  );
+
   const getAlgorithmStats = () => {
-    const total = algorithms.length;
-    const bioInspired = algorithms.filter(a => a.category === 'Bio-inspired').length;
-    const searchBased = algorithms.filter(a => a.category === 'Search-based').length;
-    const mathematical = algorithms.filter(a => a.category === 'Mathematical').length;
-    const multiObjective = algorithms.filter(a => a.category === 'Multi-objective').length;
-    const metaheuristic = algorithms.filter(a => a.category === 'Metaheuristic').length;
+    const total = availableAlgorithms.length;
+    const bioInspired = availableAlgorithms.filter(a => a.category === 'Bio-inspired').length;
+    const searchBased = availableAlgorithms.filter(a => a.category === 'Search-based').length;
+    const mathematical = availableAlgorithms.filter(a => a.category === 'Mathematical').length;
+    const multiObjective = availableAlgorithms.filter(a => a.category === 'Multi-objective').length;
+    const metaheuristic = availableAlgorithms.filter(a => a.category === 'Metaheuristic').length;
 
     return { total, bioInspired, searchBased, mathematical, multiObjective, metaheuristic };
   };
 
   const stats = getAlgorithmStats();
 
+  // Development Journey algorithms (experimental/research)
+  const developmentJourneyAlgorithms = ['bat_algorithm', 'dragonfly_algorithm', 'a_star_search', 'deep_search', 'nsga_ii_enhanced', 'greedy'];
+
   // Filter algorithms based on selected tab
   const getFilteredAlgorithms = () => {
     switch (tabValue) {
-      case 0: return algorithms; // All
-      case 1: return algorithms.filter(a => a.category === 'Metaheuristic');
-      case 2: return algorithms.filter(a => a.category === 'Bio-inspired');
-      case 3: return algorithms.filter(a => a.category === 'Search-based');
-      case 4: return algorithms.filter(a => a.category === 'Mathematical');
-      case 5: return algorithms.filter(a => a.category === 'Multi-objective');
-      default: return algorithms;
+      case 0: return availableAlgorithms; // All
+      case 1: return availableAlgorithms.filter(a => a.category === 'Metaheuristic');
+      case 2: return availableAlgorithms.filter(a => a.category === 'Bio-inspired');
+      case 3: return availableAlgorithms.filter(a => a.category === 'Search-based');
+      case 4: return availableAlgorithms.filter(a => a.category === 'Mathematical');
+      case 5: return availableAlgorithms.filter(a => a.category === 'Multi-objective');
+      default: return availableAlgorithms;
     }
   };
 
   const filteredAlgorithms = getFilteredAlgorithms();
+
+  // Separate algorithms into two groups
+  const optimizedAlgorithms = filteredAlgorithms.filter(a =>
+    !developmentJourneyAlgorithms.includes(a.name) &&
+    !developmentJourneyAlgorithms.includes(a.type || '')
+  );
+
+  const devJourneyAlgorithms = filteredAlgorithms.filter(a =>
+    developmentJourneyAlgorithms.includes(a.name) ||
+    developmentJourneyAlgorithms.includes(a.type || '')
+  );
 
   if (loading) {
     return (
@@ -626,6 +647,9 @@ const Algorithms: React.FC = () => {
               <MenuItem value={5}>5 Sınıf</MenuItem>
               <MenuItem value={6}>6 Sınıf</MenuItem>
               <MenuItem value={7}>7 Sınıf</MenuItem>
+              <MenuItem value={8}>8 Sınıf</MenuItem>
+              <MenuItem value={9}>9 Sınıf</MenuItem>
+              <MenuItem value={10}>10 Sınıf</MenuItem>
             </Select>
           </FormControl>
 
@@ -659,24 +683,6 @@ const Algorithms: React.FC = () => {
               </Typography>
             </Box>
           )}
-
-          {/* WebSocket connection status */}
-          <Chip
-            label={connectionStatus}
-            color={connectionStatus === 'connected' ? 'success' : connectionStatus === 'connecting' ? 'warning' : 'error'}
-            size="small"
-            variant="outlined"
-          />
-
-          <Button
-            variant="contained"
-            startIcon={<Recommend />}
-            sx={{ borderRadius: 2 }}
-            onClick={handleGetRecommendation}
-            disabled={recommendationLoading}
-          >
-            {recommendationLoading ? 'Getting Recommendation...' : 'Get Recommendation'}
-          </Button>
         </Box>
       </Box>
 
@@ -694,114 +700,247 @@ const Algorithms: React.FC = () => {
         </Box>
       </Paper>
 
-      {/* Algorithm Grid */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' }, gap: 3, mb: 4 }}>
-        {(filteredAlgorithms || []).map((algorithm, index) => (
-          <Card
-            key={algorithm.type || algorithm.name || `algorithm-${index}`}
-            sx={{
-              height: '100%',
-              transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
-              '&:hover': {
-                transform: 'translateY(-4px)',
-                boxShadow: 4,
-              },
-              cursor: (executing || optimizing) ? 'not-allowed' : 'pointer',
-              opacity: (executing || optimizing) ? 0.6 : 1,
-            }}
-            onClick={() => {
-              if (!executing && !optimizing) {
-                if (optimizeClassroomCount) {
-                  handleOptimizeClassroomCount(algorithm);
-                } else {
-                  handleExecuteDirect(algorithm);
-                }
-              }
-            }}
-          >
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
-                {getAlgorithmIcon(algorithm.category)}
-                <Box sx={{ ml: 2, flexGrow: 1 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
-                    {algorithm.displayName}
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
-                    <Chip
-                      label={algorithm.category}
-                      color={getCategoryColor(algorithm.category) as any}
-                      size="small"
-                      variant="outlined"
-                    />
-                    <Chip
-                      label={algorithm.complexity}
-                      color={getComplexityColor(algorithm.complexity) as any}
-                      size="small"
-                    />
-                  </Box>
-                </Box>
-              </Box>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                {algorithm.description}
-              </Typography>
-              {optimizeClassroomCount && (
-                <Box sx={{
-                  backgroundColor: 'primary.light',
-                  color: 'primary.contrastText',
-                  p: 1,
-                  borderRadius: 1,
-                  mb: 2,
-                  fontSize: '0.75rem'
-                }}>
-                  🎯 Bu algoritma için optimal sınıf sayısı otomatik bulunacak
-                </Box>
-              )}
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
-                  Recommended for:
-                </Typography>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
-                  {Array.isArray(algorithm.recommendedFor) && algorithm.recommendedFor.map((item: any, index: number) => (
-                    <Chip
-                      key={index}
-                      label={typeof item === 'string' ? item : String(item)}
-                      size="small"
-                      variant="outlined"
-                      sx={{ fontSize: '0.7rem', height: 20 }}
-                    />
-                  ))}
-                </Box>
-              </Box>
-              <Box sx={{ display: 'flex', gap: 1, mt: 'auto' }}>
-                <Button
-                  variant="contained"
-                  size="small"
-                  sx={{ flexGrow: 1 }}
-                  disabled={executing || optimizing}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (!executing && !optimizing) {
-                      if (optimizeClassroomCount) {
-                        handleOptimizeClassroomCount(algorithm);
-                      } else {
-                        handleExecuteDirect(algorithm);
-                      }
+      {/* Optimized Algorithms Section */}
+      {optimizedAlgorithms.length > 0 && (
+        <>
+          <Typography variant="h5" sx={{ fontWeight: 600, mb: 3, mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CheckCircle sx={{ color: 'success.main' }} />
+            Optimized Algorithms
+          </Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' }, gap: 3, mb: 4 }}>
+            {optimizedAlgorithms.map((algorithm, index) => (
+              <Card
+                key={algorithm.type || algorithm.name || `optimized-${index}`}
+                sx={{
+                  height: '100%',
+                  transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
+                  '&:hover': {
+                    transform: 'translateY(-4px)',
+                    boxShadow: 4,
+                  },
+                  cursor: (executing || optimizing) ? 'not-allowed' : 'pointer',
+                  opacity: (executing || optimizing) ? 0.6 : 1,
+                  borderLeft: '4px solid',
+                  borderLeftColor: 'success.main',
+                }}
+                onClick={() => {
+                  if (!executing && !optimizing) {
+                    if (optimizeClassroomCount) {
+                      handleOptimizeClassroomCount(algorithm);
+                    } else {
+                      handleExecuteDirect(algorithm);
                     }
-                  }}>
-                  {optimizing ? 'Optimizing...' : executing ? 'Running...' : optimizeClassroomCount ? 'Find Optimal & Run' : 'Run'}
-                </Button>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  disabled={executing || optimizing}
-                  onClick={(e) => { e.stopPropagation(); !executing && !optimizing && handleConfigureAlgorithm(algorithm); }}>
-                  Configure
-                </Button>
-              </Box>
-            </CardContent>
-          </Card>
-        ))}
-      </Box>
+                  }
+                }}
+              >
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+                    {getAlgorithmIcon(algorithm.category)}
+                    <Box sx={{ ml: 2, flexGrow: 1 }}>
+                      <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+                        {algorithm.displayName}
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                        <Chip
+                          label={algorithm.category}
+                          color={getCategoryColor(algorithm.category) as any}
+                          size="small"
+                          variant="outlined"
+                        />
+                        <Chip
+                          label={algorithm.complexity}
+                          color={getComplexityColor(algorithm.complexity) as any}
+                          size="small"
+                        />
+                      </Box>
+                    </Box>
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    {algorithm.description}
+                  </Typography>
+                  {optimizeClassroomCount && (
+                    <Box sx={{
+                      backgroundColor: 'primary.light',
+                      color: 'primary.contrastText',
+                      p: 1,
+                      borderRadius: 1,
+                      mb: 2,
+                      fontSize: '0.75rem'
+                    }}>
+                      🎯 Bu algoritma için optimal sınıf sayısı otomatik bulunacak
+                    </Box>
+                  )}
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
+                      Recommended for:
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                      {Array.isArray(algorithm.recommendedFor) && algorithm.recommendedFor.map((item: any, index: number) => (
+                        <Chip
+                          key={index}
+                          label={typeof item === 'string' ? item : String(item)}
+                          size="small"
+                          variant="outlined"
+                          sx={{ fontSize: '0.7rem', height: 20 }}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 1, mt: 'auto' }}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      sx={{ flexGrow: 1 }}
+                      disabled={executing || optimizing}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!executing && !optimizing) {
+                          if (optimizeClassroomCount) {
+                            handleOptimizeClassroomCount(algorithm);
+                          } else {
+                            handleExecuteDirect(algorithm);
+                          }
+                        }
+                      }}>
+                      {optimizing ? 'Optimizing...' : executing ? 'Running...' : optimizeClassroomCount ? 'Find Optimal & Run' : 'Run'}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={executing || optimizing}
+                      onClick={(e) => { e.stopPropagation(); !executing && !optimizing && handleConfigureAlgorithm(algorithm); }}>
+                      Configure
+                    </Button>
+                  </Box>
+                </CardContent>
+              </Card>
+            ))}
+          </Box>
+        </>
+      )}
+
+      {/* Development Journey Section */}
+      {devJourneyAlgorithms.length > 0 && (
+        <>
+          <Typography variant="h5" sx={{ fontWeight: 600, mb: 3, mt: 4, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Science sx={{ color: 'warning.main' }} />
+            Development Journey
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Bu algoritmalar araştırma ve geliştirme sürecinde deneysel olarak test edilmiştir.
+          </Typography>
+          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: 'repeat(3, 1fr)' }, gap: 3, mb: 4 }}>
+            {devJourneyAlgorithms.map((algorithm, index) => (
+              <Card
+                key={algorithm.type || algorithm.name || `dev-${index}`}
+                sx={{
+                  height: '100%',
+                  transition: 'transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out',
+                  '&:hover': {
+                    transform: 'translateY(-4px)',
+                    boxShadow: 4,
+                  },
+                  cursor: (executing || optimizing) ? 'not-allowed' : 'pointer',
+                  opacity: (executing || optimizing) ? 0.6 : 1,
+                  borderLeft: '4px solid',
+                  borderLeftColor: 'warning.main',
+                }}
+                onClick={() => {
+                  if (!executing && !optimizing) {
+                    if (optimizeClassroomCount) {
+                      handleOptimizeClassroomCount(algorithm);
+                    } else {
+                      handleExecuteDirect(algorithm);
+                    }
+                  }
+                }}
+              >
+                <CardContent>
+                  <Box sx={{ display: 'flex', alignItems: 'flex-start', mb: 2 }}>
+                    {getAlgorithmIcon(algorithm.category)}
+                    <Box sx={{ ml: 2, flexGrow: 1 }}>
+                      <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
+                        {algorithm.displayName}
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                        <Chip
+                          label={algorithm.category}
+                          color={getCategoryColor(algorithm.category) as any}
+                          size="small"
+                          variant="outlined"
+                        />
+                        <Chip
+                          label={algorithm.complexity}
+                          color={getComplexityColor(algorithm.complexity) as any}
+                          size="small"
+                        />
+                      </Box>
+                    </Box>
+                  </Box>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    {algorithm.description}
+                  </Typography>
+                  {optimizeClassroomCount && (
+                    <Box sx={{
+                      backgroundColor: 'primary.light',
+                      color: 'primary.contrastText',
+                      p: 1,
+                      borderRadius: 1,
+                      mb: 2,
+                      fontSize: '0.75rem'
+                    }}>
+                      🎯 Bu algoritma için optimal sınıf sayısı otomatik bulunacak
+                    </Box>
+                  )}
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500 }}>
+                      Recommended for:
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 0.5 }}>
+                      {Array.isArray(algorithm.recommendedFor) && algorithm.recommendedFor.map((item: any, index: number) => (
+                        <Chip
+                          key={index}
+                          label={typeof item === 'string' ? item : String(item)}
+                          size="small"
+                          variant="outlined"
+                          sx={{ fontSize: '0.7rem', height: 20 }}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 1, mt: 'auto' }}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      color="warning"
+                      sx={{ flexGrow: 1 }}
+                      disabled={executing || optimizing}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!executing && !optimizing) {
+                          if (optimizeClassroomCount) {
+                            handleOptimizeClassroomCount(algorithm);
+                          } else {
+                            handleExecuteDirect(algorithm);
+                          }
+                        }
+                      }}>
+                      {optimizing ? 'Optimizing...' : executing ? 'Running...' : optimizeClassroomCount ? 'Find Optimal & Run' : 'Run'}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      disabled={executing || optimizing}
+                      onClick={(e) => { e.stopPropagation(); !executing && !optimizing && handleConfigureAlgorithm(algorithm); }}>
+                      Configure
+                    </Button>
+                  </Box>
+                </CardContent>
+              </Card>
+            ))}
+          </Box>
+        </>
+      )}
 
       {/* Recent Algorithm Runs */}
       {algorithmRuns.length > 0 && (
@@ -963,31 +1102,13 @@ const Algorithms: React.FC = () => {
                     onChange={(e) => setAlgorithmParams(prev => ({ ...prev, project_priority: e.target.value }))}
                     label="Proje Önceliği"
                   >
-                    <MenuItem value="final_exam_priority">Bitirme Ara Öncelikli</MenuItem>
+                    <MenuItem value="final_exam_priority">Bitirme Projesi Öncelikli</MenuItem>
                     <MenuItem value="midterm_priority">Ara Proje Öncelikli</MenuItem>
                     <MenuItem value="none">Önceliksiz</MenuItem>
                   </Select>
                 </FormControl>
 
-                {/* Zero Conflict Option */}
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      checked={algorithmParams.zero_conflict || false}
-                      onChange={(e) => setAlgorithmParams(prev => ({ ...prev, zero_conflict: e.target.checked }))}
-                    />
-                  }
-                  label={
-                    <Box>
-                      <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                        Zero Conflict Mode
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Algoritma çakışma analizi yaparak 0 çakışma olana kadar iteratif olarak çalışacak
-                      </Typography>
-                    </Box>
-                  }
-                />
+
 
                 {/* Algorithm-specific parameters */}
                 {selectedAlgorithm.name.includes('genetic') && (

@@ -53,46 +53,121 @@ const isSeniorInstructor = (role: string) => {
   return role.includes('Prof. Dr.') || role.includes('Doç. Dr.') || role.includes('Dr. Öğr. Üyesi');
 };
 
-const calculateConflicts = (schedules: any[]) => {
-  const instructorTimeslots = new Map<number, Set<number>>();
+const calculateConflicts = (schedules: any[], instructors?: any[], classrooms?: any[], timeslots?: any[]) => {
+  // Map: instructor_id -> timeslot_id -> list of schedules at that timeslot
+  const instructorTimeslotMap = new Map<number, Map<number, any[]>>();
   let conflictCount = 0;
+  const conflictDetails: Array<{
+    instructorId: number;
+    instructorName: string;
+    timeslotId: number;
+    timeslotLabel: string;
+    classroomIds: number[];
+    classroomNames: string[];
+    projectIds: number[];
+    projectNames: string[];
+  }> = [];
+
+  // Helper to get instructor name
+  const getInstructorNameById = (id: number) => {
+    if (!instructors || id === -1) return `Hoca ${id}`;
+    const inst = instructors.find((i: any) => i.id === id);
+    return inst?.name || inst?.full_name || `Hoca ${id}`;
+  };
+
+  // Helper to get classroom name
+  const getClassroomNameById = (id: number) => {
+    if (!classrooms) return `Sınıf ${id}`;
+    const cls = classrooms.find((c: any) => c.id === id);
+    return cls?.name || `Sınıf ${id}`;
+  };
+
+  // Helper to get timeslot label
+  const getTimeslotLabel = (id: number) => {
+    if (!timeslots) return `Slot ${id}`;
+    const ts = timeslots.find((t: any) => t.id === id);
+    if (ts?.start_time && ts?.end_time) {
+      return `${String(ts.start_time).slice(0, 5)}-${String(ts.end_time).slice(0, 5)}`;
+    }
+    return `Slot ${id}`;
+  };
 
   schedules.forEach((schedule: any) => {
-    if (!schedule.timeslot_id || !schedule.classroom_id) return;
+    if (!schedule.timeslot_id) return;
 
-    // Responsible instructor'ı bul - schedule'dan veya project'ten
-    let responsibleInstructorId = schedule.project?.responsible_instructor_id || 
-                                 schedule.responsible_instructor_id;
-    
-    // Eğer schedule.instructors array'i varsa, ilk eleman (role:'responsible') responsible instructor
-    if (!responsibleInstructorId && schedule.instructors && Array.isArray(schedule.instructors) && schedule.instructors.length > 0) {
-      const firstInstructor = schedule.instructors[0];
-      if (firstInstructor?.role === 'responsible' && firstInstructor?.id) {
-        responsibleInstructorId = firstInstructor.id;
+    // Get all instructors involved (PS + J1)
+    const involvedInstructors: number[] = [];
+
+    // Responsible instructor
+    let responsibleInstructorId = schedule.project?.responsible_instructor_id ||
+      schedule.responsible_instructor_id;
+
+    // From instructors array
+    if (schedule.instructors && Array.isArray(schedule.instructors)) {
+      schedule.instructors.forEach((inst: any) => {
+        if (typeof inst === 'object' && inst?.id && inst.id !== -1) {
+          involvedInstructors.push(inst.id);
+          // Also get responsible from instructors array
+          if (!responsibleInstructorId && inst?.role === 'responsible') {
+            responsibleInstructorId = inst.id;
+          }
+        }
+      });
+    }
+
+    // Add responsible if found
+    if (responsibleInstructorId && responsibleInstructorId !== -1 && !involvedInstructors.includes(responsibleInstructorId)) {
+      involvedInstructors.push(responsibleInstructorId);
+    }
+
+    // Track each instructor at this timeslot
+    involvedInstructors.forEach((instructorId) => {
+      if (instructorId === -1) return;
+
+      if (!instructorTimeslotMap.has(instructorId)) {
+        instructorTimeslotMap.set(instructorId, new Map());
       }
-    }
 
-    if (!responsibleInstructorId) return;
-    
-    // Instructor -1'i çakışma hesaplamalarına dahil etme
-    if (responsibleInstructorId === -1) return;
+      const timeslotMap = instructorTimeslotMap.get(instructorId)!;
+      if (!timeslotMap.has(schedule.timeslot_id)) {
+        timeslotMap.set(schedule.timeslot_id, []);
+      }
 
-    if (!instructorTimeslots.has(responsibleInstructorId)) {
-      instructorTimeslots.set(responsibleInstructorId, new Set());
-    }
+      timeslotMap.get(schedule.timeslot_id)!.push(schedule);
+    });
+  });
 
-    const existingTimeslots = instructorTimeslots.get(responsibleInstructorId)!;
-    if (existingTimeslots.has(schedule.timeslot_id)) {
-      conflictCount++;
-    } else {
-      existingTimeslots.add(schedule.timeslot_id);
-    }
+  // Find conflicts (instructor has multiple schedules at the same timeslot)
+  instructorTimeslotMap.forEach((timeslotMap, instructorId) => {
+    timeslotMap.forEach((schedulesAtSlot, timeslotId) => {
+      if (schedulesAtSlot.length > 1) {
+        // Found a conflict - this instructor has multiple duties at the same time
+        const classroomIds = schedulesAtSlot.map(s => s.classroom_id).filter(Boolean);
+        const uniqueClassroomIds = Array.from(new Set(classroomIds));
+
+        // Only count as conflict if in different classrooms
+        if (uniqueClassroomIds.length > 1) {
+          conflictCount += schedulesAtSlot.length - 1;
+
+          conflictDetails.push({
+            instructorId,
+            instructorName: getInstructorNameById(instructorId),
+            timeslotId,
+            timeslotLabel: getTimeslotLabel(timeslotId),
+            classroomIds: uniqueClassroomIds,
+            classroomNames: uniqueClassroomIds.map(id => getClassroomNameById(id)),
+            projectIds: schedulesAtSlot.map(s => s.project_id).filter(Boolean),
+            projectNames: schedulesAtSlot.map(s => s.project?.title || `Proje ${s.project_id}`),
+          });
+        }
+      }
+    });
   });
 
   return {
     totalConflicts: conflictCount,
-    instructorsWithConflicts: Array.from(instructorTimeslots.entries())
-      .filter(([, timeslots]) => timeslots.size > 1).length
+    instructorsWithConflicts: conflictDetails.length,
+    conflictDetails: conflictDetails.sort((a, b) => a.timeslotId - b.timeslotId)
   };
 };
 
@@ -122,7 +197,7 @@ const calculateAllInstructorWorkloads = (schedules: any[], instructors: any[]) =
   // Schedule'ları işle
   schedules.forEach((schedule: any) => {
     const responsibleId = schedule.responsible_instructor_id;
-    
+
     // Sorumlu instructor'ı say (Instructor -1 hariç)
     if (responsibleId && responsibleId !== -1) {
       const workload = workloadMap.get(responsibleId);
@@ -150,12 +225,12 @@ const calculateAllInstructorWorkloads = (schedules: any[], instructors: any[]) =
         if (typeof inst === 'string' && inst === '[Araştırma Görevlisi]') {
           return; // Placeholder'ı iş yükü hesaplamalarına dahil etme
         }
-        
+
         // Placeholder kontrolü: is_placeholder veya id: -1
         if (inst?.is_placeholder === true || inst?.id === -1 || inst?.id === null || inst?.id === undefined) {
           return; // Instructor -1'i iş yükü hesaplamalarına dahil etme
         }
-        
+
         const juryId = typeof inst === 'object' ? inst.id : inst;
         // Sorumlu dışındaki jüri üyelerini say (Instructor -1 hariç)
         if (juryId && juryId !== -1 && juryId !== responsibleId) {
@@ -198,15 +273,15 @@ const calculateAllInstructorWorkloads = (schedules: any[], instructors: any[]) =
 const analyzeWorkloadDistribution = (schedules: any[], instructors: any[]) => {
   // calculateAllInstructorWorkloads kullanarak doğru iş yükünü al
   const allInstructorWorkloads = calculateAllInstructorWorkloads(schedules, instructors);
-  
+
   // Sadece toplam yükü 0'dan büyük olan ve Instructor -1 olmayan instructor'ları al
-  const workloadsWithLoad = allInstructorWorkloads.filter(w => 
-    w.totalCount > 0 && 
-    w.instructorId !== -1 && 
-    w.instructorId !== null && 
+  const workloadsWithLoad = allInstructorWorkloads.filter(w =>
+    w.totalCount > 0 &&
+    w.instructorId !== -1 &&
+    w.instructorId !== null &&
     w.instructorId !== undefined
   );
-  
+
   if (workloadsWithLoad.length === 0) {
     return {
       maxWorkload: 0,
@@ -252,9 +327,9 @@ const analyzeClassroomChanges = (schedules: any[]) => {
 
   schedules.forEach((schedule: any) => {
     // Responsible instructor'ı bul - schedule'dan veya project'ten
-    let responsibleInstructorId = schedule.project?.responsible_instructor_id || 
-                                 schedule.responsible_instructor_id;
-    
+    let responsibleInstructorId = schedule.project?.responsible_instructor_id ||
+      schedule.responsible_instructor_id;
+
     // Eğer schedule.instructors array'i varsa, ilk eleman (role:'responsible') responsible instructor
     if (!responsibleInstructorId && schedule.instructors && Array.isArray(schedule.instructors) && schedule.instructors.length > 0) {
       const firstInstructor = schedule.instructors[0];
@@ -289,33 +364,33 @@ const analyzeClassroomChanges = (schedules: any[]) => {
 const calculateSatisfactionScore = (data: any) => {
   let score = 100;
   const totalSchedules = data.totalSchedules || 0;
-  
+
   // Çakışma cezası - Toplam schedule'a göre normalize edilmiş (max 25 puan)
   const totalConflicts = data.conflictAnalysis?.totalConflicts || 0;
   if (totalConflicts > 0 && totalSchedules > 0) {
     const conflictRate = totalConflicts / totalSchedules;
     score -= Math.min(conflictRate * 50, 25);
   }
-  
+
   // Yük dağılımı cezası - Daha toleranslı (max 20 puan)
   const maxDifference = data.workloadAnalysis?.maxDifference || 0;
   if (maxDifference > 2) {
     const penalty = Math.min((maxDifference - 2) * 3, 20);
     score -= penalty;
   }
-  
+
   // Sınıf değişimi cezası - Daha düşük (max 15 puan)
   if (data.classroomChangeAnalysis?.instructorsWithChanges > 0 && data.classroomChangeAnalysis?.totalInstructors > 0) {
     const changeRate = data.classroomChangeAnalysis.instructorsWithChanges / data.classroomChangeAnalysis.totalInstructors;
     score -= Math.min(changeRate * 30, 15);
   }
-  
+
   // Atanmamış proje cezası - Orantılı ama makul (max 30 puan)
   if (data.unassignedProjects > 0 && data.totalProjects > 0) {
     const unassignedRate = data.unassignedProjects / data.totalProjects;
     score -= Math.min(unassignedRate * 40, 30);
   }
-  
+
   return Math.max(0, Math.round(score));
 };
 
@@ -335,14 +410,14 @@ const Planner: React.FC = () => {
   // Drag-and-drop için state
   const [draggedSchedule, setDraggedSchedule] = useState<any>(null);
   const [dragOverCell, setDragOverCell] = useState<string | null>(null);
-  
+
   // Dialog açıldığında state'leri initialize et
   useEffect(() => {
     if (openDialog && selectedTimeSlot?.project) {
       const sch = schedules.find((s: any) => s.id === selectedTimeSlot.scheduleId);
       const currentJury = sch ? getJuryForSchedule(sch) : [];
       const currentJuryIds = currentJury.map((j: any) => j.id).filter((id: number) => id !== -1);
-      
+
       setEditableResponsibleId(selectedTimeSlot.project.responsible_instructor_id || '');
       setEditableJuryIds(currentJuryIds);
     } else if (!openDialog) {
@@ -361,10 +436,10 @@ const Planner: React.FC = () => {
   const [calendarOverlays, setCalendarOverlays] = useState<any[]>([]);
   // View toggle: 'classroom' or 'jury'
   const [viewMode, setViewMode] = useState<'classroom' | 'jury'>('classroom');
-  
+
   // Classroom count from localStorage (set by Algorithms page)
   const [selectedClassroomCount, setSelectedClassroomCount] = useState<number>(7);
-  
+
   // Slot insufficiency dialog state
   const [showSlotDialog, setShowSlotDialog] = useState(false);
   const [slotDialogData, setSlotDialogData] = useState({
@@ -412,11 +487,11 @@ const Planner: React.FC = () => {
       const projectsResponse = await api.get('/projects/');
       const projects = projectsResponse.data;
       const projectCount = projects.length;
-      
+
       // Calculate available slots (16 timeslots * classroom count)
       const availableSlots = 16 * selectedClassroomCount;
       const requiredSlots = projectCount;
-      
+
       // Check if there's a shortage
       if (requiredSlots > availableSlots) {
         setSlotDialogData({
@@ -428,7 +503,7 @@ const Planner: React.FC = () => {
         setShowSlotDialog(true);
         return false; // Insufficient slots
       }
-      
+
       return true; // Sufficient slots
     } catch (error) {
       console.error('Error checking slot sufficiency:', error);
@@ -437,12 +512,12 @@ const Planner: React.FC = () => {
   };
 
   const getJuryForSchedule = (schedule: any) => {
-    let juryFromSchedule: Array<{id: number, name: string, role: string}> = [];
-    
+    let juryFromSchedule: Array<{ id: number, name: string, role: string }> = [];
+
     try {
       // Schedule'dan project verisini al (sorumlu hocayı kontrol etmek için)
       const proj = schedule?.project || projects.find((p: any) => p.id === schedule?.project_id);
-      
+
       // SADECE algoritmanın ürettiği gerçek jüri üyelerini kullan (schedule.instructors)
       // Placeholder jürileri (assistant_instructors, advisor_id, co_advisor_id) tamamen kaldır
       if (schedule?.instructors && Array.isArray(schedule.instructors)) {
@@ -453,7 +528,7 @@ const Planner: React.FC = () => {
           instructors: schedule?.instructors,
           instructorsCount: schedule?.instructors?.length || 0
         }, null, 2));
-        
+
         // DEBUG: Detailed instructor analysis
         console.log('🔍 Detailed Instructor Analysis:', {
           scheduleId: schedule?.id,
@@ -464,7 +539,7 @@ const Planner: React.FC = () => {
           secondInstructor: schedule?.instructors?.[1],
           thirdInstructor: schedule?.instructors?.[2]
         });
-        
+
         // Sadece jüri üyelerini dahil et (sorumlu hariç)
         // ÖNCELİK: Backend'den gelen role field'ını kullan (daha güvenilir)
         // Fallback: Eğer role yoksa, responsibleId ile karşılaştır
@@ -475,16 +550,16 @@ const Planner: React.FC = () => {
             if (typeof inst === 'string' && inst === '[Araştırma Görevlisi]') {
               return true; // J2 placeholder'ı her zaman dahil et
             }
-            
+
             // Object kontrolü
             if (typeof inst === 'object') {
               // Placeholder kontrolü: is_placeholder veya id: -1 veya name: '[Araştırma Görevlisi]'
-              if (inst?.is_placeholder === true || 
-                  inst?.id === -1 || 
-                  inst?.name === '[Araştırma Görevlisi]') {
+              if (inst?.is_placeholder === true ||
+                inst?.id === -1 ||
+                inst?.name === '[Araştırma Görevlisi]') {
                 return true; // J2 placeholder'ı her zaman dahil et
               }
-              
+
               // Öncelik: role field'ını kontrol et (backend'den geliyor)
               if (inst?.role === 'jury') {
                 return true; // Jüri üyesi
@@ -495,7 +570,7 @@ const Planner: React.FC = () => {
               // Fallback: role yoksa eski mantık (responsibleId ile karşılaştır)
               return inst.id && inst.id !== responsibleId;
             }
-            
+
             return false;
           })
           .forEach((inst: any) => {
@@ -508,21 +583,21 @@ const Planner: React.FC = () => {
               });
               return;
             }
-            
+
             // Object kontrolü
             if (typeof inst === 'object') {
               // Placeholder kontrolü: is_placeholder flag'i veya özel ID'ler
-              const isPlaceholder = inst.is_placeholder === true || 
-                                    inst.id === -1 || 
-                                    inst.id === 'RA_PLACEHOLDER' ||
-                                    inst.name === '[Araştırma Görevlisi]';
-              
+              const isPlaceholder = inst.is_placeholder === true ||
+                inst.id === -1 ||
+                inst.id === 'RA_PLACEHOLDER' ||
+                inst.name === '[Araştırma Görevlisi]';
+
               // Gerçek öğretim üyeleri için 'Öğretim Üyesi', placeholder'lar için 'Araştırma Görevlisi'
               const displayRole = isPlaceholder ? 'Araştırma Görevlisi' : 'Öğretim Üyesi';
-              
+
               // id kontrolü: -1 veya gerçek id olabilir
               const juryId = inst.id !== undefined ? inst.id : -1;
-              
+
               juryFromSchedule.push({
                 id: juryId,
                 name: inst.full_name || inst.name || '[Araştırma Görevlisi]',
@@ -530,14 +605,14 @@ const Planner: React.FC = () => {
               });
             }
           });
-        
+
         // DEBUG: Log jury result
         console.log('🎯 Jury result:', JSON.stringify({
           scheduleId: schedule?.id,
           juryCount: juryFromSchedule.length,
           juryMembers: juryFromSchedule
         }, null, 2));
-        
+
         // DEBUG: Step-by-step jury filtering
         console.log('🔍 Step-by-step jury filtering:', {
           scheduleId: schedule?.id,
@@ -557,7 +632,7 @@ const Planner: React.FC = () => {
           finalJuryMembers: juryFromSchedule.map(j => ({ id: j.id, name: j.name }))
         });
       }
-      
+
     } catch (error) {
       console.error('Error getting jury for schedule:', error);
     }
@@ -575,37 +650,37 @@ const Planner: React.FC = () => {
     if (!selected) return '';
     const sch = schedules.find((s: any) => s.id === selected.scheduleId);
     let list = sch ? getJuryForSchedule(sch) : [];
-    
+
     // Sorumlu hocayı jüri listesine ekleme - sadece yardımcıları göster
     // Eğer yardımcı yoksa "Atanmamış" döndür
     if (!list || list.length === 0) {
       return 'Atanmamış';
     }
-    
+
     return list.map((j: any) => j.name).join(', ');
   };
 
   const getProjectComplianceStatus = (project: any, juryList: any[]) => {
     if (!project) return { isCompliant: true, message: '', severity: 'success' };
-    
+
     const juryCount = juryList.length;
     const isBitirme = project.type === 'bitirme';
     const requiredMinJury = isBitirme ? 2 : 1; // Bitirme: en az 2 hoca, Ara: en az 1 hoca
-    
+
     if (juryCount < requiredMinJury) {
-      const message = isBitirme 
+      const message = isBitirme
         ? `Bitirme projesi için en az 2 hoca gerekli (şu anda ${juryCount})`
         : `Ara proje için en az 1 hoca gerekli (şu anda ${juryCount})`;
       return { isCompliant: false, message, severity: 'error' };
     }
-    
+
     if (juryCount === requiredMinJury) {
-      const message = isBitirme 
+      const message = isBitirme
         ? `Bitirme projesi için minimum jüri sayısı sağlanmış (${juryCount} hoca)`
         : `Ara proje için jüri ataması tamamlanmış (${juryCount} hoca)`;
       return { isCompliant: true, message, severity: 'warning' };
     }
-    
+
     return { isCompliant: true, message: `Jüri ataması tamamlanmış (${juryCount} hoca)`, severity: 'success' };
   };
 
@@ -631,28 +706,28 @@ const Planner: React.FC = () => {
       // Ensure deterministic order - use timeslots directly
       const orderedSlots: string[] =
         timeslots && timeslots.length > 0
-        ? timeslots.map((t: any) => {
+          ? timeslots.map((t: any) => {
             const startTime = String(t.start_time).slice(0, 5);
             const endTime = String(t.end_time).slice(0, 5);
             return `${startTime}-${endTime}`;
           })
-        : [
-              '09:00-09:30',
-              '09:30-10:00',
-              '10:00-10:30',
-              '10:30-11:00',
-              '11:00-11:30',
-              '11:30-12:00',
-              '13:00-13:30',
-              '13:30-14:00',
-              '14:00-14:30',
-              '14:30-15:00',
-              '15:00-15:30',
-              '15:30-16:00',
-              '16:00-16:30',
-              '16:30-17:00',
-              '17:00-17:30',
-              '17:30-18:00',
+          : [
+            '09:00-09:30',
+            '09:30-10:00',
+            '10:00-10:30',
+            '10:30-11:00',
+            '11:00-11:30',
+            '11:30-12:00',
+            '13:00-13:30',
+            '13:30-14:00',
+            '14:00-14:30',
+            '14:30-15:00',
+            '15:00-15:30',
+            '15:30-16:00',
+            '16:00-16:30',
+            '16:30-17:00',
+            '17:00-17:30',
+            '17:30-18:00',
           ];
 
       // Respect selected classroom count, then sort by name
@@ -743,7 +818,7 @@ const Planner: React.FC = () => {
         if (!fullName) return;
         if (isAssistant) {
           arsGorLoad[fullName] = item.totalCount;
-          } else {
+        } else {
           hocaLoad[fullName] = item.totalCount;
         }
       });
@@ -778,7 +853,7 @@ const Planner: React.FC = () => {
           fileName = match[1];
         }
       }
-      
+
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -800,11 +875,11 @@ const Planner: React.FC = () => {
   };
 
   // Animated session card with Collapse effect
-  const SessionCard: React.FC<{ 
-    proj: any; 
-    jury: any[]; 
-    color: string; 
-    onClick: () => void; 
+  const SessionCard: React.FC<{
+    proj: any;
+    jury: any[];
+    color: string;
+    onClick: () => void;
     delay?: number;
     scheduleId?: number;
     onDragStart?: (schedule: any) => void;
@@ -813,15 +888,15 @@ const Planner: React.FC = () => {
     const hasJury = jury && jury.length > 0;
     const juryCount = hasJury ? jury.length : 0;
     const cardHeight = hasJury ? Math.max(120, 96 + (juryCount * 20)) : 96; // Jüri sayısına göre yükseklik
-    
+
     const dragStartedRef = useRef(false);
-    
+
     const handleDragStart = (e: React.DragEvent) => {
       if (!scheduleId || !proj) {
         e.preventDefault();
         return;
       }
-      
+
       dragStartedRef.current = true;
       const schedule = schedules.find((s: any) => s.id === scheduleId);
       if (schedule && onDragStart) {
@@ -835,7 +910,7 @@ const Planner: React.FC = () => {
         }));
       }
     };
-    
+
     const handleClick = (e: React.MouseEvent) => {
       // Drag işlemi sırasında onClick'i engelle
       if (!dragStartedRef.current) {
@@ -843,20 +918,20 @@ const Planner: React.FC = () => {
       }
       dragStartedRef.current = false;
     };
-    
+
     return (
-      <Box 
-        sx={{ 
-          width: 220, 
-          minHeight: cardHeight, 
-          cursor: proj && scheduleId ? 'grab' : 'pointer', 
-          position: 'relative', 
+      <Box
+        sx={{
+          width: 220,
+          minHeight: cardHeight,
+          cursor: proj && scheduleId ? 'grab' : 'pointer',
+          position: 'relative',
           m: 1,
           opacity: draggedSchedule?.id === scheduleId ? 0.5 : 1,
           transition: 'opacity 0.2s',
           userSelect: 'none',
           pointerEvents: 'auto' // Drag event'lerinin çalışması için
-        }} 
+        }}
         onClick={handleClick}
         draggable={!!proj && !!scheduleId}
         onDragStart={handleDragStart}
@@ -898,17 +973,17 @@ const Planner: React.FC = () => {
               {proj ? (
                 <>
                   {/* Üst kısım: Proje bilgileri */}
-                  <Box 
+                  <Box
                     sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, width: '100%' }}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
                   >
-                    <Box 
+                    <Box
                       sx={{ width: 6, height: 48, bgcolor: color, borderRadius: 1, mt: 0.3, flexShrink: 0 }}
                       draggable={false}
                       onDragStart={(e) => e.preventDefault()}
                     />
-                    <Box 
+                    <Box
                       sx={{ flex: 1, minWidth: 0 }}
                       draggable={false}
                       onDragStart={(e) => e.preventDefault()}
@@ -927,19 +1002,19 @@ const Planner: React.FC = () => {
                         </Typography>
                       </Tooltip>
                     </Box>
-                    <Box 
+                    <Box
                       sx={{ display: 'flex', gap: 0.5 }}
                       draggable={false}
                       onDragStart={(e) => e.preventDefault()}
                       onMouseDown={(e) => e.stopPropagation()} // IconButton'lara tıklamayı engelleme
                     >
                       <Tooltip title="Projeyi görüntüle" arrow>
-                        <IconButton 
-                          size="small" 
+                        <IconButton
+                          size="small"
                           onClick={(e) => {
                             e.stopPropagation();
                             onClick();
-                          }} 
+                          }}
                           aria-label="Projeyi görüntüle"
                           onMouseDown={(e) => e.stopPropagation()}
                           draggable={false}
@@ -949,12 +1024,12 @@ const Planner: React.FC = () => {
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="Projeyi düzenle" arrow>
-                        <IconButton 
-                          size="small" 
+                        <IconButton
+                          size="small"
                           onClick={(e) => {
                             e.stopPropagation();
                             onClick();
-                          }} 
+                          }}
                           aria-label="Projeyi düzenle"
                           onMouseDown={(e) => e.stopPropagation()}
                           draggable={false}
@@ -965,10 +1040,10 @@ const Planner: React.FC = () => {
                       </Tooltip>
                     </Box>
                   </Box>
-                  
+
                   {/* Alt kısım: Jüri üyeleri */}
                   {hasJury && (
-                    <Box 
+                    <Box
                       sx={{ mt: 0.5, pt: 0.5, borderTop: '1px solid', borderColor: 'divider' }}
                       draggable={false}
                       onDragStart={(e) => e.preventDefault()}
@@ -976,17 +1051,17 @@ const Planner: React.FC = () => {
                       <Typography variant="caption" sx={{ fontSize: '0.7rem', color: 'text.secondary', fontWeight: 600, mb: 0.5, display: 'block' }}>
                         🎯 Jüri Üyeleri:
                       </Typography>
-                      <Box 
+                      <Box
                         sx={{ display: 'flex', flexDirection: 'column', gap: 0.25 }}
                         draggable={false}
                         onDragStart={(e) => e.preventDefault()}
                       >
                         {jury.slice(0, 3).map((juryMember, index) => (
                           <Tooltip key={index} title={juryMember.name} placement="bottom" arrow>
-                            <Typography 
-                              variant="caption" 
-                              sx={{ 
-                                fontSize: '0.7rem', 
+                            <Typography
+                              variant="caption"
+                              sx={{
+                                fontSize: '0.7rem',
                                 color: 'text.secondary',
                                 fontWeight: 500,
                                 lineHeight: 1.3,
@@ -1003,8 +1078,8 @@ const Planner: React.FC = () => {
                           </Tooltip>
                         ))}
                         {jury.length > 3 && (
-                          <Typography 
-                            variant="caption" 
+                          <Typography
+                            variant="caption"
                             sx={{ fontSize: '0.65rem', color: 'text.disabled', fontStyle: 'italic' }}
                             draggable={false}
                             onDragStart={(e) => e.preventDefault()}
@@ -1051,7 +1126,7 @@ const Planner: React.FC = () => {
                       </Typography>
                     </Tooltip>
                   </Box>
-                  
+
                   {/* Sorumlu öğretim üyesi */}
                   <Box sx={{ mb: 0.5 }}>
                     <Tooltip title={getInstructorName(proj.responsible_instructor_id) || ''} placement="bottom" arrow>
@@ -1060,7 +1135,7 @@ const Planner: React.FC = () => {
                       </Typography>
                     </Tooltip>
                   </Box>
-                  
+
                   {/* Jüri üyeleri */}
                   {hasJury && (
                     <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
@@ -1069,10 +1144,10 @@ const Planner: React.FC = () => {
                       </Typography>
                       {jury.slice(0, 4).map((juryMember, index) => (
                         <Tooltip key={index} title={juryMember.name} placement="bottom" arrow>
-                          <Typography 
-                            variant="caption" 
-                            sx={{ 
-                              fontSize: '0.7rem', 
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              fontSize: '0.7rem',
                               color: 'text.secondary',
                               fontWeight: 500,
                               lineHeight: 1.3,
@@ -1118,9 +1193,9 @@ const Planner: React.FC = () => {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) setCalendarOverlays(parsed);
       }
-    } catch {}
+    } catch { }
   }, []);
-  
+
   // Load classroom count from localStorage
   useEffect(() => {
     try {
@@ -1128,15 +1203,15 @@ const Planner: React.FC = () => {
       if (savedClassroomCount) {
         setSelectedClassroomCount(Number(savedClassroomCount));
       }
-    } catch {}
+    } catch { }
   }, []);
 
   useEffect(() => {
     try {
       localStorage.setItem('planner_overlays', JSON.stringify(calendarOverlays));
-    } catch {}
+    } catch { }
   }, [calendarOverlays]);
-  
+
   // Takvime henüz eklenmemiş projeleri hesapla
   const scheduledProjectIds = React.useMemo(() => {
     const ids = new Set<number>();
@@ -1151,7 +1226,7 @@ const Planner: React.FC = () => {
           });
         }
       });
-    } catch (e) {}
+    } catch (e) { }
     return ids;
   }, [schedules]);
 
@@ -1192,7 +1267,7 @@ const Planner: React.FC = () => {
         source = res.data || [];
         setTimeslots(source);
         found = matchFrom(source);
-      } catch {}
+      } catch { }
     }
 
     // 3) Yine bulunamazsa, standart slotları seed et ve tekrar dene (superuser için)
@@ -1203,7 +1278,7 @@ const Planner: React.FC = () => {
         source = res2.data || [];
         setTimeslots(source);
         found = matchFrom(source);
-      } catch {}
+      } catch { }
     }
 
     // 4) Hala bulunamadıysa, slotı oluşturmayı dene (superuser için)
@@ -1215,7 +1290,7 @@ const Planner: React.FC = () => {
         // listeyi yenile
         const res3 = await api.get('/timeslots/');
         setTimeslots(res3.data || []);
-      } catch {}
+      } catch { }
     }
 
     return found;
@@ -1247,11 +1322,11 @@ const Planner: React.FC = () => {
             setProjects(projectsRes.data || []);
             setInstructors(instructorsRes.data || []);
             setSnack({ open: true, message: 'Algoritma atamaları yüklendi', severity: 'success' });
-          } catch (e) {}
+          } catch (e) { }
           finally { localStorage.removeItem('planner_refresh'); }
         })();
       }
-    } catch {}
+    } catch { }
   }, []);
 
   useEffect(() => {
@@ -1332,7 +1407,7 @@ const Planner: React.FC = () => {
             const tsList = (timeslotsRes.value?.data || []) as any[];
             const projs = (projectsRes.value?.data || []) as any[];
 
-            const toKey = (t: any) => `${String(t.start_time).slice(0,5)}-${String(t.end_time).slice(0,5)}`;
+            const toKey = (t: any) => `${String(t.start_time).slice(0, 5)}-${String(t.end_time).slice(0, 5)}`;
             const tsKeys = new Set(tsList.map(toKey));
             const gridSlots = timeSlots.filter((s) => tsKeys.has(s));
 
@@ -1349,10 +1424,10 @@ const Planner: React.FC = () => {
             }
             if (overlaysTemp.length > 0) {
               setCalendarOverlays(overlaysTemp);
-              try { localStorage.setItem('planner_overlays', JSON.stringify(overlaysTemp)); } catch {}
+              try { localStorage.setItem('planner_overlays', JSON.stringify(overlaysTemp)); } catch { }
             }
           }
-        } catch {}
+        } catch { }
       } catch (err) {
         console.error('Failed to fetch planner data:', err);
       } finally {
@@ -1372,34 +1447,34 @@ const Planner: React.FC = () => {
   }, [selectedClassroomCount]);
 
   // Generate timeSlots from API data or fallback to hardcoded
-  const timeSlots = timeslots && timeslots.length > 0 
+  const timeSlots = timeslots && timeslots.length > 0
     ? timeslots.map((t: any) => {
-        // Format time properly: "09:00:00.000000" -> "09:00"
-        const startTime = String(t.start_time).slice(0, 5);
-        const endTime = String(t.end_time).slice(0, 5);
-        return `${startTime}-${endTime}`;
-      })
+      // Format time properly: "09:00:00.000000" -> "09:00"
+      const startTime = String(t.start_time).slice(0, 5);
+      const endTime = String(t.end_time).slice(0, 5);
+      return `${startTime}-${endTime}`;
+    })
     : [
-        // Fallback: Sabah: 09:00, 09:30, 10:00, 10:30, 11:00, 11:30
-        '09:00-09:30',
-        '09:30-10:00',
-        '10:00-10:30',
-        '10:30-11:00',
-        '11:00-11:30',
-        '11:30-12:00',
-        // Öğleden sonra: 13:00, 13:30, 14:00, 14:30, 15:00, 15:30, 16:00, 16:30
-        '13:00-13:30',
-        '13:30-14:00',
-        '14:00-14:30',
-        '14:30-15:00',
-        '15:00-15:30',
-        '15:30-16:00',
-        '16:00-16:30',
-        '16:30-17:00',
-        // Akşam: 17:00, 17:30
-        '17:00-17:30',
-        '17:30-18:00'
-      ];
+      // Fallback: Sabah: 09:00, 09:30, 10:00, 10:30, 11:00, 11:30
+      '09:00-09:30',
+      '09:30-10:00',
+      '10:00-10:30',
+      '10:30-11:00',
+      '11:00-11:30',
+      '11:30-12:00',
+      // Öğleden sonra: 13:00, 13:30, 14:00, 14:30, 15:00, 15:30, 16:00, 16:30
+      '13:00-13:30',
+      '13:30-14:00',
+      '14:00-14:30',
+      '14:30-15:00',
+      '15:00-15:30',
+      '15:30-16:00',
+      '16:00-16:30',
+      '16:30-17:00',
+      // Akşam: 17:00, 17:30
+      '17:00-17:30',
+      '17:30-18:00'
+    ];
 
   // Filter classrooms based on selected count
   const filteredClassrooms = React.useMemo(() => {
@@ -1567,8 +1642,8 @@ const Planner: React.FC = () => {
   }; */
 
   const renderClassroomView = () => (
-    <Paper sx={{ p: 3 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', mb: 3, width: '100%' }}>
+    <Paper sx={{ p: 3, overflow: 'hidden' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', mb: 3, width: '100%', flexWrap: 'wrap', gap: 2 }}>
         {/* Left Side - Toggle Buttons */}
         <ToggleButtonGroup
           value={viewMode}
@@ -1579,8 +1654,8 @@ const Planner: React.FC = () => {
             }
           }}
           aria-label="view mode"
-          sx={{ 
-            '& .MuiToggleButton-root': { 
+          sx={{
+            '& .MuiToggleButton-root': {
               borderRadius: 2,
               px: 3,
               py: 1,
@@ -1622,7 +1697,7 @@ const Planner: React.FC = () => {
             />
             <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>Bitirme</Typography>
           </Box>
-          
+
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <Box
               sx={{
@@ -1635,7 +1710,7 @@ const Planner: React.FC = () => {
             />
             <Typography variant="body2" sx={{ fontSize: '0.8rem' }}>Ara</Typography>
           </Box>
-          
+
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <Box
               sx={{
@@ -1661,117 +1736,117 @@ const Planner: React.FC = () => {
                 // Mevcut schedule'ları al ve performans analizi yap
                 const schedulesResponse = await api.get('/schedules/');
                 const schedules = schedulesResponse.data || [];
-                
-                 if (schedules.length > 0) {
-                   // Projeleri ve instructor'ları al
-                   const projectsResponse = await api.get('/projects/');
-                   const instructorsResponse = await api.get('/instructors/');
-                   const projects = projectsResponse.data || [];
-                   const instructors = instructorsResponse.data || [];
-                   
-                   // Detaylı performans analizi
-                   const totalSchedules = schedules.length;
-                   
-                   // Doğru alanları kullanarak benzersiz değerleri hesapla
-                   const uniqueProjects = new Set(schedules.map((s: any) => s.project_id).filter((id: any) => id != null)).size;
-                   
-                   // Öğretim üyesi sayısını hesapla - hem responsible_instructor_id hem de instructors array'inden
-                   const instructorIds = new Set<number>();
-                   schedules.forEach((s: any) => {
-                     if (s.responsible_instructor_id) {
-                       instructorIds.add(s.responsible_instructor_id);
-                     }
-                     if (s.instructors && Array.isArray(s.instructors)) {
-                       s.instructors.forEach((inst: any) => {
-                         if (inst.id) {
-                           instructorIds.add(inst.id);
-                         }
-                       });
-                     }
-                   });
-                   const uniqueInstructors = instructorIds.size;
-                   
-                   const uniqueClassrooms = new Set(schedules.map((s: any) => s.classroom_id).filter((id: any) => id != null)).size;
-                   
-                   // Zaman dağılımı analizi
-                   const timeDistribution = schedules.reduce((acc: any, s: any) => {
-                     const startTime = s.start_time || 'Bilinmeyen';
-                     const sessionType = s.session_type || 'Bilinmeyen';
-                     const timeKey = `${sessionType}-${startTime}`;
-                     acc[timeKey] = (acc[timeKey] || 0) + 1;
-                     return acc;
-                   }, {});
-                   
-                   // Aktif zaman slotu sayısı - kullanılan zaman slotları
-                   const activeTimeSlots = Object.keys(timeDistribution).filter(key => 
-                     !key.includes('undefined') && !key.includes('Bilinmeyen')
-                   ).length;
-                   
-                   // Toplam zaman slotu sayısı (16 slot)
-                   const totalTimeSlots = 16;
-                   
-                   const avgLoadPerSlot = activeTimeSlots > 0 ? totalSchedules / activeTimeSlots : 0;
-                   
-                   // En yoğun zaman slotları
-                   const topTimeSlots = Object.entries(timeDistribution)
-                     .filter(([timeSlot]) => !timeSlot.includes('undefined') && !timeSlot.includes('Bilinmeyen'))
-                     .sort(([,a], [,b]) => (b as number) - (a as number))
-                     .slice(0, 5);
-                   
-                   // Detaylı analizler
-                   const conflictAnalysis = calculateConflicts(schedules);
-                   const workloadAnalysis = analyzeWorkloadDistribution(schedules, instructors);
-                   const classroomChangeAnalysis = analyzeClassroomChanges(schedules);
-                   const allInstructorWorkloads = calculateAllInstructorWorkloads(schedules, instructors);
-                   
-                   // Memnuniyet skoru için geçici veri objesi
-                   const tempData = {
-                     totalSchedules,
-                     uniqueProjects,
-                     conflictAnalysis,
-                     workloadAnalysis,
-                     classroomChangeAnalysis,
-                     totalProjects: projects.length,
-                     unassignedProjects: projects.length - totalSchedules
-                   };
-                   const satisfactionScore = calculateSatisfactionScore(tempData);
-                   
-                   // Performans verilerini state'e kaydet ve dialog'u aç
-                   setPerformanceData({
-                     totalSchedules,
-                     uniqueProjects,
-                     uniqueInstructors,
-                     uniqueClassrooms,
-                     timeSlots: activeTimeSlots, // Aktif zaman slotu sayısı
-                     totalTimeSlots, // Toplam zaman slotu sayısı (16)
-                     avgLoadPerSlot,
-                     topTimeSlots,
-                     programDistribution: uniqueProjects > 0 ? (totalSchedules / uniqueProjects).toFixed(2) : '0.00',
-                     classroomUsage: uniqueClassrooms > 0 ? (totalSchedules / uniqueClassrooms).toFixed(2) : '0.00',
-                     // Yeni detaylı analizler
-                     conflictAnalysis,
-                     workloadAnalysis,
-                     classroomChangeAnalysis,
-                     allInstructorWorkloads, // Tüm öğretim görevlilerinin detaylı iş yükü
-                     satisfactionScore,
-                     totalProjects: projects.length,
-                     assignedProjects: uniqueProjects, // Benzersiz atanmış proje sayısı
-                     unassignedProjects: projects.length - uniqueProjects, // Toplam - atanmış
-                     utilizationRate: projects.length > 0 ? Math.round((uniqueProjects / projects.length) * 100 * 10) / 10 : 0
-                   });
+
+                if (schedules.length > 0) {
+                  // Projeleri ve instructor'ları al
+                  const projectsResponse = await api.get('/projects/');
+                  const instructorsResponse = await api.get('/instructors/');
+                  const projects = projectsResponse.data || [];
+                  const instructors = instructorsResponse.data || [];
+
+                  // Detaylı performans analizi
+                  const totalSchedules = schedules.length;
+
+                  // Doğru alanları kullanarak benzersiz değerleri hesapla
+                  const uniqueProjects = new Set(schedules.map((s: any) => s.project_id).filter((id: any) => id != null)).size;
+
+                  // Öğretim üyesi sayısını hesapla - hem responsible_instructor_id hem de instructors array'inden
+                  const instructorIds = new Set<number>();
+                  schedules.forEach((s: any) => {
+                    if (s.responsible_instructor_id) {
+                      instructorIds.add(s.responsible_instructor_id);
+                    }
+                    if (s.instructors && Array.isArray(s.instructors)) {
+                      s.instructors.forEach((inst: any) => {
+                        if (inst.id) {
+                          instructorIds.add(inst.id);
+                        }
+                      });
+                    }
+                  });
+                  const uniqueInstructors = instructorIds.size;
+
+                  const uniqueClassrooms = new Set(schedules.map((s: any) => s.classroom_id).filter((id: any) => id != null)).size;
+
+                  // Zaman dağılımı analizi
+                  const timeDistribution = schedules.reduce((acc: any, s: any) => {
+                    const startTime = s.start_time || 'Bilinmeyen';
+                    const sessionType = s.session_type || 'Bilinmeyen';
+                    const timeKey = `${sessionType}-${startTime}`;
+                    acc[timeKey] = (acc[timeKey] || 0) + 1;
+                    return acc;
+                  }, {});
+
+                  // Aktif zaman slotu sayısı - kullanılan zaman slotları
+                  const activeTimeSlots = Object.keys(timeDistribution).filter(key =>
+                    !key.includes('undefined') && !key.includes('Bilinmeyen')
+                  ).length;
+
+                  // Toplam zaman slotu sayısı (16 slot)
+                  const totalTimeSlots = 16;
+
+                  const avgLoadPerSlot = activeTimeSlots > 0 ? totalSchedules / activeTimeSlots : 0;
+
+                  // En yoğun zaman slotları
+                  const topTimeSlots = Object.entries(timeDistribution)
+                    .filter(([timeSlot]) => !timeSlot.includes('undefined') && !timeSlot.includes('Bilinmeyen'))
+                    .sort(([, a], [, b]) => (b as number) - (a as number))
+                    .slice(0, 5);
+
+                  // Detaylı analizler
+                  const conflictAnalysis = calculateConflicts(schedules, instructors, classrooms, timeslots);
+                  const workloadAnalysis = analyzeWorkloadDistribution(schedules, instructors);
+                  const classroomChangeAnalysis = analyzeClassroomChanges(schedules);
+                  const allInstructorWorkloads = calculateAllInstructorWorkloads(schedules, instructors);
+
+                  // Memnuniyet skoru için geçici veri objesi
+                  const tempData = {
+                    totalSchedules,
+                    uniqueProjects,
+                    conflictAnalysis,
+                    workloadAnalysis,
+                    classroomChangeAnalysis,
+                    totalProjects: projects.length,
+                    unassignedProjects: projects.length - totalSchedules
+                  };
+                  const satisfactionScore = calculateSatisfactionScore(tempData);
+
+                  // Performans verilerini state'e kaydet ve dialog'u aç
+                  setPerformanceData({
+                    totalSchedules,
+                    uniqueProjects,
+                    uniqueInstructors,
+                    uniqueClassrooms,
+                    timeSlots: activeTimeSlots, // Aktif zaman slotu sayısı
+                    totalTimeSlots, // Toplam zaman slotu sayısı (16)
+                    avgLoadPerSlot,
+                    topTimeSlots,
+                    programDistribution: uniqueProjects > 0 ? (totalSchedules / uniqueProjects).toFixed(2) : '0.00',
+                    classroomUsage: uniqueClassrooms > 0 ? (totalSchedules / uniqueClassrooms).toFixed(2) : '0.00',
+                    // Yeni detaylı analizler
+                    conflictAnalysis,
+                    workloadAnalysis,
+                    classroomChangeAnalysis,
+                    allInstructorWorkloads, // Tüm öğretim görevlilerinin detaylı iş yükü
+                    satisfactionScore,
+                    totalProjects: projects.length,
+                    assignedProjects: uniqueProjects, // Benzersiz atanmış proje sayısı
+                    unassignedProjects: projects.length - uniqueProjects, // Toplam - atanmış
+                    utilizationRate: projects.length > 0 ? Math.round((uniqueProjects / projects.length) * 100 * 10) / 10 : 0
+                  });
                   setShowPerformanceDialog(true);
                 } else {
-                  setSnack({ 
-                    open: true, 
-                    message: 'Henüz hiç program oluşturulmamış!', 
-                    severity: 'warning' 
+                  setSnack({
+                    open: true,
+                    message: 'Henüz hiç program oluşturulmamış!',
+                    severity: 'warning'
                   });
                 }
               } catch (error: any) {
-                setSnack({ 
-                  open: true, 
-                  message: 'Performans verileri alınamadı: ' + (error?.response?.data?.detail || error.message), 
-                  severity: 'error' 
+                setSnack({
+                  open: true,
+                  message: 'Performans verileri alınamadı: ' + (error?.response?.data?.detail || error.message),
+                  severity: 'error'
                 });
               }
             }}
@@ -1779,7 +1854,7 @@ const Planner: React.FC = () => {
           >
             Performansı Görüntüle
           </Button>
-          
+
           <Button
             variant="outlined"
             color="primary"
@@ -1804,7 +1879,7 @@ const Planner: React.FC = () => {
           >
             Verileri Yenile
           </Button>
-          
+
           <Button
             variant="contained"
             startIcon={<Event />}
@@ -1813,12 +1888,12 @@ const Planner: React.FC = () => {
           >
             Programı Dışa Aktar
           </Button>
-          
+
           <Button variant="outlined" color="error" onClick={async () => {
             try {
               const res = await api.get('/schedules/');
               const all = res.data || [];
-              for (const s of all) { try { await api.delete(`/schedules/${s.id}`); } catch {} }
+              for (const s of all) { try { await api.delete(`/schedules/${s.id}`); } catch { } }
               setCalendarOverlays([]);
               localStorage.removeItem('planner_overlays');
               const refreshed = await api.get('/schedules/');
@@ -1831,199 +1906,207 @@ const Planner: React.FC = () => {
         </Box>
       </Box>
 
-       {/* Grid with sticky headers/left column for accessibility */}
-       <Box sx={{ display: 'grid', gridTemplateColumns: `160px repeat(${filteredClassrooms.length}, 236px)`, gridAutoRows: 'minmax(96px, auto)', gap: 2, pr: 1, maxHeight: 'none', overflow: 'visible' }}>
-         {/* Header row */}
-         <Box sx={{ position: 'sticky', top: 0, zIndex: 5, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', p: 1 }}>
-           <Typography variant="body2" sx={{ fontWeight: 700 }}>Zaman</Typography>
-         </Box>
-         {filteredClassrooms.map((room) => (
-           <Box key={`hdr-${room.id}`} sx={{ position: 'sticky', top: 0, zIndex: 5, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2, display: 'flex', alignItems: 'center', gap: 1, p: 1 }}>
-             <Room sx={{ color: 'primary.main' }} />
-             <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{room.name}</Typography>
-           </Box>
-         ))}
+      {/* Grid with sticky headers/left column for accessibility */}
+      <Box sx={{ width: '100%', pb: 2, overflowX: 'auto' }}>
+        <Box sx={{
+          display: 'grid',
+          gridTemplateColumns: `100px repeat(${filteredClassrooms.length}, minmax(220px, 1fr))`,
+          gridAutoRows: 'minmax(96px, auto)',
+          gap: 1,
+          minWidth: `${100 + (filteredClassrooms.length * 220)}px`,
+        }}>
+          {/* Header row */}
+          <Box sx={{ position: 'sticky', top: 0, zIndex: 5, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', p: 1 }}>
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>Zaman</Typography>
+          </Box>
+          {filteredClassrooms.map((room) => (
+            <Box key={`hdr-${room.id}`} sx={{ position: 'sticky', top: 0, zIndex: 5, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, p: 1 }}>
+              <Room sx={{ color: 'primary.main' }} />
+              <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{room.name}</Typography>
+            </Box>
+          ))}
 
-        {/* Rows per timeslot */}
-        {timeSlots.map((slot) => (
-          <React.Fragment key={`row-${slot}`}>
-             {/* Left time cell - sticky */}
-             <Box sx={{ position: 'sticky', left: 0, zIndex: 4, p: 1, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 96 }}>
-               <Typography variant="body2" sx={{ fontWeight: 700 }}>{slot}</Typography>
-             </Box>
-            {/* One cell per classroom */}
-            {filteredClassrooms.map((room, roomIndex) => {
-              const ts = timeslots.find((t: any) => `${String(t.start_time).slice(0,5)}-${String(t.end_time).slice(0,5)}` === slot);
-              const existing = (schedules || []).find((s: any) => {
-                if (s.classroom_id !== room.id) return false;
-                if (ts?.id) return s.timeslot_id === ts.id || s.timeslot?.id === ts.id;
-                if (s?.timeslot?.start_time && s?.timeslot?.end_time) {
-                  const key = `${String(s.timeslot.start_time).slice(0,5)}-${String(s.timeslot.end_time).slice(0,5)}`;
-                  return key === slot;
+          {/* Rows per timeslot */}
+          {timeSlots.map((slot) => (
+            <React.Fragment key={`row-${slot}`}>
+              {/* Left time cell - sticky */}
+              <Box sx={{ position: 'sticky', left: 0, zIndex: 4, p: 1, bgcolor: 'background.paper', border: '1px solid', borderColor: 'divider', borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 96 }}>
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>{slot}</Typography>
+              </Box>
+              {/* One cell per classroom */}
+              {filteredClassrooms.map((room, roomIndex) => {
+                const ts = timeslots.find((t: any) => `${String(t.start_time).slice(0, 5)}-${String(t.end_time).slice(0, 5)}` === slot);
+                const existing = (schedules || []).find((s: any) => {
+                  if (s.classroom_id !== room.id) return false;
+                  if (ts?.id) return s.timeslot_id === ts.id || s.timeslot?.id === ts.id;
+                  if (s?.timeslot?.start_time && s?.timeslot?.end_time) {
+                    const key = `${String(s.timeslot.start_time).slice(0, 5)}-${String(s.timeslot.end_time).slice(0, 5)}`;
+                    return key === slot;
+                  }
+                  return false;
+                });
+
+                // Debug: Log when we find a match
+                if (existing) {
+                  console.log('🎯 Found schedule match:', JSON.stringify({ room: room.name, slot, existing }, null, 2));
                 }
-                return false;
-              });
-              
-              // Debug: Log when we find a match
-              if (existing) {
-                console.log('🎯 Found schedule match:', JSON.stringify({ room: room.name, slot, existing }, null, 2));
-              }
-              const [startTime, endTime] = slot.split('-');
-              const ov = calendarOverlays.find((o: any) => o.classroom === room.name && o.startTime === startTime && o.endTime === endTime);
-              const proj = existing ? (projects.find((p: any) => p.id === existing.project_id) || (existing as any).project) : ov?.project;
-              const jury = existing ? getJuryForSchedule(existing) : [];
-              const color = getProjectColor(proj);
-              const delay = roomIndex * 100; // Her sınıf için 100ms gecikme
-              const cellKey = `${room.id}-${slot}`;
-              const isDragOver = dragOverCell === cellKey;
-              
-              const handleDragEnter = (e: React.DragEvent) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (!existing && draggedSchedule) {
-                  console.log('📥 Drag enter:', cellKey, { room: room.name, slot });
-                  setDragOverCell(cellKey);
-                }
-              };
-              
-              const handleDragOver = (e: React.DragEvent) => {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                if (!existing && draggedSchedule) {
-                  // Sadece boş cell'lere drop edilebilir
-                  e.dataTransfer.dropEffect = 'move';
-                  if (dragOverCell !== cellKey) {
+                const [startTime, endTime] = slot.split('-');
+                const ov = calendarOverlays.find((o: any) => o.classroom === room.name && o.startTime === startTime && o.endTime === endTime);
+                const proj = existing ? (projects.find((p: any) => p.id === existing.project_id) || (existing as any).project) : ov?.project;
+                const jury = existing ? getJuryForSchedule(existing) : [];
+                const color = getProjectColor(proj);
+                const delay = roomIndex * 100; // Her sınıf için 100ms gecikme
+                const cellKey = `${room.id}-${slot}`;
+                const isDragOver = dragOverCell === cellKey;
+
+                const handleDragEnter = (e: React.DragEvent) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!existing && draggedSchedule) {
+                    console.log('📥 Drag enter:', cellKey, { room: room.name, slot });
                     setDragOverCell(cellKey);
                   }
-                } else {
-                  e.dataTransfer.dropEffect = 'none';
-                }
-              };
-              
-              const handleDragLeave = (e: React.DragEvent) => {
-                // Sadece gerçekten cell'den çıkıldığında tetikle
-                // (child element'lere geçildiğinde tetiklenmemesi için)
-                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                const x = e.clientX;
-                const y = e.clientY;
-                
-                // Eğer hala cell içindeyse, dragLeave'i yok say
-                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-                  return;
-                }
-                
-                if (dragOverCell === cellKey) {
-                  console.log('📤 Drag leave:', cellKey);
-                  setDragOverCell(null);
-                }
-              };
-              
-              const handleDrop = async (e: React.DragEvent) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('🎯 Drop event:', cellKey, { draggedSchedule, existing, room: room.name, slot });
-                setDragOverCell(null);
-                
-                if (!draggedSchedule) {
-                  console.log('❌ No dragged schedule');
-                  return;
-                }
-                
-                if (existing) {
-                  console.log('❌ Cell already has a project');
-                  return; // Zaten bir proje varsa drop edilemez
-                }
-                
-                try {
-                  console.log('🔄 Starting drop operation...');
-                  // Zaman dilimini database'den bul
-                  const ts = await resolveDbTimeslot(startTime, endTime);
-                  if (!ts?.id || !room?.id) {
-                    console.error('❌ Timeslot or room not found:', { ts, room });
-                    setSnack({ open: true, message: 'Zaman veya sınıf bulunamadı', severity: 'error' });
+                };
+
+                const handleDragOver = (e: React.DragEvent) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+
+                  if (!existing && draggedSchedule) {
+                    // Sadece boş cell'lere drop edilebilir
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragOverCell !== cellKey) {
+                      setDragOverCell(cellKey);
+                    }
+                  } else {
+                    e.dataTransfer.dropEffect = 'none';
+                  }
+                };
+
+                const handleDragLeave = (e: React.DragEvent) => {
+                  // Sadece gerçekten cell'den çıkıldığında tetikle
+                  // (child element'lere geçildiğinde tetiklenmemesi için)
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const x = e.clientX;
+                  const y = e.clientY;
+
+                  // Eğer hala cell içindeyse, dragLeave'i yok say
+                  if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
                     return;
                   }
-                  
-                  console.log('✅ Found timeslot and room:', { timeslotId: ts.id, roomId: room.id });
-                  
-                  // Schedule'ı güncelle
-                  const updatePayload = {
-                    classroom_id: room.id,
-                    timeslot_id: ts.id
-                  };
-                  
-                  console.log('📤 Updating schedule:', { scheduleId: draggedSchedule.id, payload: updatePayload });
-                  await api.put(`/schedules/${draggedSchedule.id}`, updatePayload);
-                  
-                  // Verileri yenile
-                  const refreshed = await api.get('/schedules/');
-                  setSchedules(refreshed.data || []);
-                  
-                  console.log('✅ Schedule updated successfully');
-                  setSnack({ open: true, message: 'Proje taşındı', severity: 'success' });
-                  setDraggedSchedule(null);
-                } catch (e: any) {
-                  console.error('❌ Drop error:', e);
-                  setSnack({ open: true, message: e?.response?.data?.detail || 'Taşıma başarısız', severity: 'error' });
-                  setDraggedSchedule(null);
-                }
-              };
-              
-              return (
-                 <Box 
-                   key={cellKey}
-                   sx={{ 
-                     position: 'relative', 
-                     border: '2px dashed', 
-                     borderColor: isDragOver ? 'primary.main' : 'divider', 
-                     borderRadius: 2, 
-                     minHeight: 96, 
-                     display: 'flex', 
-                     alignItems: 'center', 
-                     justifyContent: 'center',
-                     bgcolor: isDragOver ? 'primary.light' : 'transparent',
-                     transition: 'all 0.2s',
-                     pointerEvents: 'auto' // Drop event'lerinin çalışması için
-                   }}
-                   onDragEnter={handleDragEnter}
-                   onDragOver={handleDragOver}
-                   onDragLeave={handleDragLeave}
-                   onDrop={handleDrop}
-                 >
-                  {proj ? (
-                  <SessionCard 
-                    proj={proj} 
-                    jury={jury} 
-                    color={color} 
-                    onClick={() => handleTimeSlotClick(slot, room.name, proj, (existing as any)?.id)}
-                    delay={delay}
-                      scheduleId={(existing as any)?.id}
-                      onDragStart={setDraggedSchedule}
-                    />
-                  ) : (
-                    // Boş cell için drop zone göster
-                    <Box
-                      sx={{
-                        width: '100%',
-                        height: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        minHeight: 96,
-                        pointerEvents: 'none' // Text'in drag event'lerini engelle
-                      }}
-                    >
-                      <Typography variant="caption" sx={{ color: isDragOver ? 'primary.main' : 'text.secondary', fontWeight: isDragOver ? 600 : 400 }}>
-                        {isDragOver ? 'Bırakın' : 'Boş'}
-                      </Typography>
-                    </Box>
-                  )}
-                </Box>
-              );
-            })}
-          </React.Fragment>
-        ))}
+
+                  if (dragOverCell === cellKey) {
+                    console.log('📤 Drag leave:', cellKey);
+                    setDragOverCell(null);
+                  }
+                };
+
+                const handleDrop = async (e: React.DragEvent) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  console.log('🎯 Drop event:', cellKey, { draggedSchedule, existing, room: room.name, slot });
+                  setDragOverCell(null);
+
+                  if (!draggedSchedule) {
+                    console.log('❌ No dragged schedule');
+                    return;
+                  }
+
+                  if (existing) {
+                    console.log('❌ Cell already has a project');
+                    return; // Zaten bir proje varsa drop edilemez
+                  }
+
+                  try {
+                    console.log('🔄 Starting drop operation...');
+                    // Zaman dilimini database'den bul
+                    const ts = await resolveDbTimeslot(startTime, endTime);
+                    if (!ts?.id || !room?.id) {
+                      console.error('❌ Timeslot or room not found:', { ts, room });
+                      setSnack({ open: true, message: 'Zaman veya sınıf bulunamadı', severity: 'error' });
+                      return;
+                    }
+
+                    console.log('✅ Found timeslot and room:', { timeslotId: ts.id, roomId: room.id });
+
+                    // Schedule'ı güncelle
+                    const updatePayload = {
+                      classroom_id: room.id,
+                      timeslot_id: ts.id
+                    };
+
+                    console.log('📤 Updating schedule:', { scheduleId: draggedSchedule.id, payload: updatePayload });
+                    await api.put(`/schedules/${draggedSchedule.id}`, updatePayload);
+
+                    // Verileri yenile
+                    const refreshed = await api.get('/schedules/');
+                    setSchedules(refreshed.data || []);
+
+                    console.log('✅ Schedule updated successfully');
+                    setSnack({ open: true, message: 'Proje taşındı', severity: 'success' });
+                    setDraggedSchedule(null);
+                  } catch (e: any) {
+                    console.error('❌ Drop error:', e);
+                    setSnack({ open: true, message: e?.response?.data?.detail || 'Taşıma başarısız', severity: 'error' });
+                    setDraggedSchedule(null);
+                  }
+                };
+
+                return (
+                  <Box
+                    key={cellKey}
+                    sx={{
+                      position: 'relative',
+                      border: '2px dashed',
+                      borderColor: isDragOver ? 'primary.main' : 'divider',
+                      borderRadius: 2,
+                      minHeight: 96,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      bgcolor: isDragOver ? 'primary.light' : 'transparent',
+                      transition: 'all 0.2s',
+                      pointerEvents: 'auto' // Drop event'lerinin çalışması için
+                    }}
+                    onDragEnter={handleDragEnter}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                  >
+                    {proj ? (
+                      <SessionCard
+                        proj={proj}
+                        jury={jury}
+                        color={color}
+                        onClick={() => handleTimeSlotClick(slot, room.name, proj, (existing as any)?.id)}
+                        delay={delay}
+                        scheduleId={(existing as any)?.id}
+                        onDragStart={setDraggedSchedule}
+                      />
+                    ) : (
+                      // Boş cell için drop zone göster
+                      <Box
+                        sx={{
+                          width: '100%',
+                          height: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          minHeight: 96,
+                          pointerEvents: 'none' // Text'in drag event'lerini engelle
+                        }}
+                      >
+                        <Typography variant="caption" sx={{ color: isDragOver ? 'primary.main' : 'text.secondary', fontWeight: isDragOver ? 600 : 400 }}>
+                          {isDragOver ? 'Bırakın' : 'Boş'}
+                        </Typography>
+                      </Box>
+                    )}
+                  </Box>
+                );
+              })}
+            </React.Fragment>
+          ))}
+        </Box>
       </Box>
     </Paper>
   );
@@ -2035,7 +2118,7 @@ const Planner: React.FC = () => {
           Jüri Atamaları
         </Typography>
       </Box>
-      
+
       {/* Time slots on the left sidebar */}
       <Box sx={{ display: 'flex', gap: 2 }}>
         {/* Left sidebar with time slots */}
@@ -2071,7 +2154,7 @@ const Planner: React.FC = () => {
               .filter((s: any) => s.classroom_id === room.id)
               .reduce((acc: any, s: any) => {
                 const ts = timeslots.find((t: any) => t.id === s.timeslot_id);
-                acc[`${String(ts?.start_time).slice(0,5)}-${String(ts?.end_time).slice(0,5)}`] = s;
+                acc[`${String(ts?.start_time).slice(0, 5)}-${String(ts?.end_time).slice(0, 5)}`] = s;
                 return acc;
               }, {} as Record<string, any>);
 
@@ -2097,7 +2180,7 @@ const Planner: React.FC = () => {
                       const proj = existing ? projects.find((p: any) => p.id === existing.project_id) : ov?.project;
                       const jury = existing ? getJuryForSchedule(existing) : [];
                       const color = getProjectColor(proj);
-                      
+
                       return (
                         <Box
                           key={slot}
@@ -2122,7 +2205,7 @@ const Planner: React.FC = () => {
                               <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mb: 1 }}>
                                 {getTypeLabel(proj)}
                               </Typography>
-                              
+
                               {/* Jury members */}
                               {jury.length > 0 && (
                                 <Box sx={{ mt: 1 }}>
@@ -2166,7 +2249,7 @@ const Planner: React.FC = () => {
         <ColorLens sx={{ mr: 1 }} />
         Renk Kodlaması
       </Typography>
-      
+
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Box
@@ -2180,7 +2263,7 @@ const Planner: React.FC = () => {
           />
           <Typography variant="body2">Bitirme Projeleri</Typography>
         </Box>
-        
+
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Box
             sx={{
@@ -2193,7 +2276,7 @@ const Planner: React.FC = () => {
           />
           <Typography variant="body2">Ara Projeler</Typography>
         </Box>
-        
+
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Box
             sx={{
@@ -2206,7 +2289,7 @@ const Planner: React.FC = () => {
           />
           <Typography variant="body2">Özel Projeler</Typography>
         </Box>
-        
+
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Box
             sx={{
@@ -2224,14 +2307,14 @@ const Planner: React.FC = () => {
   );
 
   return (
-    <Box>
+    <Box sx={{ width: '100%', overflow: 'hidden' }}>
 
 
 
       {/* Tek düzen: içerik flip ile değişir */}
-      <Box 
-        sx={{ 
-          position: 'relative', 
+      <Box
+        sx={{
+          position: 'relative',
           minHeight: 'auto',
           transition: 'opacity 0.3s ease-in-out',
           opacity: 1
@@ -2262,12 +2345,12 @@ const Planner: React.FC = () => {
                   InputProps={{ readOnly: true }}
                 />
               </Box>
-              
+
               {selectedTimeSlot.project ? (
                 <>
                   <TextField label="Proje Başlığı" value={selectedTimeSlot.project.title} fullWidth InputProps={{ readOnly: true }} />
                   <TextField label="Proje Türü" value={selectedTimeSlot.project.type === 'bitirme' ? 'Bitirme' : 'Ara'} fullWidth InputProps={{ readOnly: true }} />
-                  
+
                   {/* Sorumlu Öğretim Üyesi - Editable */}
                   <TextField
                     select
@@ -2283,7 +2366,7 @@ const Planner: React.FC = () => {
                       </MenuItem>
                     ))}
                   </TextField>
-                  
+
                   {/* Jüri Üyeleri - Editable (Multi-select) */}
                   <TextField
                     select
@@ -2327,13 +2410,13 @@ const Planner: React.FC = () => {
                     <Typography variant="body2" sx={{ mb: 1 }}>
                       {getJuryNamesForDialog(selectedTimeSlot) || 'Atanmamış'}
                     </Typography>
-                    
+
                     {/* Uyumluluk Durumu */}
                     {(() => {
                       const sch = schedules.find((s: any) => s.id === selectedTimeSlot.scheduleId);
                       const juryList = sch ? getJuryForSchedule(sch) : [];
                       const compliance = getProjectComplianceStatus(selectedTimeSlot.project, juryList);
-                      
+
                       if (!compliance.isCompliant) {
                         return (
                           <Alert severity="error" sx={{ mt: 1 }}>
@@ -2361,7 +2444,7 @@ const Planner: React.FC = () => {
                   <TextField select label="Bu seansa farklı proje yerleştir" fullWidth value={selectedProjectId}
                     onChange={(e) => setSelectedProjectId(Number((e.target as any).value) || '')}>
                     <MenuItem value="">Proje seçin...</MenuItem>
-                    {projects.filter((p:any)=> p.id !== selectedTimeSlot.project.id).map((p:any)=> (
+                    {projects.filter((p: any) => p.id !== selectedTimeSlot.project.id).map((p: any) => (
                       <MenuItem key={p.id} value={p.id}>{p.title}</MenuItem>
                     ))}
                   </TextField>
@@ -2399,8 +2482,8 @@ const Planner: React.FC = () => {
           {selectedTimeSlot?.project ? (
             <>
               {/* Kaydet Butonu - Manuel Düzenleme */}
-              <Button 
-                variant="contained" 
+              <Button
+                variant="contained"
                 color="primary"
                 onClick={async () => {
                   try {
@@ -2408,19 +2491,19 @@ const Planner: React.FC = () => {
                       setSnack({ open: true, message: 'Schedule ID bulunamadı', severity: 'error' });
                       return;
                     }
-                    
+
                     const updatePayload: any = {};
-                    
+
                     // Sorumlu öğretim üyesi değiştiyse
                     if (editableResponsibleId && editableResponsibleId !== selectedTimeSlot.project.responsible_instructor_id) {
                       updatePayload.responsible_instructor_id = editableResponsibleId;
                     }
-                    
+
                     // Jüri üyeleri değiştiyse
                     const sch = schedules.find((s: any) => s.id === selectedTimeSlot.scheduleId);
                     const currentJury = sch ? getJuryForSchedule(sch) : [];
                     const currentJuryIds = currentJury.map((j: any) => j.id).filter((id: number) => id !== -1);
-                    
+
                     if (JSON.stringify(editableJuryIds.sort()) !== JSON.stringify(currentJuryIds.sort())) {
                       // Jüri üyelerini formatla: [responsible_id, jury1_id, jury2_id, ...]
                       // Responsible'ı ilk sıraya ekle
@@ -2431,19 +2514,19 @@ const Planner: React.FC = () => {
                       ];
                       updatePayload.instructors = formattedInstructors;
                     }
-                    
+
                     // Eğer değişiklik varsa güncelle
                     if (Object.keys(updatePayload).length > 0) {
                       await api.put(`/schedules/${selectedTimeSlot.scheduleId}`, updatePayload);
-                      
+
                       // Verileri yenile
                       const refreshed = await api.get('/schedules/');
                       setSchedules(refreshed.data || []);
-                      
+
                       // Projects'i de yenile (responsible_id değişmiş olabilir)
                       const projectsRefreshed = await api.get('/projects/');
                       setProjects(projectsRefreshed.data || []);
-                      
+
                       setSnack({ open: true, message: 'Değişiklikler kaydedildi', severity: 'success' });
                       setOpenDialog(false);
                       setEditableResponsibleId('');
@@ -2458,7 +2541,7 @@ const Planner: React.FC = () => {
               >
                 Kaydet
               </Button>
-              <Button color="error" onClick={async ()=>{
+              <Button color="error" onClick={async () => {
                 try {
                   // mevcut programı kaldır
                   if (selectedTimeSlot?.scheduleId) {
@@ -2468,30 +2551,31 @@ const Planner: React.FC = () => {
                   setSchedules(refreshed.data || []);
                   setSnack({ open: true, message: 'Program kaldırıldı', severity: 'success' });
                   setOpenDialog(false);
-                } catch (e:any) {
+                } catch (e: any) {
                   setSnack({ open: true, message: e?.response?.data?.detail || 'Program kaldırılamadı', severity: 'error' });
                 }
               }}>Takvimden Kaldır</Button>
-              <Button variant="contained" disabled={!selectedProjectId} onClick={async ()=>{
+              <Button variant="contained" disabled={!selectedProjectId} onClick={async () => {
                 try {
                   if (!selectedProjectId) return;
                   // Zaman dilimini backend'de bul
                   const ts = await resolveDbTimeslot(selectedTimeSlot.startTime, selectedTimeSlot.endTime);
-                  const clsSan = (s:string) => (s || '').toLowerCase().replace(/\s|-/g,'');
-                  const classroom = classrooms.find((c:any)=> clsSan(c.name)===clsSan(selectedTimeSlot.classroom));
-                  if (!ts?.id || !classroom?.id) { setSnack({open:true, message:'Zaman veya sınıf bulunamadı', severity:'error'}); return; }
-                  const payload:any = { project_id: selectedProjectId, classroom_id: classroom.id, timeslot_id: ts.id };
+                  const clsSan = (s: string) => (s || '').toLowerCase().replace(/\s|-/g, '');
+                  const classroom = classrooms.find((c: any) => clsSan(c.name) === clsSan(selectedTimeSlot.classroom));
+                  if (!ts?.id || !classroom?.id) { setSnack({ open: true, message: 'Zaman veya sınıf bulunamadı', severity: 'error' }); return; }
+                  const payload: any = { project_id: selectedProjectId, classroom_id: classroom.id, timeslot_id: ts.id };
                   await api.post('/schedules/', { schedule_in: payload, instructor_ids: [] });
                   // eski programı kaldır
-                  if (selectedTimeSlot?.scheduleId) { try { await api.delete(`/schedules/${selectedTimeSlot.scheduleId}`); } catch {}
+                  if (selectedTimeSlot?.scheduleId) {
+                    try { await api.delete(`/schedules/${selectedTimeSlot.scheduleId}`); } catch { }
                   }
                   const refreshed = await api.get('/schedules/');
                   setSchedules(refreshed.data || []);
                   setSnack({ open: true, message: 'Proje değiştirildi', severity: 'success' });
                   setOpenDialog(false);
                   setSelectedProjectId('');
-                } catch (e:any) {
-                  setSnack({ open: true, message: e?.response?.data?.detail || 'Değişiklik yapılamadı', severity:'error' });
+                } catch (e: any) {
+                  setSnack({ open: true, message: e?.response?.data?.detail || 'Değişiklik yapılamadı', severity: 'error' });
                 }
               }}>Bu seansa taşı</Button>
             </>
@@ -2501,12 +2585,12 @@ const Planner: React.FC = () => {
                 if (!selectedProjectId) return;
                 // Zaman dilimini database'den bul
                 const ts = await resolveDbTimeslot(selectedTimeSlot.startTime, selectedTimeSlot.endTime);
-                const clsSan = (s:string) => (s || '').toLowerCase().replace(/\s|-/g,'');
-                const classroom = classrooms.find((c:any)=> clsSan(c.name)===clsSan(selectedTimeSlot.classroom));
+                const clsSan = (s: string) => (s || '').toLowerCase().replace(/\s|-/g, '');
+                const classroom = classrooms.find((c: any) => clsSan(c.name) === clsSan(selectedTimeSlot.classroom));
                 if (!selectedProjectId) { window.alert('Lütfen bir proje seçin'); return; }
                 if (!ts?.id) { window.alert('Seçilen zaman dilimi sistemde bulunamadı'); return; }
                 if (!classroom?.id) { window.alert('Seçilen sınıf sistemde bulunamadı'); return; }
-                const payload:any = {
+                const payload: any = {
                   project_id: selectedProjectId,
                   classroom_id: classroom?.id,
                   timeslot_id: ts?.id
@@ -2548,10 +2632,10 @@ const Planner: React.FC = () => {
       </Snackbar>
 
       {/* Performance Analysis Dialog */}
-      <Dialog 
-        open={showPerformanceDialog} 
-        onClose={() => setShowPerformanceDialog(false)} 
-        maxWidth="md" 
+      <Dialog
+        open={showPerformanceDialog}
+        onClose={() => setShowPerformanceDialog(false)}
+        maxWidth="md"
         fullWidth
         PaperProps={{
           sx: {
@@ -2560,9 +2644,9 @@ const Planner: React.FC = () => {
           }
         }}
       >
-        <DialogTitle sx={{ 
-          display: 'flex', 
-          alignItems: 'center', 
+        <DialogTitle sx={{
+          display: 'flex',
+          alignItems: 'center',
           gap: 1,
           pb: 1,
           borderBottom: '1px solid',
@@ -2573,7 +2657,7 @@ const Planner: React.FC = () => {
             Program Performans Analizi
           </Typography>
         </DialogTitle>
-        
+
         <DialogContent sx={{ pt: 3 }}>
           {performanceData && (
             <Stack spacing={3}>
@@ -2618,283 +2702,371 @@ const Planner: React.FC = () => {
                 </Box>
               </Paper>
 
-               {/* Kalite Metrikleri */}
-               <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
-                 <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
-                   🎯 Kalite Metrikleri
-                 </Typography>
-                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2 }}>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color="success.main" sx={{ fontWeight: 'bold' }}>
-                       {performanceData.programDistribution}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary">
-                       Program/Proje Oranı
-                     </Typography>
-                   </Box>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color="info.main" sx={{ fontWeight: 'bold' }}>
-                       {performanceData.classroomUsage}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary">
-                       Program/Sınıf Oranı
-                     </Typography>
-                   </Box>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color="primary.main" sx={{ fontWeight: 'bold' }}>
-                       {performanceData.utilizationRate}%
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary">
-                       Kullanım Oranı
-                     </Typography>
-                   </Box>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color={performanceData.satisfactionScore >= 80 ? 'success.main' : performanceData.satisfactionScore >= 60 ? 'warning.main' : 'error.main'} sx={{ fontWeight: 'bold' }}>
-                       {performanceData.satisfactionScore}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary">
-                       Memnuniyet Skoru
-                     </Typography>
-                   </Box>
-                 </Box>
-               </Paper>
+              {/* Kalite Metrikleri */}
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
+                <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
+                  🎯 Kalite Metrikleri
+                </Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2 }}>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color="success.main" sx={{ fontWeight: 'bold' }}>
+                      {performanceData.programDistribution}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Program/Proje Oranı
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color="info.main" sx={{ fontWeight: 'bold' }}>
+                      {performanceData.classroomUsage}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Program/Sınıf Oranı
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color="primary.main" sx={{ fontWeight: 'bold' }}>
+                      {performanceData.utilizationRate}%
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Kullanım Oranı
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color={performanceData.satisfactionScore >= 80 ? 'success.main' : performanceData.satisfactionScore >= 60 ? 'warning.main' : 'error.main'} sx={{ fontWeight: 'bold' }}>
+                      {performanceData.satisfactionScore}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Memnuniyet Skoru
+                    </Typography>
+                  </Box>
+                </Box>
+              </Paper>
 
-               {/* Çakışma Analizi */}
-               <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
-                 <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
-                   ⚠️ Çakışma Analizi
-                 </Typography>
-                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 2 }}>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color={performanceData.conflictAnalysis.totalConflicts === 0 ? 'success.main' : 'error.main'} sx={{ fontWeight: 'bold' }}>
-                       {performanceData.conflictAnalysis.totalConflicts}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary">
-                       Toplam Çakışma
-                     </Typography>
-                   </Box>
-                 </Box>
-               </Paper>
+              {/* Çakışma Analizi */}
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
+                <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
+                  ⚠️ Çakışma Analizi
+                </Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 2, mb: performanceData.conflictAnalysis.totalConflicts > 0 ? 2 : 0 }}>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color={performanceData.conflictAnalysis.totalConflicts === 0 ? 'success.main' : 'error.main'} sx={{ fontWeight: 'bold' }}>
+                      {performanceData.conflictAnalysis.totalConflicts}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Toplam Çakışma
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color={performanceData.conflictAnalysis.instructorsWithConflicts === 0 ? 'success.main' : 'warning.main'} sx={{ fontWeight: 'bold' }}>
+                      {performanceData.conflictAnalysis.instructorsWithConflicts}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Çakışan Öğretim Üyesi
+                    </Typography>
+                  </Box>
+                </Box>
 
-               {/* Yük Dağılımı Analizi */}
-               <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
-                 <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
-                   ⚖️ Yük Dağılımı Analizi
-                 </Typography>
-                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 2 }}>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color="info.main" sx={{ fontWeight: 'bold' }}>
-                       {performanceData.workloadAnalysis.maxWorkload}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                       Maksimum Yük
-                     </Typography>
-                     {performanceData.workloadAnalysis.maxWorkloadInstructors && 
+                {/* Çakışma Detayları - Sadece çakışma varsa göster */}
+                {performanceData.conflictAnalysis.totalConflicts > 0 &&
+                  performanceData.conflictAnalysis.conflictDetails &&
+                  performanceData.conflictAnalysis.conflictDetails.length > 0 && (
+                    <Box sx={{ mt: 2 }}>
+                      <Typography variant="subtitle2" sx={{ mb: 1.5, color: 'error.main', fontWeight: 'bold' }}>
+                        🚨 Çakışma Detayları:
+                      </Typography>
+                      <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 300 }}>
+                        <Table size="small" stickyHeader>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell sx={{ fontWeight: 'bold', bgcolor: 'error.lighter' }}>Saat</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', bgcolor: 'error.lighter' }}>Öğretim Üyesi</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', bgcolor: 'error.lighter' }}>Çakışan Sınıflar</TableCell>
+                              <TableCell sx={{ fontWeight: 'bold', bgcolor: 'error.lighter' }}>Projeler</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {performanceData.conflictAnalysis.conflictDetails.map((conflict: any, index: number) => (
+                              <TableRow key={index} sx={{ '&:nth-of-type(odd)': { bgcolor: 'grey.50' } }}>
+                                <TableCell>
+                                  <Chip
+                                    label={conflict.timeslotLabel}
+                                    size="small"
+                                    color="error"
+                                    variant="outlined"
+                                    sx={{ fontWeight: 'bold' }}
+                                  />
+                                </TableCell>
+                                <TableCell>
+                                  <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
+                                    {conflict.instructorName}
+                                  </Typography>
+                                </TableCell>
+                                <TableCell>
+                                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                    {conflict.classroomNames.map((name: string, idx: number) => (
+                                      <Chip
+                                        key={idx}
+                                        label={name}
+                                        size="small"
+                                        variant="outlined"
+                                        color="warning"
+                                        sx={{ fontSize: '0.75rem' }}
+                                      />
+                                    ))}
+                                  </Box>
+                                </TableCell>
+                                <TableCell>
+                                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem' }}>
+                                    {conflict.projectNames.slice(0, 2).join(', ')}
+                                    {conflict.projectNames.length > 2 && ` +${conflict.projectNames.length - 2}`}
+                                  </Typography>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    </Box>
+                  )}
+
+                {/* Çakışma yoksa başarı mesajı */}
+                {performanceData.conflictAnalysis.totalConflicts === 0 && (
+                  <Box sx={{
+                    mt: 2,
+                    p: 2,
+                    bgcolor: 'success.lighter',
+                    borderRadius: 1,
+                    border: '1px solid',
+                    borderColor: 'success.light',
+                    textAlign: 'center'
+                  }}>
+                    <Typography variant="body1" color="success.main" sx={{ fontWeight: 'medium' }}>
+                      ✅ Hiçbir öğretim üyesinin aynı anda birden fazla sınıfta görevi yok!
+                    </Typography>
+                  </Box>
+                )}
+              </Paper>
+
+              {/* Yük Dağılımı Analizi */}
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
+                <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
+                  ⚖️ Yük Dağılımı Analizi
+                </Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 2 }}>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color="info.main" sx={{ fontWeight: 'bold' }}>
+                      {performanceData.workloadAnalysis.maxWorkload}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      Maksimum Yük
+                    </Typography>
+                    {performanceData.workloadAnalysis.maxWorkloadInstructors &&
                       performanceData.workloadAnalysis.maxWorkloadInstructors.length > 0 && (
-                       <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 0.5 }}>
-                         {performanceData.workloadAnalysis.maxWorkloadInstructors.map((name: string, index: number) => (
-                           <Chip
-                             key={index}
-                             label={name}
-                             size="small"
-                             sx={{ 
-                               fontSize: '0.7rem',
-                               height: '22px',
-                               bgcolor: 'info.lighter',
-                               color: 'info.main'
-                             }}
-                           />
-                         ))}
-                       </Box>
-                     )}
-                   </Box>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color="success.main" sx={{ fontWeight: 'bold' }}>
-                       {performanceData.workloadAnalysis.minWorkload}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                       Minimum Yük
-                     </Typography>
-                     {performanceData.workloadAnalysis.minWorkloadInstructors && 
+                        <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 0.5 }}>
+                          {performanceData.workloadAnalysis.maxWorkloadInstructors.map((name: string, index: number) => (
+                            <Chip
+                              key={index}
+                              label={name}
+                              size="small"
+                              sx={{
+                                fontSize: '0.7rem',
+                                height: '22px',
+                                bgcolor: 'info.lighter',
+                                color: 'info.main'
+                              }}
+                            />
+                          ))}
+                        </Box>
+                      )}
+                  </Box>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color="success.main" sx={{ fontWeight: 'bold' }}>
+                      {performanceData.workloadAnalysis.minWorkload}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                      Minimum Yük
+                    </Typography>
+                    {performanceData.workloadAnalysis.minWorkloadInstructors &&
                       performanceData.workloadAnalysis.minWorkloadInstructors.length > 0 && (
-                       <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 0.5 }}>
-                         {performanceData.workloadAnalysis.minWorkloadInstructors.map((name: string, index: number) => (
-                           <Chip
-                             key={index}
-                             label={name}
-                             size="small"
-                             sx={{ 
-                               fontSize: '0.7rem',
-                               height: '22px',
-                               bgcolor: 'success.lighter',
-                               color: 'success.main'
-                             }}
-                           />
-                         ))}
-                       </Box>
-                     )}
-                   </Box>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color="primary.main" sx={{ fontWeight: 'bold' }}>
-                       {performanceData.workloadAnalysis.avgWorkload}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary">
-                       Ortalama Yük
-                     </Typography>
-                   </Box>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color={performanceData.workloadAnalysis.maxDifference <= 2 ? 'success.main' : 'warning.main'} sx={{ fontWeight: 'bold' }}>
-                       {performanceData.workloadAnalysis.maxDifference}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary">
-                       Yük Farkı
-                     </Typography>
-                   </Box>
-                 </Box>
-               </Paper>
+                        <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 0.5 }}>
+                          {performanceData.workloadAnalysis.minWorkloadInstructors.map((name: string, index: number) => (
+                            <Chip
+                              key={index}
+                              label={name}
+                              size="small"
+                              sx={{
+                                fontSize: '0.7rem',
+                                height: '22px',
+                                bgcolor: 'success.lighter',
+                                color: 'success.main'
+                              }}
+                            />
+                          ))}
+                        </Box>
+                      )}
+                  </Box>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color="primary.main" sx={{ fontWeight: 'bold' }}>
+                      {performanceData.workloadAnalysis.avgWorkload}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Ortalama Yük
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color={performanceData.workloadAnalysis.maxDifference <= 2 ? 'success.main' : 'warning.main'} sx={{ fontWeight: 'bold' }}>
+                      {performanceData.workloadAnalysis.maxDifference}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Yük Farkı
+                    </Typography>
+                  </Box>
+                </Box>
+              </Paper>
 
-               {/* Sınıf Değişimi Analizi */}
-               <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
-                 <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
-                   🏫 Sınıf Değişimi Analizi
-                 </Typography>
-                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 2 }}>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color={performanceData.classroomChangeAnalysis.totalChanges === 0 ? 'success.main' : 'warning.main'} sx={{ fontWeight: 'bold' }}>
-                       {performanceData.classroomChangeAnalysis.totalChanges}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary">
-                       Toplam Sınıf Değişimi
-                     </Typography>
-                   </Box>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color={performanceData.classroomChangeAnalysis.instructorsWithChanges === 0 ? 'success.main' : 'info.main'} sx={{ fontWeight: 'bold' }}>
-                       {performanceData.classroomChangeAnalysis.instructorsWithChanges}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary">
-                       Sınıf Değiştiren Öğretim Üyesi
-                     </Typography>
-                   </Box>
-                 </Box>
-               </Paper>
+              {/* Sınıf Değişimi Analizi */}
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
+                <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
+                  🏫 Sınıf Değişimi Analizi
+                </Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 2 }}>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color={performanceData.classroomChangeAnalysis.totalChanges === 0 ? 'success.main' : 'warning.main'} sx={{ fontWeight: 'bold' }}>
+                      {performanceData.classroomChangeAnalysis.totalChanges}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Toplam Sınıf Değişimi
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color={performanceData.classroomChangeAnalysis.instructorsWithChanges === 0 ? 'success.main' : 'info.main'} sx={{ fontWeight: 'bold' }}>
+                      {performanceData.classroomChangeAnalysis.instructorsWithChanges}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Sınıf Değiştiren Öğretim Üyesi
+                    </Typography>
+                  </Box>
+                </Box>
+              </Paper>
 
-               {/* Proje Atama Durumu */}
-               <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
-                 <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
-                   📋 Proje Atama Durumu
-                 </Typography>
-                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 2 }}>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color="primary.main" sx={{ fontWeight: 'bold' }}>
-                       {performanceData.totalProjects}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary">
-                       Toplam Proje
-                     </Typography>
-                   </Box>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color="success.main" sx={{ fontWeight: 'bold' }}>
-                       {performanceData.assignedProjects}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary">
-                       Atanmış Proje
-                     </Typography>
-                   </Box>
-                   <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
-                     <Typography variant="h5" color={performanceData.unassignedProjects === 0 ? 'success.main' : 'warning.main'} sx={{ fontWeight: 'bold' }}>
-                       {performanceData.unassignedProjects}
-                     </Typography>
-                     <Typography variant="body2" color="text.secondary">
-                       Atanmamış Proje
-                     </Typography>
-                   </Box>
-                 </Box>
-               </Paper>
+              {/* Proje Atama Durumu */}
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
+                <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
+                  📋 Proje Atama Durumu
+                </Typography>
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 2 }}>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color="primary.main" sx={{ fontWeight: 'bold' }}>
+                      {performanceData.totalProjects}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Toplam Proje
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color="success.main" sx={{ fontWeight: 'bold' }}>
+                      {performanceData.assignedProjects}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Atanmış Proje
+                    </Typography>
+                  </Box>
+                  <Box sx={{ textAlign: 'center', p: 1.5, bgcolor: 'white', borderRadius: 1, border: '1px solid', borderColor: 'grey.200' }}>
+                    <Typography variant="h5" color={performanceData.unassignedProjects === 0 ? 'success.main' : 'warning.main'} sx={{ fontWeight: 'bold' }}>
+                      {performanceData.unassignedProjects}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Atanmamış Proje
+                    </Typography>
+                  </Box>
+                </Box>
+              </Paper>
 
-               {/* Öğretim Görevlileri İş Yükü */}
-               <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
-                 <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
-                   👥 Öğretim Görevlileri İş Yükü
-                 </Typography>
-                 {performanceData.allInstructorWorkloads && performanceData.allInstructorWorkloads.length > 0 ? (
-                   <TableContainer sx={{ bgcolor: 'white', borderRadius: 1, maxHeight: 400, overflow: 'auto' }}>
-                     <Table size="small" stickyHeader>
-                       <TableHead>
-                         <TableRow>
-                           <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Öğretim Görevlisi</TableCell>
-                           <TableCell align="center" sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Sorumlu</TableCell>
-                           <TableCell align="center" sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Jüri</TableCell>
-                           <TableCell align="center" sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Toplam</TableCell>
-                         </TableRow>
-                       </TableHead>
-                       <TableBody>
-                         {performanceData.allInstructorWorkloads
-                           .filter((workload: any) => workload.instructorId !== -1 && workload.instructorId !== null && workload.instructorId !== undefined)
-                           .map((workload: any, index: number) => {
-                           // Renk belirleme: Ortalama yükün üstünde ise uyarı rengi
-                           const avgWorkload = performanceData.workloadAnalysis.avgWorkload || 0;
-                           const isAboveAverage = workload.totalCount > avgWorkload;
-                           const isBelowAverage = workload.totalCount < avgWorkload && workload.totalCount > 0;
-                           
-                           return (
-                             <TableRow 
-                               key={workload.instructorId} 
-                               sx={{ 
-                                 '&:nth-of-type(odd)': { bgcolor: 'grey.50' },
-                                 '&:hover': { bgcolor: 'action.hover' }
-                               }}
-                             >
-                               <TableCell sx={{ fontWeight: 500 }}>
-                                 {workload.instructorName}
-                               </TableCell>
-                               <TableCell align="center">
-                                 <Chip 
-                                   label={workload.responsibleCount} 
-                                   size="small"
-                                   sx={{ 
-                                     bgcolor: 'primary.lighter',
-                                     color: 'primary.main',
-                                     fontWeight: 'bold'
-                                   }}
-                                 />
-                               </TableCell>
-                               <TableCell align="center">
-                                 <Chip 
-                                   label={workload.juryCount} 
-                                   size="small"
-                                   sx={{ 
-                                     bgcolor: 'secondary.lighter',
-                                     color: 'secondary.main',
-                                     fontWeight: 'bold'
-                                   }}
-                                 />
-                               </TableCell>
-                               <TableCell align="center">
-                                 <Chip 
-                                   label={workload.totalCount} 
-                                   size="small"
-                                   color={isAboveAverage ? 'warning' : isBelowAverage ? 'info' : 'success'}
-                                   sx={{ fontWeight: 'bold' }}
-                                 />
-                               </TableCell>
-                             </TableRow>
-                           );
-                         })}
-                       </TableBody>
-                     </Table>
-                   </TableContainer>
-                 ) : (
-                   <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
-                     İş yükü bilgisi bulunamadı
-                   </Typography>
-                 )}
-               </Paper>
+              {/* Öğretim Görevlileri İş Yükü */}
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'grey.50' }}>
+                <Typography variant="h6" sx={{ mb: 2, color: 'primary.main' }}>
+                  👥 Öğretim Görevlileri İş Yükü
+                </Typography>
+                {performanceData.allInstructorWorkloads && performanceData.allInstructorWorkloads.length > 0 ? (
+                  <TableContainer sx={{ bgcolor: 'white', borderRadius: 1, maxHeight: 400, overflow: 'auto' }}>
+                    <Table size="small" stickyHeader>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Öğretim Görevlisi</TableCell>
+                          <TableCell align="center" sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Sorumlu</TableCell>
+                          <TableCell align="center" sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Jüri</TableCell>
+                          <TableCell align="center" sx={{ fontWeight: 'bold', bgcolor: 'grey.100' }}>Toplam</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {performanceData.allInstructorWorkloads
+                          .filter((workload: any) => workload.instructorId !== -1 && workload.instructorId !== null && workload.instructorId !== undefined)
+                          .map((workload: any, index: number) => {
+                            // Renk belirleme: Ortalama yükün üstünde ise uyarı rengi
+                            const avgWorkload = performanceData.workloadAnalysis.avgWorkload || 0;
+                            const isAboveAverage = workload.totalCount > avgWorkload;
+                            const isBelowAverage = workload.totalCount < avgWorkload && workload.totalCount > 0;
+
+                            return (
+                              <TableRow
+                                key={workload.instructorId}
+                                sx={{
+                                  '&:nth-of-type(odd)': { bgcolor: 'grey.50' },
+                                  '&:hover': { bgcolor: 'action.hover' }
+                                }}
+                              >
+                                <TableCell sx={{ fontWeight: 500 }}>
+                                  {workload.instructorName}
+                                </TableCell>
+                                <TableCell align="center">
+                                  <Chip
+                                    label={workload.responsibleCount}
+                                    size="small"
+                                    sx={{
+                                      bgcolor: 'primary.lighter',
+                                      color: 'primary.main',
+                                      fontWeight: 'bold'
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell align="center">
+                                  <Chip
+                                    label={workload.juryCount}
+                                    size="small"
+                                    sx={{
+                                      bgcolor: 'secondary.lighter',
+                                      color: 'secondary.main',
+                                      fontWeight: 'bold'
+                                    }}
+                                  />
+                                </TableCell>
+                                <TableCell align="center">
+                                  <Chip
+                                    label={workload.totalCount}
+                                    size="small"
+                                    color={isAboveAverage ? 'warning' : isBelowAverage ? 'info' : 'success'}
+                                    sx={{ fontWeight: 'bold' }}
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : (
+                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>
+                    İş yükü bilgisi bulunamadı
+                  </Typography>
+                )}
+              </Paper>
             </Stack>
           )}
         </DialogContent>
-        
+
         <DialogActions sx={{ p: 2, borderTop: '1px solid', borderColor: 'divider' }}>
-          <Button 
+          <Button
             onClick={() => setShowPerformanceDialog(false)}
             variant="outlined"
             sx={{ borderRadius: 2 }}

@@ -102,7 +102,7 @@ const Dashboard: React.FC = () => {
   ];
 
   return (
-    <Box sx={{ minHeight: 'calc(100vh - 64px)', p: 3 }}>
+    <Box sx={{ minHeight: 'calc(100vh - 64px)', p: 3, width: '100%' }}>
       {/* Header Section */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" gutterBottom sx={{ fontWeight: 600, mb: 1 }}>
@@ -257,18 +257,18 @@ const Dashboard: React.FC = () => {
                   gap: 1.5,
                 }}
               >
-                <Card 
-                  onClick={() => navigate('/projects')} 
-                  role="button" 
-                  tabIndex={0} 
-                  sx={{ 
-                    cursor: 'pointer', 
+                <Card
+                  onClick={() => navigate('/projects')}
+                  role="button"
+                  tabIndex={0}
+                  sx={{
+                    cursor: 'pointer',
                     minHeight: 100,
                     transition: 'all 0.2s ease',
-                    '&:hover': { 
+                    '&:hover': {
                       boxShadow: 4,
                       transform: 'translateY(-2px)'
-                    } 
+                    }
                   }}
                 >
                   <CardContent sx={{ p: 2 }}>
@@ -284,18 +284,18 @@ const Dashboard: React.FC = () => {
                   </CardContent>
                 </Card>
 
-                <Card 
-                  onClick={() => navigate('/algorithms')} 
-                  role="button" 
-                  tabIndex={0} 
-                  sx={{ 
-                    cursor: 'pointer', 
+                <Card
+                  onClick={() => navigate('/algorithms')}
+                  role="button"
+                  tabIndex={0}
+                  sx={{
+                    cursor: 'pointer',
                     minHeight: 100,
                     transition: 'all 0.2s ease',
-                    '&:hover': { 
+                    '&:hover': {
                       boxShadow: 4,
                       transform: 'translateY(-2px)'
-                    } 
+                    }
                   }}
                 >
                   <CardContent sx={{ p: 2 }}>
@@ -311,18 +311,18 @@ const Dashboard: React.FC = () => {
                   </CardContent>
                 </Card>
 
-                <Card 
-                  onClick={() => navigate('/planner')} 
-                  role="button" 
-                  tabIndex={0} 
-                  sx={{ 
-                    cursor: 'pointer', 
+                <Card
+                  onClick={() => navigate('/planner')}
+                  role="button"
+                  tabIndex={0}
+                  sx={{
+                    cursor: 'pointer',
                     minHeight: 100,
                     transition: 'all 0.2s ease',
-                    '&:hover': { 
+                    '&:hover': {
                       boxShadow: 4,
                       transform: 'translateY(-2px)'
-                    } 
+                    }
                   }}
                 >
                   <CardContent sx={{ p: 2 }}>
@@ -338,18 +338,18 @@ const Dashboard: React.FC = () => {
                   </CardContent>
                 </Card>
 
-                <Card 
-                  onClick={() => navigate('/instructors')} 
-                  role="button" 
-                  tabIndex={0} 
-                  sx={{ 
-                    cursor: 'pointer', 
+                <Card
+                  onClick={() => navigate('/instructors')}
+                  role="button"
+                  tabIndex={0}
+                  sx={{
+                    cursor: 'pointer',
                     minHeight: 100,
                     transition: 'all 0.2s ease',
-                    '&:hover': { 
+                    '&:hover': {
                       boxShadow: 4,
                       transform: 'translateY(-2px)'
-                    } 
+                    }
                   }}
                 >
                   <CardContent sx={{ p: 2 }}>
@@ -374,10 +374,10 @@ const Dashboard: React.FC = () => {
               </Typography>
               <Box>
                 {recentActivities.map((activity) => (
-                  <Box key={activity.id} sx={{ 
-                    mb: 1.5, 
-                    p: 2, 
-                    bgcolor: 'grey.50', 
+                  <Box key={activity.id} sx={{
+                    mb: 1.5,
+                    p: 2,
+                    bgcolor: 'grey.50',
                     borderRadius: 1.5,
                     border: '1px solid',
                     borderColor: 'grey.200',

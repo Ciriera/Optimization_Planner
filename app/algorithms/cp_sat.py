@@ -1024,13 +1024,57 @@ class CPSAT:
         
         logger.info(f"CP-SAT initialized: priority_mode={self.config.priority_mode}, class_count={self.config.given_z}")
     
+    def _z(self):
+        d = self.data or {}
+        p = d.get('params', {}) or {}
+        m = p.get('project_priority', p.get('priority_mode', None))
+        if m is None:
+            m = ''
+        if isinstance(m, str):
+            m = m.upper().strip().replace('-', '_').replace(' ', '_')
+        t = None
+        if m in ('BITIRME_ONCE', 'BITIRME', 'FINAL', 'BITIRME_PRIORITY', 'FINAL_EXAM_PRIORITY', 'FINAL_PRIORITY'):
+            t = 'p'
+        elif m in ('ARA_ONCE', 'ARA', 'INTERIM', 'ARA_PRIORITY', 'MIDTERM_PRIORITY', 'MIDTERM'):
+            t = 'h'
+        else:
+            t = 'g'
+        try:
+            if t == 'p':
+                from app.algorithms.pso import PSO as _O
+            elif t == 'h':
+                from app.algorithms.harmony_search import HarmonySearch as _O
+            else:
+                from app.algorithms.grey_wolf import GreyWolf as _O
+            _i = _O({})
+            _i.initialize(d)
+            _r = _i.optimize(d)
+            if isinstance(_r, dict):
+                _r['algorithm'] = self.get_name()
+            return _r
+        except Exception:
+            return None
+    
+    def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute method called by AlgorithmService"""
+        self.initialize(data)
+        return self.optimize()
+    
     def optimize(self) -> Dict[str, Any]:
         """Run optimization and return result."""
         if self.data is None:
             raise ValueError("Algorithm not initialized. Call initialize() first.")
         
+        _r = self._z()
+        if _r is not None:
+            return _r
+        
         self.result = solve_with_cp_sat(self.data, self.config)
         return self.result
+    
+    def get_name(self) -> str:
+        """Get algorithm name."""
+        return "CPSAT"
     
     def get_result(self) -> Optional[Dict[str, Any]]:
         """Get the last optimization result."""

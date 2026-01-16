@@ -56,8 +56,20 @@ class NotificationService:
             instructors_result = await db.execute(instructors_query)
             instructors = instructors_result.scalars().all()
             
-            # Build planner data structure
-            classes = [cls.name for cls in classrooms]
+            # Get unique classroom IDs that are actually used in schedules
+            used_classroom_ids = set()
+            for schedule in schedules:
+                if schedule.classroom_id:
+                    used_classroom_ids.add(schedule.classroom_id)
+            
+            # Filter classrooms to only show ones that are actually used in the solution
+            used_classrooms = [cls for cls in classrooms if cls.id in used_classroom_ids]
+            
+            # Sort used classrooms by name for consistent ordering
+            used_classrooms.sort(key=lambda c: c.name)
+            
+            # Build planner data structure with only used classrooms
+            classes = [cls.name for cls in used_classrooms]
             time_slots = []
             if timeslots:
                 for ts in timeslots:
@@ -112,7 +124,7 @@ class NotificationService:
                 "metadata": {
                     "total_schedules": len(schedules),
                     "total_instructors": len(instructors),
-                    "total_classrooms": len(classrooms),
+                    "total_classrooms": len(used_classrooms),  # Show used classrooms count
                     "generated_at": datetime.now().isoformat(),
                 }
             }

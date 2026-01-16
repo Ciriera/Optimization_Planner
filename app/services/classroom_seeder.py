@@ -15,7 +15,7 @@ from app.schemas.classroom import ClassroomCreate
 class ClassroomSeeder:
     """Service for seeding default classrooms."""
     
-    # Proje açıklamasından: D106, D107, D108, D109, D110, D111, D223
+    # Proje açıklamasından: D106, D107, D108, D109, D110, D111, D223 + Yeni: D224, D225, D226
     DEFAULT_CLASSROOMS = [
         {"name": "D106", "capacity": 25, "location": "Bilgisayar Mühendisliği Binası"},
         {"name": "D107", "capacity": 25, "location": "Bilgisayar Mühendisliği Binası"},
@@ -24,6 +24,9 @@ class ClassroomSeeder:
         {"name": "D110", "capacity": 25, "location": "Bilgisayar Mühendisliği Binası"},
         {"name": "D111", "capacity": 25, "location": "Bilgisayar Mühendisliği Binası"},
         {"name": "D223", "capacity": 30, "location": "Bilgisayar Mühendisliği Binası"},
+        {"name": "D224", "capacity": 25, "location": "Bilgisayar Mühendisliği Binası"},
+        {"name": "D225", "capacity": 25, "location": "Bilgisayar Mühendisliği Binası"},
+        {"name": "D226", "capacity": 25, "location": "Bilgisayar Mühendisliği Binası"},
     ]
     
     async def seed_default_classrooms(self, db: AsyncSession) -> Dict[str, Any]:

@@ -191,7 +191,7 @@ class CPSAT(OptimizationAlgorithm):
             "solution": best_solution or [],
             "fitness_scores": self._calculate_fitness_scores(best_solution or []),
             "execution_time": execution_time,
-            "algorithm": "CP-SAT (ULTRA AI-POWERED - NO HARD CONSTRAINTS)",
+            "algorithm": "CP-SAT",
             "status": "completed",
             
             # 🤖 AI SCORES

@@ -127,8 +127,7 @@ class HarmonySearch(OptimizationAlgorithm):
             if ts_id is not None:
                 self.timeslot_order[ts_id] = idx
         
-        logger.info(f"HS Init: {len(self.projects)} projects, {len(self.instructor_ids)} instructors, "
-                   f"{len(self.classrooms)} classrooms, {len(self.sorted_timeslots)} timeslots")
+        pass
 
     def _parse_time_to_minutes(self, time_str) -> int:
         if not time_str:
@@ -156,14 +155,12 @@ class HarmonySearch(OptimizationAlgorithm):
         start_time = time.time()
         self.initialize(data)
         
-        logger.info("=" * 70)
-        logger.info("HARMONY SEARCH ALGORITHM - ARA PROJE ONCELIKLI")
-        logger.info("=" * 70)
+        pass
         
         bitirme_projects = [p for p in self.projects if self._is_bitirme(p)]
         ara_projects = [p for p in self.projects if self._is_ara(p)]
         
-        logger.info(f"Ara: {len(ara_projects)}, Bitirme: {len(bitirme_projects)}")
+        pass
         
         if not self.projects:
             return self._create_empty_result(time.time() - start_time, "No projects")
@@ -348,16 +345,6 @@ class HarmonySearch(OptimizationAlgorithm):
         
         for ts_order in sorted(timeslot_assignments.keys()):
             assignments.extend(timeslot_assignments[ts_order])
-        
-        ara_count = len(ara_projects) - len(remaining_ara)
-        bitirme_count = len(bitirme_projects) - len(remaining_bitirme)
-        
-        logger.info(f"Slot Assignment: {len(assignments)} total ({ara_count} ara, {bitirme_count} bitirme)")
-        
-        if remaining_ara:
-            logger.warning(f"{len(remaining_ara)} ara projesi atanamadı!")
-        if remaining_bitirme:
-            logger.warning(f"{len(remaining_bitirme)} bitirme projesi atanamadı!")
         
         return assignments
 
@@ -598,7 +585,7 @@ class HarmonySearch(OptimizationAlgorithm):
         if len(assignments) < 2:
             return assignments
         
-        logger.info(f"HS: {self.n_particles} harmonies, {self.n_iterations} iterations")
+        pass
         
         current = copy.deepcopy(assignments)
         current = self._fix_hard_constraints(current)
@@ -639,8 +626,7 @@ class HarmonySearch(OptimizationAlgorithm):
                     best_global_fitness = new_fit
                     best_global = copy.deepcopy(new_pos)
             
-            if (it + 1) % 50 == 0:
-                logger.info(f"  Iter {it+1}: Best = {best_global_fitness:.2f}")
+            pass
         
         return best_global
 
@@ -935,30 +921,7 @@ class HarmonySearch(OptimizationAlgorithm):
 
     def _log_final_stats(self, assignments: List[Dict], fitness: float,
                           h1: float, h2: float, h3: float, continuity: float):
-        logger.info("=" * 70)
-        logger.info("FINAL RESULTS - HARMONY SEARCH (ARA ONCELIKLI)")
-        logger.info("=" * 70)
-        logger.info(f"  Fitness: {fitness:.2f}")
-        logger.info(f"  H1 (GAP): {h1:.2f}, H2 (Workload): {h2:.2f}, H3 (Class): {h3:.2f}")
-        logger.info(f"  Continuity: {continuity:.1f}%")
-        
-        # ARA öncelikli kontrol (PSO'nun tersi)
-        ara_orders = [a.get("ts_order", 0) for a in assignments if a.get("project_type") == "ara"]
-        bitirme_orders = [a.get("ts_order", 0) for a in assignments if a.get("project_type") == "bitirme"]
-        
-        if ara_orders and bitirme_orders:
-            max_a = max(ara_orders)
-            min_b = min(bitirme_orders)
-            if max_a <= min_b:
-                logger.info(f"  Ara Priority: OK (max_ara={max_a} <= min_bitirme={min_b})")
-            else:
-                logger.warning(f"  Ara Priority: FAIL")
-        
-        violations = self._count_hard_violations(assignments)
-        if violations == 0:
-            logger.info("  Hard Constraints: ALL OK")
-        else:
-            logger.warning(f"  Hard Constraints: {violations} violations")
+        pass
 
     def _create_empty_result(self, exec_time: float, error: str) -> Dict[str, Any]:
         return {

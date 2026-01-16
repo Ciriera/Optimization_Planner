@@ -1,749 +1,1082 @@
 """
-Particle Swarm Optimization (PSO) algoritmasi sinifi - CP-SAT ozellikli versiyon.
+Particle Swarm Optimization (PSO) - Bitirme Projesi Öncelikli
+Çok Kriterli ve Çok Kısıtlı Akademik Proje Sınavı / Jüri Planlama Sistemi
+
+==========================================================================
+TEMEL ÖZELLİKLER:
+==========================================================================
+1. Bitirme Projeleri SABAH saatlerine (HARD constraint)
+2. Ara Projeleri öğleden sonra (Bitirme bittikten sonra)  
+3. 2. Jüri = "[Araştırma Görevlisi]" placeholder (her projede)
+4. Her timeslotta her öğretim görevlisi EN FAZLA 1 görev
+5. Öğretim görevlisi kendi projesine jüri OLAMAZ
+6. Süreklilik: Öğretim görevlileri mümkün olduğunca arka arkaya görev alır
+7. İş yükü dengesi: Görevler eşit dağıtılır (±2 tolerans)
+8. Back-to-back sınıf yerleşimi
+
+==========================================================================
+AMAÇ FONKSİYONU: min Z = C1·H1 + C2·H2 + C3·H3
+==========================================================================
+H1: Zaman/GAP cezası (öğretim görevlisi boşlukları)
+H2: İş yükü dengesizlik cezası (dominant kriter)
+H3: Sınıf değişimi cezası
 """
-from typing import Dict, Any, List, Tuple
+from __future__ import annotations
+
+from typing import Dict, Any, List, Tuple, Optional, Set
+from enum import Enum
 import random
-import numpy as np
+import logging
 import copy
+import time
+from collections import defaultdict
+from datetime import time as dt_time
 
 from app.algorithms.base import OptimizationAlgorithm
-from app.algorithms.gap_free_assignment import GapFreeAssignment
+
+logger = logging.getLogger(__name__)
+
+# ==========================================================================
+# SABITLER
+# ==========================================================================
+JURY2_PLACEHOLDER = "[Araştırma Görevlisi]"
+HARD_CONSTRAINT_PENALTY = 1_000_000.0
+
+
+class TimePenaltyMode(Enum):
+    BINARY = "binary"
+    GAP_PROPORTIONAL = "gap_proportional"
+
+
+class WorkloadConstraintMode(Enum):
+    SOFT_ONLY = "soft_only"
+    SOFT_AND_HARD = "soft_and_hard"
+
 
 class PSO(OptimizationAlgorithm):
     """
-    Particle Swarm Optimization (PSO) algoritmasi sinifi.
-    Parcacik Suru Optimizasyonu kullanarak proje atama problemini cozer.
+    Particle Swarm Optimization - Süreklilik ve İş Yükü Odaklı
     """
-    
-    
-    def _prioritize_projects_for_gap_free(self) -> List[Dict[str, Any]]:
-        """Projeleri gap-free icin onceliklendir."""
-        bitirme_normal = [p for p in self.projects if p.get("type") == "bitirme" and not p.get("is_makeup", False)]
-        ara_normal = [p for p in self.projects if p.get("type") == "ara" and not p.get("is_makeup", False)]
-        bitirme_makeup = [p for p in self.projects if p.get("type") == "bitirme" and p.get("is_makeup", False)]
-        ara_makeup = [p for p in self.projects if p.get("type") == "ara" and p.get("is_makeup", False)]
-        return bitirme_normal + ara_normal + bitirme_makeup + ara_makeup
 
-def __init__(self, params: Dict[str, Any] = None):
-        """
-        PSO algoritmasi baslatici - CP-SAT ozellikli versiyon.
-
-    def _select_instructors_for_project_gap_free(self, project: Dict[str, Any], instructor_timeslot_usage: Dict[int, Set[int]]) -> List[int]:
-        """
-        Proje icin instructor secer (gap-free versiyonu).
-        
-        Kurallar:
-        - Bitirme: 1 sorumlu + en az 1 juri (hoca veya arastirma gorevlisi)
-        - Ara: 1 sorumlu
-        - Ayni kisi hem sorumlu hem juri OLAMAZ
-        
-        Args:
-            project: Proje
-            instructor_timeslot_usage: Kullanim bilgisi
-            
-        Returns:
-            Instructor ID listesi
-        """
-        instructors = []
-        project_type = project.get("type", "ara")
-        responsible_id = project.get("responsible_id")
-        
-        # Sorumlu her zaman ilk sirada
-        if responsible_id:
-            instructors.append(responsible_id)
-        else:
-            logger.error(f"{self.__class__.__name__}: Project {project.get("id")} has NO responsible_id!")
-            return []
-        
-        # Proje tipine gore ek instructor sec
-        if project_type == "bitirme":
-            # Bitirme icin EN AZ 1 juri gerekli (sorumlu haric)
-            available_jury = [i for i in self.instructors 
-                            if i.get("id") != responsible_id]
-            
-            # Once hocalari tercih et, sonra arastirma gorevlileri
-            faculty = [i for i in available_jury if i.get("type") == "instructor"]
-            assistants = [i for i in available_jury if i.get("type") == "assistant"]
-            
-            # En az 1 juri ekle (tercihen faculty)
-            if faculty:
-                instructors.append(faculty[0].get("id"))
-            elif assistants:
-                instructors.append(assistants[0].get("id"))
-            else:
-                logger.warning(f"{self.__class__.__name__}: No jury available for bitirme project {project.get("id")}")
-                return []  # Bitirme icin juri zorunlu!
-        
-        # Ara proje icin sadece sorumlu yeterli
-        return instructors
-
-        Args:
-            params: Algoritma parametreleri.
-        """
+    def __init__(self, params: Dict[str, Any] = None):
         super().__init__(params)
         params = params or {}
-        self.n_particles = params.get("n_particles", 30)
-        self.n_iterations = params.get("n_iterations", 100)
-        self.w = params.get("w", 0.7)  # Eylemsizlik agirligi
-        self.c1 = params.get("c1", 1.5)  # Bilissel katsayi
-        self.c2 = params.get("c2", 1.5)  # Sosyal katsayi
+        
+        # PSO Parametreleri
+        self.n_particles = params.get("n_particles", 40)     # Daha fazla parçacık
+        self.n_iterations = params.get("n_iterations", 300)  # Daha fazla iterasyon
+        self.inertia_weight = params.get("inertia_weight", 0.5)  # Daha az exploration
+        self.cognitive_weight = params.get("cognitive_weight", 2.0)  # Daha güçlü personal best
+        self.social_weight = params.get("social_weight", 2.0)  # Daha güçlü global best
+        
+        # Ceza Katsayıları - İŞ YÜKÜ DENGESİ EN ÖNEMLİ!
+        self.C1 = params.get("time_penalty_weight", 15.0)       # GAP cezası
+        self.C2 = params.get("workload_penalty_weight", 50.0)   # İş yükü DENGESİ - EN ÖNEMLİ!
+        self.C3 = params.get("class_change_penalty_weight", 10.0)  # Sınıf değişimi
+        
+        time_mode = params.get("time_penalty_mode", "gap_proportional")
+        self.time_penalty_mode = TimePenaltyMode(time_mode) if isinstance(time_mode, str) else time_mode
+        
+        self.workload_tolerance = params.get("workload_tolerance", 2)
+        
+        # Veri
+        self.projects = []
+        self.instructors = []
+        self.classrooms = []
+        self.timeslots = []
+        self.sorted_timeslots = []
+        self.timeslot_order = {}  # timeslot_id -> sıra numarası (süreklilik için)
+        self.instructor_ids = []
+        self.instructor_id_set = set()
 
-        # CP-SAT ozellikleri
-        self.time_limit = params.get("time_limit", 60) if params else 60  # Saniye cinsinden zaman limiti
-        self.max_load_tolerance = params.get("max_load_tolerance", 2) if params else 2  # ortalamanin +2 fazlasini gecmesin
-        self.best_solution = None
-        self.best_fitness = float('-inf')
+    def _safe_int(self, val) -> Optional[int]:
+        if val is None:
+            return None
+        try:
+            return int(float(val))
+        except (ValueError, TypeError):
+            return None
 
-        # CP-SAT ozellikleri icin ek veri yapilari
-        self._instructor_timeslot_usage = {}
-    
     def initialize(self, data: Dict[str, Any]) -> None:
-        """
-        PSO algoritmasini baslangic verileri ile baslatir - CP-SAT ozellikli versiyon.
-
-        Args:
-            data: Algoritma giris verileri.
-        """
-        self.instructors = data.get("instructors", [])
+        self.data = data
         self.projects = data.get("projects", [])
+        self.instructors = data.get("instructors", [])
         self.classrooms = data.get("classrooms", [])
         self.timeslots = data.get("timeslots", [])
-
-        # CP-SAT ozelligi: instructor timeslot kullanim takibi
-        self._instructor_timeslot_usage = {}
+        
+        # Instructor ID'leri temizle
+        self.instructor_ids = []
+        self.instructor_id_set = set()
         for inst in self.instructors:
-            self._instructor_timeslot_usage[inst.get("id")] = set()
+            iid = self._safe_int(inst.get("id"))
+            if iid is not None and iid not in self.instructor_id_set:
+                self.instructor_ids.append(iid)
+                self.instructor_id_set.add(iid)
+        
+        # Timeslotları sırala
+        self.sorted_timeslots = sorted(
+            self.timeslots,
+            key=lambda x: self._parse_time_to_minutes(x.get("start_time", "09:00"))
+        )
+        
+        # Timeslot sıra numarası (süreklilik hesabı için)
+        self.timeslot_order = {}
+        for idx, ts in enumerate(self.sorted_timeslots):
+            ts_id = self._safe_int(ts.get("id"))
+            if ts_id is not None:
+                self.timeslot_order[ts_id] = idx
+        
+        logger.info(f"PSO Init: {len(self.projects)} projects, {len(self.instructor_ids)} instructors, "
+                   f"{len(self.classrooms)} classrooms, {len(self.sorted_timeslots)} timeslots")
 
-        # Parcaciklari baslat
-        self.particles = self._initialize_particles()
-    
+    def _parse_time_to_minutes(self, time_str) -> int:
+        if not time_str:
+            return 0
+        try:
+            if isinstance(time_str, dt_time):
+                return time_str.hour * 60 + time_str.minute
+            parts = str(time_str).split(":")
+            return int(parts[0]) * 60 + int(parts[1])
+        except:
+            return 0
+
+    def _is_bitirme(self, project: Dict) -> bool:
+        t = str(project.get("type", "")).lower()
+        return t in ["bitirme", "final"]
+
+    def _is_ara(self, project: Dict) -> bool:
+        t = str(project.get("type", "")).lower()
+        return t in ["ara", "interim"]
+
+    def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        return self.optimize(data)
+
     def optimize(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        PSO algoritmasini calistirir - CP-SAT ozellikli versiyon.
-
-        Args:
-            data: Algoritma giris verileri.
-
-        Returns:
-            Dict[str, Any]: Optimizasyon sonucu.
-        """
-        import time
         start_time = time.time()
-
-        # CP-SAT ozelligi: Baslangic cozumu olustur ve degerlendir
-        initial_solution = self._create_initial_solution()
-        initial_fitness = self.evaluate_fitness({"solution": initial_solution})
-
-        # En iyi cozumu guncelle (CP-SAT ozelligi)
-        self.best_solution = initial_solution
-        self.best_fitness = initial_fitness
-
-        # CP-SAT ozelligi: Yerel arama ile cozumu iyilestir (zaman limiti icinde)
-        while time.time() - start_time < self.time_limit:
-            # Her parcacik icin
-            for particle in self.particles:
-                # Parcacigin mevcut cozumunu degerlendir
-                current_fitness = self.evaluate_fitness({"solution": particle["position"]})
-
-                # Parcacigin en iyi konumunu guncelle
-                if current_fitness > particle["best_fitness"]:
-                    particle["best_position"] = copy.deepcopy(particle["position"])
-                    particle["best_fitness"] = current_fitness
-
-                # Global en iyi cozumu guncelle
-                if current_fitness > self.best_fitness:
-                    self.best_solution = copy.deepcopy(particle["position"])
-                    self.best_fitness = current_fitness
-
-                # Parcacigin hizini ve konumunu guncelle
-                self._update_velocity_and_position(particle)
-
-        # Sonucu dondur (duplicate guvenli)
-        final_schedule = self._deduplicate_assignments(self.best_solution) if isinstance(self.best_solution, list) else self.best_solution
+        self.initialize(data)
+        
+        logger.info("=" * 70)
+        logger.info("PSO ALGORITHM - BITIRME ONCELIKLI")
+        logger.info("=" * 70)
+        
+        bitirme_projects = [p for p in self.projects if self._is_bitirme(p)]
+        ara_projects = [p for p in self.projects if self._is_ara(p)]
+        
+        logger.info(f"Bitirme: {len(bitirme_projects)}, Ara: {len(ara_projects)}")
+        
+        if not self.projects:
+            return self._create_empty_result(time.time() - start_time, "No projects")
+        
+        # AŞAMA 1: Slot ataması
+        assignments = self._create_initial_assignments(bitirme_projects, ara_projects)
+        
+        if not assignments:
+            return self._create_empty_result(time.time() - start_time, "Slot assignment failed")
+        
+        # AŞAMA 2: Süreklilik odaklı jüri ataması
+        assignments = self._assign_juries_with_continuity(assignments)
+        
+        # AŞAMA 3: PSO optimizasyonu
+        assignments = self._pso_optimize(assignments)
+        
+        # AŞAMA 4: Son düzeltmeler
+        assignments = self._final_fix(assignments)
+        
+        execution_time = time.time() - start_time
+        fitness = self._calculate_fitness(assignments)
+        h1, h2, h3 = self._calculate_penalties(assignments)
+        continuity = self._calculate_continuity_score(assignments)
+        
+        self._log_final_stats(assignments, fitness, h1, h2, h3, continuity)
+        
         return {
-            "schedule": final_schedule,
-            "fitness": self.best_fitness,
-            "iterations": self.n_iterations,
-            "execution_time": time.time() - start_time
+            "assignments": assignments,
+            "schedule": assignments,
+            "solution": assignments,
+            "fitness": fitness,
+            "execution_time": execution_time,
+            "algorithm": "PSO - Çok Kriterli Optimizasyon",
+            "status": "completed",
+            "metrics": {
+                "H1_time_penalty": h1,
+                "H2_workload_penalty": h2,
+                "H3_class_change_penalty": h3,
+                "continuity_score": continuity
+            }
         }
-    
-    def _initialize_particles(self) -> List[Dict[str, Any]]:
+
+    # ==========================================================================
+    # AŞAMA 1: SLOT ATAMASI
+    # ==========================================================================
+    def _create_initial_assignments(self, bitirme_projects: List[Dict], 
+                                     ara_projects: List[Dict]) -> List[Dict]:
         """
-        Parcaciklari baslatir.
+        CONSTRAINT-AWARE + SINIF SÜREKLİLİKLİ + RASTGELELİKLİ SLOT ATAMASI
         
-        Returns:
-            List[Dict[str, Any]]: Baslangic parcaciklari.
+        1. Her timeslot'ta max sınıf sayısı kadar proje atanabilir
+        2. Aynı timeslot'ta aynı sorumlu iki projede olamaz
+        3. Öğretmenler mümkünse aynı sınıfta kalır (süreklilik)
+        4. Projeler RASTGELE sırada işlenir (her çalıştırmada farklı sonuç)
         """
-        particles = []
+        assignments = []
+        n_classrooms = len(self.classrooms)
+        n_timeslots = len(self.sorted_timeslots)
         
-        for _ in range(self.n_particles):
-            # Rastgele bir cozum olustur
-            position = self._create_random_solution()
+        if n_classrooms == 0 or n_timeslots == 0:
+            return assignments
+        
+        # Projeleri sorumlu bazlı hazırla ve SHUFFLE ET!
+        remaining_bitirme = list(bitirme_projects)
+        remaining_ara = list(ara_projects)
+        
+        # RASTGELELİK: Projeleri karıştır
+        random.shuffle(remaining_bitirme)
+        random.shuffle(remaining_ara)
+        
+        # Her timeslot için hangi sorumlular kullanıldı
+        timeslot_used_responsibles = defaultdict(set)
+        
+        # Her timeslot'a atanan projeler
+        timeslot_assignments = defaultdict(list)  # ts_order -> list of assignments
+        
+        # Her timeslot için hangi sınıflar kullanıldı
+        timeslot_used_classrooms = defaultdict(set)  # ts_order -> set of classroom_ids
+        
+        # Öğretmenlerin tercih ettiği sınıf (son kullandıkları)
+        responsible_preferred_classroom = {}  # responsible_id -> classroom_id
+        
+        def get_best_classroom(rid: int, ts_order: int) -> int:
+            """Sorumlu için en iyi sınıfı bul"""
+            used_cids = timeslot_used_classrooms[ts_order]
             
-            # Cozumun uygunlugunu degerlendir
-            fitness = self.evaluate_fitness(position)
+            # 1. Bu öğretmenin tercih ettiği sınıf boşsa, onu seç (sürekliliği korumak için)
+            if rid and rid in responsible_preferred_classroom:
+                preferred_cid = responsible_preferred_classroom[rid]
+                if preferred_cid not in used_cids:
+                    # Classroom index bul
+                    for idx, c in enumerate(self.classrooms):
+                        if self._safe_int(c.get("id")) == preferred_cid:
+                            return idx
             
-            # Parcacigi olustur
-            particle = {
-                "position": position,
-                "velocity": [],  # Baslangicta bos hiz
-                "best_position": copy.deepcopy(position),
-                "best_fitness": fitness
+            # 2. Yoksa boş sınıflar arasından RASTGELE seç
+            available_classrooms = []
+            for idx, c in enumerate(self.classrooms):
+                cid = self._safe_int(c.get("id"))
+                if cid not in used_cids:
+                    available_classrooms.append(idx)
+            
+            if available_classrooms:
+                return random.choice(available_classrooms)
+            
+            return -1  # Hiç boş sınıf yok
+        
+        def try_assign_project(project: Dict, ts_order: int, project_type: str) -> bool:
+            """Projeyi belirli timeslot'a atamayı dene"""
+            rid = self._safe_int(
+                project.get("responsible_id") or project.get("responsible_instructor_id")
+            )
+            
+            # Bu timeslot'ta bu sorumlu zaten var mı?
+            if rid and rid in timeslot_used_responsibles[ts_order]:
+                return False
+            
+            # En iyi sınıfı bul
+            classroom_idx = get_best_classroom(rid, ts_order)
+            if classroom_idx < 0:
+                return False  # Boş sınıf yok
+            
+            # Timeslot ve sınıf bilgisi
+            timeslot = self.sorted_timeslots[ts_order]
+            ts_id = self._safe_int(timeslot.get("id"))
+            classroom = self.classrooms[classroom_idx]
+            cid = self._safe_int(classroom.get("id"))
+            
+            assignment = {
+                "project_id": project.get("id"),
+                "classroom_id": cid,
+                "timeslot_id": ts_id,
+                "ts_order": ts_order,
+                "responsible_id": rid,
+                "jury1_id": None,
+                "jury2": JURY2_PLACEHOLDER,
+                "instructors": [rid] if rid else [],
+                "project_type": project_type
             }
             
-            # Parcacigi ekle
-            particles.append(particle)
+            timeslot_assignments[ts_order].append(assignment)
+            timeslot_used_classrooms[ts_order].add(cid)
+            if rid:
+                timeslot_used_responsibles[ts_order].add(rid)
+                # Bu öğretmenin tercih ettiği sınıfı güncelle
+                responsible_preferred_classroom[rid] = cid
             
-            # Global en iyi cozumu guncelle
-            if fitness > self.best_fitness:
-                self.best_solution = copy.deepcopy(position)
-                self.best_fitness = fitness
+            return True
         
-        return particles
-    
-    def _create_random_solution(self) -> List[Dict[str, Any]]:
-        """
-        Rastgele bir cozum olusturur.
+        # ================================================================
+        # GAP'SIZ SLOT ATAMASI
+        # 
+        # TEMEL KURAL: Her timeslot TAMAMEN doldurulur, BOŞ slot olmaz!
+        # 
+        # Strateji:
+        # - Her timeslot için önce Bitirme projelerini yerleştir
+        # - Bitirme kalmadıysa/atanamadıysa Ara ile doldur
+        # - Timeslot dolana kadar devam et, sonra sonraki timeslot'a geç
+        # ================================================================
         
-        Returns:
-            List[Dict[str, Any]]: Rastgele cozum.
-        """
-        solution = []
+        current_ts = 0
         
-        # Proje, sinif ve zaman dilimi atamalarini takip et
-        assigned_projects = set()
-        assigned_classrooms_timeslots = set()  # (classroom_id, timeslot_id) ciftleri
-        
-        # Projeleri rastgele sirala
-        projects = list(self.projects)
-        random.shuffle(projects)
-        
-        for project in projects:
-            # Rastgele bir sinif ve zaman dilimi sec
-            available_classrooms = list(self.classrooms)
-            random.shuffle(available_classrooms)
+        while (remaining_bitirme or remaining_ara) and current_ts < n_timeslots:
+            # Bu timeslot dolu mu?
+            if len(timeslot_assignments[current_ts]) >= n_classrooms:
+                current_ts += 1
+                continue
             
             assigned = False
             
-            for classroom in available_classrooms:
-                if assigned:
-                    break
-                    
-                available_timeslots = list(self.timeslots)
-                random.shuffle(available_timeslots)
-                
-                for timeslot in available_timeslots:
-                    if (classroom.get("id"), timeslot.get("id")) not in assigned_classrooms_timeslots:
-                        # Sorumlu ogretim uyesi
-                        responsible_id = project.get("responsible_id", None)
-                        instructors = [responsible_id] if responsible_id else []
-                        
-                        # Rastgele 1-2 yardimci katilimci ekle
-                        available_instructors = [i for i in self.instructors if i.get("id") != responsible_id]
-                        if available_instructors:
-                            # Proje tipine gore katilimci sayisini belirle
-                            if project.get("type") == "bitirme":
-                                # Bitirme projesi icin en az 2 hoca olmali
-                                hocas = [i for i in available_instructors if i.get("type") == "instructor"]
-                                aras_gors = [i for i in available_instructors if i.get("type") == "assistant"]
-                                
-                                if len(hocas) > 0:
-                                    # En az bir hoca ekle
-                                    instructors.append(random.choice(hocas).get("id"))
-                                    
-                                    # Ucuncu kisi olarak hoca veya aras. gor. ekle
-                                    if len(hocas) > 1 and random.random() > 0.5:
-                                        instructors.append(random.choice(hocas).get("id"))
-                                    elif aras_gors:
-                                        instructors.append(random.choice(aras_gors).get("id"))
-                            else:
-                                # Ara proje icin rastgele 2 kisi ekle
-                                selected = random.sample(available_instructors, min(2, len(available_instructors)))
-                                for instructor in selected:
-                                    instructors.append(instructor.get("id"))
-                        
-                        # Atamayi ekle
-                        assignment = {
-                            "project_id": project.get("id"),
-                            "classroom_id": classroom.get("id"),
-                            "timeslot_id": timeslot.get("id"),
-                            "instructors": instructors
-                        }
-                        
-                        solution.append(assignment)
-                        assigned_projects.add(project.get("id"))
-                        assigned_classrooms_timeslots.add((classroom.get("id"), timeslot.get("id")))
+            # 1. Önce Bitirme projelerini yerleştirmeye çalış
+            if remaining_bitirme:
+                for i, project in enumerate(remaining_bitirme):
+                    if try_assign_project(project, current_ts, "bitirme"):
+                        remaining_bitirme.pop(i)
                         assigned = True
                         break
-        
-        return solution
-    
-    def _update_velocity_and_position(self, particle: Dict[str, Any]) -> None:
-        """
-        Parcacigin hizini ve konumunu gunceller.
-        
-        Args:
-            particle: Guncellenecek parcacik.
-        """
-        # Ilk iterasyonda hiz olustur
-        if not particle["velocity"]:
-            particle["velocity"] = self._initialize_velocity()
-        
-        # Hizi guncelle
-        new_velocity = []
-        
-        for v_op in particle["velocity"]:
-            # Eylemsizlik bileseni
-            inertia = self.w * random.random()
             
-            # Bilissel bilesen (kisisel en iyi)
-            cognitive = self.c1 * random.random()
+            # 2. Bitirme yoksa veya atanamadıysa, Ara dene
+            if not assigned and remaining_ara:
+                for i, project in enumerate(remaining_ara):
+                    if try_assign_project(project, current_ts, "ara"):
+                        remaining_ara.pop(i)
+                        assigned = True
+                        break
             
-            # Sosyal bilesen (global en iyi)
-            social = self.c2 * random.random()
+            # 3. Hiçbir proje atanamadıysa (tüm sorumlular çakışıyor) sonraki timeslot
+            if not assigned:
+                current_ts += 1
+        
+        # Atamaları birleştir
+        for ts_order in sorted(timeslot_assignments.keys()):
+            assignments.extend(timeslot_assignments[ts_order])
+        
+        # İstatistikler
+        bitirme_count = len(bitirme_projects) - len(remaining_bitirme)
+        ara_count = len(ara_projects) - len(remaining_ara)
+        
+        logger.info(f"Slot Assignment: {len(assignments)} total ({bitirme_count} bitirme, {ara_count} ara)")
+        
+        if remaining_bitirme:
+            logger.warning(f"{len(remaining_bitirme)} bitirme projesi atanamadı!")
+        if remaining_ara:
+            logger.warning(f"{len(remaining_ara)} ara projesi atanamadı!")
+        
+        return assignments
+
+    def _create_assignment(self, project: Dict, slot: Dict, project_type: str) -> Dict:
+        responsible_id = self._safe_int(
+            project.get("responsible_id") or project.get("responsible_instructor_id")
+        )
+        
+        return {
+            "project_id": project.get("id"),
+            "classroom_id": slot["classroom_id"],
+            "timeslot_id": slot["timeslot_id"],
+            "ts_order": slot["ts_order"],  # Süreklilik için
+            "responsible_id": responsible_id,
+            "jury1_id": None,
+            "jury2": JURY2_PLACEHOLDER,
+            "instructors": [responsible_id] if responsible_id else [],
+            "project_type": project_type
+        }
+
+    # ==========================================================================
+    # AŞAMA 2: SÜREKLİLİK ODAKLI JÜRI ATAMASI
+    # ==========================================================================
+    def _assign_juries_with_continuity(self, assignments: List[Dict]) -> List[Dict]:
+        """Süreklilik odaklı jüri ataması"""
+        # Timeslot bazlı schedule: instructor_id -> set of timeslot_ids
+        instructor_busy = defaultdict(set)
+        instructor_workload = defaultdict(int)
+        instructor_slots = defaultdict(list)  # (ts_order, classroom_id) listesi
+        instructor_resp_count = defaultdict(int)  # Responsible sayısı
+        
+        # Önce sorumluları yerleştir ve RESPONSIBLE COUNT hesapla
+        for a in assignments:
+            rid = a.get("responsible_id")
+            ts_id = a.get("timeslot_id")
+            ts_order = a.get("ts_order", 0)
+            cid = a.get("classroom_id")
             
-            # Yeni hiz operasyonu
-            if random.random() < inertia:
-                new_velocity.append(v_op)
+            if rid and ts_id:
+                instructor_busy[rid].add(ts_id)
+                instructor_workload[rid] += 1
+                instructor_resp_count[rid] += 1  # Responsible count
+                instructor_slots[rid].append({"ts_order": ts_order, "classroom_id": cid})
+        
+        # Ortalama iş yükü
+        total_roles = len(assignments) * 2
+        avg_workload = total_roles / len(self.instructor_ids) if self.instructor_ids else 0
+        
+        # Her öğretmen için HEDEF jüri sayısı hesapla
+        # Hedef = Ortalama toplam - mevcut responsible sayısı
+        instructor_target_jury = {}
+        for iid in self.instructor_ids:
+            resp_count = instructor_resp_count.get(iid, 0)
+            target_jury = max(0, round(avg_workload) - resp_count)
+            instructor_target_jury[iid] = target_jury
+        
+        # Slot sırasına göre jüri ata
+        sorted_assignments = sorted(assignments, key=lambda x: (x.get("ts_order", 0), x.get("classroom_id", 0)))
+        
+        for a in sorted_assignments:
+            ts_id = a.get("timeslot_id")
+            ts_order = a.get("ts_order", 0)
+            responsible_id = a.get("responsible_id")
+            classroom_id = a.get("classroom_id")
             
-            # Bilissel bilesen: Kisisel en iyiye dogru hareket
-            if random.random() < cognitive:
-                # Kisisel en iyiden bir operasyon sec
-                if particle["best_position"]:
-                    best_op = self._extract_operation(particle["best_position"])
-                    if best_op:
-                        new_velocity.append(best_op)
+            best_jury = self._find_best_jury(
+                ts_id, ts_order, responsible_id, classroom_id,
+                instructor_busy, instructor_slots, instructor_workload, avg_workload,
+                instructor_resp_count
+            )
             
-            # Sosyal bilesen: Global en iyiye dogru hareket
-            if random.random() < social:
-                # Global en iyiden bir operasyon sec
-                if self.best_solution:
-                    global_op = self._extract_operation(self.best_solution)
-                    if global_op:
-                        new_velocity.append(global_op)
-        
-        # Hizi sinirla
-        max_velocity = 5
-        if len(new_velocity) > max_velocity:
-            new_velocity = random.sample(new_velocity, max_velocity)
-        
-        # Hizi guncelle
-        particle["velocity"] = new_velocity
-        
-        # Konumu guncelle (operasyonlari uygula)
-        new_position = copy.deepcopy(particle["position"])
-        
-        for operation in particle["velocity"]:
-            op_type = operation["type"]
-            
-            if op_type == "swap_classrooms":
-                idx1, idx2 = operation["indices"]
-                if idx1 < len(new_position) and idx2 < len(new_position):
-                    new_position[idx1]["classroom_id"], new_position[idx2]["classroom_id"] = new_position[idx2]["classroom_id"], new_position[idx1]["classroom_id"]
-            
-            elif op_type == "swap_timeslots":
-                idx1, idx2 = operation["indices"]
-                if idx1 < len(new_position) and idx2 < len(new_position):
-                    new_position[idx1]["timeslot_id"], new_position[idx2]["timeslot_id"] = new_position[idx2]["timeslot_id"], new_position[idx1]["timeslot_id"]
-            
-            elif op_type == "change_instructors":
-                idx = operation["index"]
-                instructors = operation["instructors"]
-                if idx < len(new_position):
-                    new_position[idx]["instructors"] = instructors
-        
-        # Cozumu duzelt (cakismalari gider)
-        new_position = self._repair_solution(new_position)
-        
-        # Konumu guncelle
-        particle["position"] = new_position
-    
-    def _initialize_velocity(self) -> List[Dict[str, Any]]:
-        """
-        Baslangic hizini olusturur.
-        
-        Returns:
-            List[Dict[str, Any]]: Baslangic hiz operasyonlari.
-        """
-        velocity = []
-        
-        # Rastgele 1-3 operasyon olustur
-        n_operations = random.randint(1, 3)
-        
-        for _ in range(n_operations):
-            # Rastgele bir operasyon tipi sec
-            op_type = random.choice(["swap_classrooms", "swap_timeslots", "change_instructors"])
-            
-            if op_type == "swap_classrooms":
-                # Iki rastgele indeks sec
-                idx1 = random.randint(0, max(0, len(self.projects) - 1))
-                idx2 = random.randint(0, max(0, len(self.projects) - 1))
-                while idx1 == idx2:
-                    idx2 = random.randint(0, max(0, len(self.projects) - 1))
+            if best_jury:
+                a["jury1_id"] = best_jury
+                instructor_busy[best_jury].add(ts_id)
+                instructor_workload[best_jury] += 1
+                instructor_slots[best_jury].append({"ts_order": ts_order, "classroom_id": classroom_id})
                 
-                velocity.append({
-                    "type": "swap_classrooms",
-                    "indices": (idx1, idx2)
-                })
-            
-            elif op_type == "swap_timeslots":
-                # Iki rastgele indeks sec
-                idx1 = random.randint(0, max(0, len(self.projects) - 1))
-                idx2 = random.randint(0, max(0, len(self.projects) - 1))
-                while idx1 == idx2:
-                    idx2 = random.randint(0, max(0, len(self.projects) - 1))
-                
-                velocity.append({
-                    "type": "swap_timeslots",
-                    "indices": (idx1, idx2)
-                })
-            
-            elif op_type == "change_instructors":
-                # Rastgele bir indeks sec
-                idx = random.randint(0, max(0, len(self.projects) - 1))
-                
-                # Rastgele katilimcilar sec
-                project = random.choice(self.projects)
-                responsible_id = project.get("responsible_id", None)
-                instructors = [responsible_id] if responsible_id else []
-                
-                # Rastgele 1-2 yardimci katilimci ekle
-                available_instructors = [i for i in self.instructors if i.get("id") != responsible_id]
-                if available_instructors:
-                    # Proje tipine gore katilimci sayisini belirle
-                    if project.get("type") == "bitirme":
-                        # Bitirme projesi icin en az 2 hoca olmali
-                        hocas = [i for i in available_instructors if i.get("type") == "instructor"]
-                        aras_gors = [i for i in available_instructors if i.get("type") == "assistant"]
-                        
-                        if len(hocas) > 0:
-                            # En az bir hoca ekle
-                            instructors.append(random.choice(hocas).get("id"))
-                            
-                            # Ucuncu kisi olarak hoca veya aras. gor. ekle
-                            if len(hocas) > 1 and random.random() > 0.5:
-                                instructors.append(random.choice(hocas).get("id"))
-                            elif aras_gors:
-                                instructors.append(random.choice(aras_gors).get("id"))
-                    else:
-                        # Ara proje icin rastgele 2 kisi ekle
-                        selected = random.sample(available_instructors, min(2, len(available_instructors)))
-                        for instructor in selected:
-                            instructors.append(instructor.get("id"))
-                
-                velocity.append({
-                    "type": "change_instructors",
-                    "index": idx,
-                    "instructors": instructors
-                })
+                insts = [responsible_id] if responsible_id else []
+                insts.append(best_jury)
+                a["instructors"] = insts
         
-        return velocity
-    
-    def _extract_operation(self, solution: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return assignments
+
+    def _find_best_jury(self, ts_id: int, ts_order: int, responsible_id: Optional[int],
+                        classroom_id: int, instructor_busy: Dict,
+                        instructor_slots: Dict, instructor_workload: Dict,
+                        avg_workload: float, instructor_resp_count: Dict = None) -> Optional[int]:
         """
-        Cozumden rastgele bir operasyon cikarir.
+        En uygun jüriyi bul - İŞ YÜKÜ DENGESİ ÖNCELİKLİ
         
-        Args:
-            solution: Operasyon cikarilacak cozum.
-            
-        Returns:
-            Dict[str, Any]: Cikarilan operasyon.
+        Strateji:
+        1. Responsible sayısı çok olana AZ jüri ver
+        2. En az TOPLAM yüklü öğretmeni seç
         """
-        if not solution:
+        instructor_resp_count = instructor_resp_count or {}
+        
+        # Müsait adayları bul
+        available = []
+        for iid in self.instructor_ids:
+            if iid == responsible_id:
+                continue
+            if ts_id in instructor_busy.get(iid, set()):
+                continue
+            available.append(iid)
+        
+        if not available:
             return None
         
-        # Rastgele bir operasyon tipi sec
-        op_type = random.choice(["swap_classrooms", "swap_timeslots", "change_instructors"])
+        # Mevcut workload dağılımını kontrol et
+        workloads = list(instructor_workload.values()) if instructor_workload else [0]
+        current_min = min(workloads) if workloads else 0
+        current_max = max(workloads) if workloads else 0
+        current_diff = current_max - current_min
         
-        if op_type == "swap_classrooms" and len(solution) >= 2:
-            # Iki rastgele indeks sec
-            idx1, idx2 = random.sample(range(len(solution)), 2)
+        # ================================================================
+        # STRATEJİ: RESPONSIBLE-AWARE WORKLOAD BALANCE + SINIF SÜREKLİLİĞİ
+        # 1. Responsible sayısı çok olana az jüri ver
+        # 2. Aynı sınıfta ardışık slot varsa bonus ver
+        # ================================================================
+        
+        avg_target = round(avg_workload)  # ~8
+        
+        candidates_with_score = []
+        for iid in available:
+            current_total = instructor_workload.get(iid, 0)
+            resp_count = instructor_resp_count.get(iid, 0)
             
-            return {
-                "type": "swap_classrooms",
-                "indices": (idx1, idx2)
-            }
-        
-        elif op_type == "swap_timeslots" and len(solution) >= 2:
-            # Iki rastgele indeks sec
-            idx1, idx2 = random.sample(range(len(solution)), 2)
+            # Bu kişiye jüri verirsek toplam ne olur
+            new_total = current_total + 1
             
-            return {
-                "type": "swap_timeslots",
-                "indices": (idx1, idx2)
-            }
-        
-        elif op_type == "change_instructors" and len(solution) >= 1:
-            # Rastgele bir indeks sec
-            idx = random.randint(0, len(solution) - 1)
+            # Ortalamadan sapma
+            deviation = abs(new_total - avg_target)
             
-            # Mevcut katilimcilari al
-            instructors = solution[idx].get("instructors", [])
+            # Responsible sayısı çok olana ağır ceza
+            resp_penalty = resp_count * 10
             
-            return {
-                "type": "change_instructors",
-                "index": idx,
-                "instructors": instructors
-            }
-        
-        return None
-    
-    def _repair_solution(self, solution: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Cozumdeki cakismalari giderir.
-        
-        Args:
-            solution: Duzeltilecek cozum.
+            # SINIF SÜREKLİLİĞİ BONUSU (workload balance'ı bozmayacak kadar)
+            continuity_bonus = 0
+            slots = instructor_slots.get(iid, [])
+            if slots:
+                for s in slots:
+                    if s["classroom_id"] == classroom_id and abs(ts_order - s["ts_order"]) == 1:
+                        # Aynı sınıfta ardışık slot = bonus (ama çok büyük değil)
+                        continuity_bonus = -15
+                        break
             
-        Returns:
-            List[Dict[str, Any]]: Duzeltilmis cozum.
-        """
-        # Proje, sinif ve zaman dilimi atamalarini takip et
-        assigned_projects = set()
-        assigned_classrooms_timeslots = set()  # (classroom_id, timeslot_id) ciftleri
-        
-        # Gecerli atamalari koru
-        valid_assignments = []
-        
-        for assignment in solution:
-            project_id = assignment.get("project_id")
-            classroom_id = assignment.get("classroom_id")
-            timeslot_id = assignment.get("timeslot_id")
+            # Toplam öncelik skoru (düşük = iyi)
+            priority_score = deviation + resp_penalty - (avg_target - new_total) * 5 + continuity_bonus
             
-            # Cakisma kontrolu
-            if project_id not in assigned_projects and (classroom_id, timeslot_id) not in assigned_classrooms_timeslots:
-                valid_assignments.append(assignment)
-                assigned_projects.add(project_id)
-                assigned_classrooms_timeslots.add((classroom_id, timeslot_id))
+            candidates_with_score.append((iid, priority_score, current_total))
         
-        return valid_assignments
-    
-    def evaluate_fitness(self, solution: Dict[str, Any]) -> float:
-        """CP-SAT ozelligi: Verilen cozumun uygunlugunu degerlendirir."""
-        if not solution:
-            return float('-inf')
-
-        assignments = solution.get("solution", solution.get("schedule", solution))
-        if not assignments:
-            return float('-inf')
-
-        # Cozum gecerli mi?
-        if not self._is_valid_solution(assignments):
-            return float('-inf')
-
-        score = 0.0
-
-        # Kural uygunlugu
-        rule_compliance = self._calculate_rule_compliance(assignments)
-        score += rule_compliance * 100.0
-
-        # Sinif degisim sayisini minimize et
-        instructor_changes = self._count_instructor_classroom_changes(assignments)
-        score -= instructor_changes * 10.0
-
-        # Yuk dengesini maksimize et
-        load_balance = self._calculate_load_balance(assignments)
-        score += load_balance * 50.0
-
-        # Zaman slot cezasi - 16:30 sonrasi cok agir, 16:00–16:30 orta seviye
-        time_penalty = self._calculate_time_slot_penalty(assignments)
-        score -= time_penalty
-
-        return score
-
-    def _calculate_time_slot_penalty(self, solution: List[Dict[str, Any]]) -> float:
-        """Standart baz ceza (pozitif) uygular ve fitness tarafindan dusulur."""
-        return super()._calculate_time_slot_penalty(solution)
-
-    def _is_valid_solution(self, solution: List[Dict[str, Any]]) -> bool:
-        """
-        Cozumun gecerli olup olmadigini kontrol eder.
+        # Önce priority_score'a, sonra current_total'a göre sırala
+        candidates_with_score.sort(key=lambda x: (x[1], x[2]))
         
-        Args:
-            solution: Kontrol edilecek cozum.
+        if not candidates_with_score:
+            return None
+        
+        # En iyi adaylar (en düşük priority_score)
+        best_score = candidates_with_score[0][1]
+        best_candidates = [c for c in candidates_with_score if c[1] <= best_score + 10]
+        
+        # Rastgelelik için shuffle
+        random.shuffle(best_candidates)
+        
+        # Tek aday varsa döndür
+        if len(best_candidates) == 1:
+            return best_candidates[0][0]
+        
+        # Birden fazla varsa, SINIF SÜREKLİLİĞİ + GAP için skorla
+        scored_candidates = []
+        
+        for iid, _, _ in best_candidates:
+            # Sınıf sürekliliği ve GAP skoru hesapla
+            score = 0.0
+            slots = instructor_slots.get(iid, [])
             
-        Returns:
-            bool: Cozum gecerliyse True, degilse False.
-        """
-        if not solution:
-            return False
-        
-        # Proje, sinif ve zaman dilimi atamalarini takip et
-        assigned_projects = set()
-        assigned_classrooms_timeslots = set()  # (classroom_id, timeslot_id) ciftleri
-        
-        for assignment in solution:
-            project_id = assignment.get("project_id")
-            classroom_id = assignment.get("classroom_id")
-            timeslot_id = assignment.get("timeslot_id")
-            
-            # Bir proje birden fazla kez atanmamali
-            if project_id in assigned_projects:
-                return False
-            
-            # Bir sinif-zaman dilimi cifti birden fazla kez atanmamali
-            if (classroom_id, timeslot_id) in assigned_classrooms_timeslots:
-                return False
-            
-            assigned_projects.add(project_id)
-            assigned_classrooms_timeslots.add((classroom_id, timeslot_id))
-        
-        return True
-    
-    def _count_instructor_classroom_changes(self, solution: List[Dict[str, Any]]) -> int:
-        """
-        Ogretim uyelerinin sinif degisim sayisini hesaplar.
-        
-        Args:
-            solution: Atama plani
-            
-        Returns:
-            int: Toplam sinif degisim sayisi
-        """
-        if not solution:
-            return 0
-        
-        # Ogretim uyesi basina sinif degisim sayisini hesapla
-        instructor_locations = {}
-        changes = 0
-        
-        # Zaman dilimine gore sirala
-        sorted_solution = sorted(solution, key=lambda x: x["timeslot_id"])
-        
-        for assignment in sorted_solution:
-            classroom_id = assignment["classroom_id"]
-            for instructor_id in assignment["instructors"]:
-                if instructor_id in instructor_locations:
-                    if instructor_locations[instructor_id] != classroom_id:
-                        changes += 1
-                        instructor_locations[instructor_id] = classroom_id
-                else:
-                    instructor_locations[instructor_id] = classroom_id
-        
-        return changes
-    
-    def _calculate_load_balance(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        Ogretim uyesi yuk dengesini hesaplar.
-        
-        Args:
-            solution: Atama plani
-            
-        Returns:
-            float: Yuk dengesi skoru (0-1 arasi, 1 en iyi)
-        """
-        if not solution:
-            return 0.0
-        
-        # Ogretim uyesi basina atama sayisini hesapla
-        instructor_loads = {}
-        
-        for assignment in solution:
-            for instructor_id in assignment["instructors"]:
-                instructor_loads[instructor_id] = instructor_loads.get(instructor_id, 0) + 1
-        
-        # Yuk dengesini hesapla (Gini katsayisi)
-        if not instructor_loads:
-            return 0.0
-        
-        loads = list(instructor_loads.values())
-        
-        # Gini katsayisi hesapla
-        array = np.array(loads, dtype=np.float64)
-        if np.amin(array) < 0:
-            array -= np.amin(array)
-        array += 0.0000001
-        array = np.sort(array)
-        index = np.arange(1, array.shape[0] + 1, dtype=np.float64)
-        n = float(array.shape[0])
-        gini = ((np.sum((2 * index - n - 1) * array)) / (n * np.sum(array)))
-        
-        # Gini katsayisi 0 (tam esitlik) ile 1 (tam esitsizlik) arasindadir
-        # Biz dengeyi istedigimiz icin 1 - gini donduruyoruz
-        return 1.0 - gini
-    
-    def _calculate_rule_compliance(self, solution: List[Dict[str, Any]]) -> float:
-        """
-        Proje kurallarina uygunlugu hesaplar.
-        
-        Args:
-            solution: Atama plani
-            
-        Returns:
-            float: Kural uygunluk skoru (0-1 arasi, 1 en iyi)
-        """
-        if not solution:
-            return 0.0
-        
-        total_rules = 0
-        satisfied_rules = 0
-        
-        for assignment in solution:
-            project_id = assignment["project_id"]
-            instructors = assignment["instructors"]
-            
-            # Projeyi bul
-            project = next((p for p in self.projects if p.get("id") == project_id), None)
-            if not project:
-                continue
-            
-            # Kural 1: Her projede 3 katilimci olmali
-            total_rules += 1
-            if len(instructors) == 3:
-                satisfied_rules += 1
-            
-            # Kural 2: Ilk kisi projenin sorumlu hocasi olmali
-            total_rules += 1
-            if instructors and instructors[0] == project.get("responsible_id"):
-                satisfied_rules += 1
-            
-            # Proje tipine gore kurallar
-            if project.get("type") == "bitirme":
-                # Kural 3: Bitirme projesinde en az 2 hoca olmali
-                total_rules += 1
-                hoca_count = 0
-                for instructor_id in instructors:
-                    instructor = next((i for i in self.instructors if i.get("id") == instructor_id), None)
-                    if instructor and instructor.get("type") == "instructor":
-                        hoca_count += 1
+            if slots:
+                # Bu slot'a en yakın mevcut slot
+                min_gap = min(abs(ts_order - s["ts_order"]) for s in slots)
                 
-                if hoca_count >= 2:
-                    satisfied_rules += 1
-            
-            elif project.get("type") == "ara":
-                # Kural 4: Ara projede en az 1 hoca olmali
-                total_rules += 1
-                has_hoca = False
-                for instructor_id in instructors:
-                    instructor = next((i for i in self.instructors if i.get("id") == instructor_id), None)
-                    if instructor and instructor.get("type") == "instructor":
-                        has_hoca = True
+                # AYNI SINIF + ARDIŞIK SLOT = EN İYİ (ÇARPICI BONUS)
+                same_class_consecutive = False
+                for s in slots:
+                    if s["classroom_id"] == classroom_id and abs(ts_order - s["ts_order"]) == 1:
+                        score -= 500  # 🎯 ÇARPICI BONUS - Aynı sınıf + ardışık
+                        same_class_consecutive = True
                         break
                 
-                if has_hoca:
-                    satisfied_rules += 1
+                if not same_class_consecutive:
+                    if min_gap == 1:
+                        # Ardışık ama farklı sınıf = ceza (sınıf değişimi)
+                        score += 50
+                    elif min_gap == 2:
+                        # 1 GAP = orta ceza
+                        score += 100
+                    else:
+                        # Büyük GAP = ağır ceza
+                        score += min_gap * 50
+            
+            # Küçük rastgele noise (sürekliliği bozmayacak kadar)
+            score += random.uniform(-3, 3)
+            scored_candidates.append((iid, score))
         
-        # Kural uygunluk oranini hesapla
-        if total_rules > 0:
-            return satisfied_rules / total_rules
+        # En iyi adayı seç (en düşük skor)
+        scored_candidates.sort(key=lambda x: x[1])
+        return scored_candidates[0][0]
+
+    def _calculate_jury_score(self, iid: int, ts_order: int, classroom_id: int,
+                               existing_slots: List[Dict], current_workload: int,
+                               avg_workload: float, min_workload: int = 0, 
+                               max_workload: int = 0) -> float:
+        """
+        Jüri skoru (düşük = iyi)
+        
+        ÖNCELİK SIRASI (YENİ):
+        1. İŞ YÜKÜ DENGESİ = EN ÖNEMLİ (±2 uniform dağılım)
+        2. AYNI SINIF + ARDIŞIK SLOT = İYİ
+        3. SINIF DEĞİŞİMİ = KÖTÜ
+        """
+        score = 0.0
+        
+        # ================================================================
+        # 1. İŞ YÜKÜ DENGESİ - EN ÖNEMLİ!
+        # Max-Min fark ≤ 4 olmalı (±2 uniform)
+        # ================================================================
+        workload_after = current_workload + 1
+        
+        # Bu atama yapılırsa max-min fark ne olur?
+        new_max = max(max_workload, workload_after)
+        new_min = min_workload  # min değişmez (artış oldu)
+        predicted_diff = new_max - new_min
+        
+        # ±2 uniform dağılım için max fark 4 olmalı - 3'te uyarı ver
+        if predicted_diff > 3:
+            # ÇARPICI CEZA - bu atamayı engelle!
+            score += (predicted_diff - 3) * 800  # Artırıldı!
+        
+        # Ortalamadan sapma cezası - daha agresif
+        deviation = abs(workload_after - avg_workload)
+        if deviation > 2:
+            score += (deviation - 2) * 200  # Artırıldı!
+        elif deviation > 1:
+            score += 50  # Artırıldı!
+        
+        # Düşük iş yükü bonus, yüksek iş yükü ceza - daha güçlü
+        if current_workload < avg_workload - 1:
+            score -= 250  # AZ YÜKÜ OLANA ÇARPICI BONUS!
+        elif current_workload < avg_workload:
+            score -= 100
+        elif current_workload > avg_workload + 1:
+            score += 300  # ÇOK YÜKÜ OLANA ÇARPICI CEZA!
+        elif current_workload > avg_workload:
+            score += 100
+        
+        # ================================================================
+        # 2. SINIF SÜREKLİLİĞİ (ikinci öncelik)
+        # ================================================================
+        if existing_slots:
+            # En yakın slotu bul
+            min_gap = float('inf')
+            best_match = None
+            
+            for s in existing_slots:
+                gap = abs(ts_order - s["ts_order"])
+                if gap < min_gap:
+                    min_gap = gap
+                    best_match = s
+                elif gap == min_gap and s["classroom_id"] == classroom_id:
+                    best_match = s
+            
+            if best_match:
+                is_same_classroom = (best_match["classroom_id"] == classroom_id)
+                
+                if min_gap == 1:  # Ardışık slot
+                    if is_same_classroom:
+                        score -= 100  # Aynı sınıf + ardışık
+                    else:
+                        score += 30   # Farklı sınıf = ceza
+                elif min_gap == 2:
+                    if is_same_classroom:
+                        score -= 40
+                    else:
+                        score += 20
+                else:
+                    score += min_gap * 10
+            
+            # Aynı sınıfta ardışık varsa bonus
+            for s in existing_slots:
+                if s["classroom_id"] == classroom_id:
+                    diff = abs(ts_order - s["ts_order"])
+                    if diff == 1:
+                        score -= 80
+        
+        return score
+
+    # ==========================================================================
+    # AŞAMA 3: PSO OPTİMİZASYONU
+    # ==========================================================================
+    def _pso_optimize(self, assignments: List[Dict]) -> List[Dict]:
+        """PSO ile jüri optimizasyonu"""
+        if len(assignments) < 2:
+            return assignments
+        
+        logger.info(f"PSO: {self.n_particles} particles, {self.n_iterations} iterations")
+        
+        current = copy.deepcopy(assignments)
+        current = self._fix_hard_constraints(current)
+        current_fitness = self._calculate_fitness(current)
+        
+        best_global = copy.deepcopy(current)
+        best_global_fitness = current_fitness
+        
+        # Parçacıklar
+        particles = []
+        for _ in range(self.n_particles):
+            p = self._create_particle_variation(assignments)
+            p = self._fix_hard_constraints(p)
+            f = self._calculate_fitness(p)
+            
+            particles.append({
+                "pos": p, "fit": f,
+                "best_pos": copy.deepcopy(p), "best_fit": f
+            })
+            
+            if f < best_global_fitness:
+                best_global_fitness = f
+                best_global = copy.deepcopy(p)
+        
+        # İterasyonlar
+        for it in range(self.n_iterations):
+            for p in particles:
+                new_pos = self._update_particle(p["pos"], p["best_pos"], best_global)
+                new_pos = self._fix_hard_constraints(new_pos)
+                new_fit = self._calculate_fitness(new_pos)
+                
+                p["pos"] = new_pos
+                p["fit"] = new_fit
+                
+                if new_fit < p["best_fit"]:
+                    p["best_fit"] = new_fit
+                    p["best_pos"] = copy.deepcopy(new_pos)
+                
+                if new_fit < best_global_fitness:
+                    best_global_fitness = new_fit
+                    best_global = copy.deepcopy(new_pos)
+            
+            if (it + 1) % 50 == 0:
+                logger.info(f"  Iter {it+1}: Best = {best_global_fitness:.2f}")
+        
+        return best_global
+
+    def _create_particle_variation(self, base: List[Dict]) -> List[Dict]:
+        """Varyasyon oluştur"""
+        result = copy.deepcopy(base)
+        change_count = max(1, len(result) // 4)
+        
+        if not result:
+            return result
+            
+        indices = random.sample(range(len(result)), min(change_count, len(result)))
+        
+        for idx in indices:
+            a = result[idx]
+            rid = a.get("responsible_id")
+            candidates = [iid for iid in self.instructor_ids if iid != rid]
+            if candidates:
+                a["jury1_id"] = random.choice(candidates)
+        
+        return result
+
+    def _update_particle(self, current: List[Dict], personal_best: List[Dict],
+                         global_best: List[Dict]) -> List[Dict]:
+        """PSO pozisyon güncelleme"""
+        result = copy.deepcopy(current)
+        busy = self._build_busy_map(result)
+        
+        for i, a in enumerate(result):
+            if i >= len(personal_best) or i >= len(global_best):
+                continue
+            
+            ts_id = a.get("timeslot_id")
+            rid = a.get("responsible_id")
+            current_jury = a.get("jury1_id")
+            
+            new_jury = current_jury
+            r1, r2, r3 = random.random(), random.random(), random.random()
+            
+            # Cognitive
+            if r1 < self.cognitive_weight / 4:
+                pb_jury = personal_best[i].get("jury1_id")
+                if pb_jury and pb_jury != rid and ts_id not in busy.get(pb_jury, set()):
+                    new_jury = pb_jury
+            
+            # Social
+            if r2 < self.social_weight / 4:
+                gb_jury = global_best[i].get("jury1_id")
+                if gb_jury and gb_jury != rid and ts_id not in busy.get(gb_jury, set()):
+                    new_jury = gb_jury
+            
+            # Exploration
+            if r3 < self.inertia_weight / 5:
+                candidates = [
+                    iid for iid in self.instructor_ids
+                    if iid != rid and ts_id not in busy.get(iid, set())
+                ]
+                if candidates:
+                    new_jury = random.choice(candidates)
+            
+            if new_jury != current_jury:
+                if current_jury:
+                    busy[current_jury].discard(ts_id)
+                
+                a["jury1_id"] = new_jury
+                insts = [rid] if rid else []
+                if new_jury:
+                    insts.append(new_jury)
+                    busy[new_jury].add(ts_id)
+                a["instructors"] = insts
+        
+        return result
+
+    def _build_busy_map(self, assignments: List[Dict]) -> Dict[int, Set[int]]:
+        """instructor_id -> set of busy timeslot_ids"""
+        busy = defaultdict(set)
+        for a in assignments:
+            ts_id = a.get("timeslot_id")
+            if a.get("responsible_id") and ts_id:
+                busy[a["responsible_id"]].add(ts_id)
+            if a.get("jury1_id") and ts_id:
+                busy[a["jury1_id"]].add(ts_id)
+        return busy
+
+    # ==========================================================================
+    # AŞAMA 4: HARD CONSTRAINT DÜZELTMELERİ
+    # ==========================================================================
+    def _fix_hard_constraints(self, assignments: List[Dict]) -> List[Dict]:
+        """Hard constraint ihlallerini düzelt"""
+        # instructor_id -> set of timeslot_ids (busy)
+        busy = defaultdict(set)
+        
+        # Önce sorumluları yerleştir
+        for a in assignments:
+            rid = a.get("responsible_id")
+            ts_id = a.get("timeslot_id")
+            if rid and ts_id:
+                busy[rid].add(ts_id)
+        
+        # Jürileri kontrol et/düzelt
+        for a in assignments:
+            ts_id = a.get("timeslot_id")
+            rid = a.get("responsible_id")
+            jid = a.get("jury1_id")
+            
+            need_fix = False
+            
+            if jid is None:
+                need_fix = True
+            elif jid == rid:
+                need_fix = True
+            elif ts_id in busy.get(jid, set()):
+                need_fix = True
+            
+            if need_fix:
+                new_jury = self._find_available_jury(ts_id, rid, busy)
+                
+                if new_jury:
+                    a["jury1_id"] = new_jury
+                    busy[new_jury].add(ts_id)
+                else:
+                    a["jury1_id"] = None
+                
+                insts = [rid] if rid else []
+                if a["jury1_id"]:
+                    insts.append(a["jury1_id"])
+                a["instructors"] = insts
+            else:
+                if jid:
+                    busy[jid].add(ts_id)
+            
+            # JURY2 always placeholder
+            a["jury2"] = JURY2_PLACEHOLDER
+        
+        return assignments
+
+    def _find_available_jury(self, ts_id: int, responsible_id: Optional[int],
+                              busy: Dict[int, Set[int]]) -> Optional[int]:
+        """Müsait jüri bul"""
+        candidates = []
+        for iid in self.instructor_ids:
+            if iid == responsible_id:
+                continue
+            if ts_id in busy.get(iid, set()):
+                continue
+            workload = len(busy.get(iid, set()))
+            candidates.append((iid, workload))
+        
+        if not candidates:
+            return None
+        
+        candidates.sort(key=lambda x: x[1])
+        return candidates[0][0]
+
+    def _final_fix(self, assignments: List[Dict]) -> List[Dict]:
+        """
+        Son düzeltmeler - Real Simplex uyumlu format
+        
+        instructors = [
+            ps_id (int),
+            j1_id (int),
+            {
+                "id": -1,
+                "name": "[Araştırma Görevlisi]",
+                "is_placeholder": True
+            }
+        ]
+        """
+        for a in assignments:
+            a["jury2"] = JURY2_PLACEHOLDER
+            
+            # instructors array'ini Real Simplex formatında oluştur
+            # Sadece ID'ler + placeholder object
+            instructor_list = []
+            
+            # 1. Sorumlu (responsible) - sadece ID
+            rid = a.get("responsible_id")
+            if rid:
+                instructor_list.append(rid)
+            
+            # 2. Jüri 1 - sadece ID
+            j1id = a.get("jury1_id")
+            if j1id:
+                instructor_list.append(j1id)
+            
+            # 3. Jüri 2 - PLACEHOLDER object
+            instructor_list.append({
+                "id": -1,
+                "name": JURY2_PLACEHOLDER,
+                "is_placeholder": True
+            })
+            
+            a["instructors"] = instructor_list
+        
+        return assignments
+
+    # ==========================================================================
+    # FITNESS VE CEZALAR
+    # ==========================================================================
+    def _calculate_fitness(self, assignments: List[Dict]) -> float:
+        h1, h2, h3 = self._calculate_penalties(assignments)
+        violations = self._count_hard_violations(assignments)
+        return self.C1 * h1 + self.C2 * h2 + self.C3 * h3 + violations * HARD_CONSTRAINT_PENALTY
+
+    def _calculate_penalties(self, assignments: List[Dict]) -> Tuple[float, float, float]:
+        tasks = defaultdict(list)
+        workload = defaultdict(int)
+        
+        for a in assignments:
+            ts_order = a.get("ts_order", 0)
+            cid = a.get("classroom_id")
+            
+            # instructors hem ID listesi hem de object array olabilir
+            for inst in a.get("instructors", []):
+                # Object ise ID'yi çıkar, değilse direkt kullan
+                if isinstance(inst, dict):
+                    iid = inst.get("id")
+                    # Placeholder'ları atla (-1)
+                    if iid == -1:
+                        continue
+                else:
+                    iid = inst
+                
+                if iid:
+                    tasks[iid].append({"ts_order": ts_order, "cid": cid})
+                    workload[iid] += 1
+        
+        # H1: GAP
+        h1 = 0.0
+        for iid, tlist in tasks.items():
+            if len(tlist) < 2:
+                continue
+            sorted_t = sorted(tlist, key=lambda x: x["ts_order"])
+            for i in range(len(sorted_t) - 1):
+                gap = sorted_t[i+1]["ts_order"] - sorted_t[i]["ts_order"] - 1
+                if gap > 0:
+                    if self.time_penalty_mode == TimePenaltyMode.BINARY:
+                        h1 += 1
+                    else:
+                        h1 += gap
+        
+        # H2: Workload
+        h2 = 0.0
+        if workload:
+            vals = list(workload.values())
+            avg = sum(vals) / len(vals)
+            for cnt in vals:
+                dev = abs(cnt - avg)
+                if dev > self.workload_tolerance:
+                    h2 += (dev - self.workload_tolerance) ** 2
+        
+        # H3: Class change
+        h3 = 0.0
+        for iid, tlist in tasks.items():
+            if len(tlist) < 2:
+                continue
+            sorted_t = sorted(tlist, key=lambda x: x["ts_order"])
+            for i in range(len(sorted_t) - 1):
+                if sorted_t[i+1]["ts_order"] - sorted_t[i]["ts_order"] <= 2:
+                    if sorted_t[i]["cid"] != sorted_t[i+1]["cid"]:
+                        h3 += 1
+        
+        return h1, h2, h3
+
+    def _count_hard_violations(self, assignments: List[Dict]) -> int:
+        count = 0
+        usage = defaultdict(list)
+        
+        for a in assignments:
+            ts_id = a.get("timeslot_id")
+            rid = a.get("responsible_id")
+            jid = a.get("jury1_id")
+            
+            if jid and jid == rid:
+                count += 1
+            
+            if jid is None:
+                count += 1
+            
+            if rid and ts_id:
+                usage[(rid, ts_id)].append("r")
+            if jid and ts_id:
+                usage[(jid, ts_id)].append("j")
+        
+        for key, roles in usage.items():
+            if len(roles) > 1:
+                count += len(roles) - 1
+        
+        return count
+
+    def _calculate_continuity_score(self, assignments: List[Dict]) -> float:
+        tasks = defaultdict(list)
+        
+        for a in assignments:
+            ts_order = a.get("ts_order", 0)
+            for inst in a.get("instructors", []):
+                # Object ise ID'yi çıkar, değilse direkt kullan
+                if isinstance(inst, dict):
+                    iid = inst.get("id")
+                    if iid == -1:  # Placeholder atla
+                        continue
+                else:
+                    iid = inst
+                
+                if iid:
+                    tasks[iid].append(ts_order)
+        
+        total = 0
+        consecutive = 0
+        
+        for iid, orders in tasks.items():
+            if len(orders) < 2:
+                continue
+            sorted_o = sorted(orders)
+            for i in range(len(sorted_o) - 1):
+                total += 1
+                if sorted_o[i+1] - sorted_o[i] == 1:
+                    consecutive += 1
+        
+        if total == 0:
+            return 100.0
+        return (consecutive / total) * 100
+
+    def _log_final_stats(self, assignments: List[Dict], fitness: float,
+                          h1: float, h2: float, h3: float, continuity: float):
+        logger.info("=" * 70)
+        logger.info("FINAL RESULTS")
+        logger.info("=" * 70)
+        logger.info(f"  Fitness: {fitness:.2f}")
+        logger.info(f"  H1 (GAP): {h1:.2f}, H2 (Workload): {h2:.2f}, H3 (Class): {h3:.2f}")
+        logger.info(f"  Continuity: {continuity:.1f}%")
+        
+        bitirme_orders = [a.get("ts_order", 0) for a in assignments if a.get("project_type") == "bitirme"]
+        ara_orders = [a.get("ts_order", 0) for a in assignments if a.get("project_type") == "ara"]
+        
+        if bitirme_orders and ara_orders:
+            max_b = max(bitirme_orders)
+            min_a = min(ara_orders)
+            if max_b <= min_a:
+                logger.info(f"  Bitirme Priority: OK (max={max_b} <= min_ara={min_a})")
+            else:
+                logger.warning(f"  Bitirme Priority: FAIL")
+        
+        violations = self._count_hard_violations(assignments)
+        if violations == 0:
+            logger.info("  Hard Constraints: ALL OK")
         else:
-            return 0.0
+            logger.warning(f"  Hard Constraints: {violations} violations")
 
-    def _calculate_time_slot_penalty(self, solution: List[Dict[str, Any]]) -> float:
-        """CP-SAT ozelligi: Zaman slotu cezasi hesaplar."""
-        penalty = 0.0
+    def _create_empty_result(self, exec_time: float, error: str) -> Dict[str, Any]:
+        return {
+            "assignments": [],
+            "schedule": [],
+            "solution": [],
+            "fitness": 0.0,
+            "execution_time": exec_time,
+            "algorithm": "PSO",
+            "status": "failed",
+            "error": error
+        }
 
-        for assignment in solution:
-            timeslot_id = assignment.get("timeslot_id")
-            timeslot = next((t for t in self.timeslots if t.get("id") == timeslot_id), None)
-
-            if timeslot:
-                time_range = timeslot.get("time_range", "")
-                # 16:30 sonrasi agir ceza
-                if "16:30" in time_range:
-                    penalty += 100.0
-                # 16:00-16:30 hafif ceza
-                elif "16:00" in time_range:
-                    penalty += 30.0
-
-        return penalty 
+    def evaluate_fitness(self, solution: Any) -> float:
+        if isinstance(solution, list):
+            return self._calculate_fitness(solution)
+        return 0.0

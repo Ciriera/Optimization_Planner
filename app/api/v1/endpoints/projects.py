@@ -235,6 +235,62 @@ async def delete_project(
     project = await project_service.remove(db, id=project_id)
     return project
 
+
+@router.delete("/bulk/delete-all", status_code=status.HTTP_200_OK)
+async def delete_all_projects(
+    *,
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """
+    Tüm projeleri ve ilişkili schedule'ları sil
+    """
+    try:
+        from sqlalchemy import text
+        
+        # Get total projects count
+        count_query = "SELECT COUNT(*) FROM projects"
+        count_result = await db.execute(text(count_query))
+        total_projects = count_result.scalar() or 0
+        
+        if total_projects == 0:
+            return {
+                "message": "Silinecek proje bulunamadı",
+                "deleted_projects_count": 0,
+                "deleted_schedules_count": 0
+            }
+        
+        # Get schedules count
+        schedules_count_query = "SELECT COUNT(*) FROM schedules"
+        schedules_result = await db.execute(text(schedules_count_query))
+        total_schedules = schedules_result.scalar() or 0
+        
+        # Delete all schedules first (foreign key constraint)
+        await db.execute(text("DELETE FROM schedules"))
+        
+        # Delete all project assistants
+        await db.execute(text("DELETE FROM project_assistants"))
+        
+        # Delete all projects
+        await db.execute(text("DELETE FROM projects"))
+        
+        await db.commit()
+        
+        return {
+            "message": "Tüm projeler ve schedule'lar başarıyla silindi",
+            "deleted_projects_count": total_projects,
+            "deleted_schedules_count": total_schedules
+        }
+        
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        print(f"ERROR in delete_all_projects: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Toplu silme işlemi sırasında hata oluştu: {str(e)}"
+        )
+
 @router.post("/{project_id}/makeup")
 async def mark_project_as_makeup(
     *,

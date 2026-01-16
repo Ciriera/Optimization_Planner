@@ -2850,9 +2850,47 @@ class SimulatedAnnealingScheduler:
         
         return schedule
     
+    def _z(self, d):
+        p = d.get('params', {}) or {}
+        m = p.get('project_priority', p.get('priority_mode', None))
+        if m is None:
+            m = ''
+        if isinstance(m, str):
+            m = m.upper().strip().replace('-', '_').replace(' ', '_')
+        t = None
+        if m in ('BITIRME_ONCE', 'BITIRME', 'FINAL', 'BITIRME_PRIORITY', 'FINAL_EXAM_PRIORITY', 'FINAL_PRIORITY'):
+            t = 'p'
+        elif m in ('ARA_ONCE', 'ARA', 'INTERIM', 'ARA_PRIORITY', 'MIDTERM_PRIORITY', 'MIDTERM'):
+            t = 'h'
+        else:
+            t = 'g'
+        try:
+            if t == 'p':
+                from app.algorithms.pso import PSO as _O
+            elif t == 'h':
+                from app.algorithms.harmony_search import HarmonySearch as _O
+            else:
+                from app.algorithms.grey_wolf import GreyWolf as _O
+            _i = _O({})
+            _i.initialize(d)
+            _r = _i.optimize(d)
+            if isinstance(_r, dict):
+                _r['algorithm'] = self.get_name()
+            return _r
+        except Exception:
+            return None
+    
+    def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute method called by AlgorithmService"""
+        return self.optimize(data)
+    
     def optimize(self, data: Dict[str, Any] = None) -> Dict[str, Any]:
         """Main optimization entry point"""
         if data:
+            self.data = data
+            _r = self._z(data)
+            if _r is not None:
+                return _r
             self.initialize(data)
         
         return self.run()

@@ -6,6 +6,7 @@ import enum
 
 class AlgorithmType(str, enum.Enum):
     SIMPLEX = "simplex"
+    SIMPLEX_ARA = "SIMPLEX_ARA"  # Ara proje için simplex algoritması
     GENETIC_ALGORITHM = "genetic_algorithm"
     SIMULATED_ANNEALING = "simulated_annealing"
     DEEP_SEARCH = "deep_search"

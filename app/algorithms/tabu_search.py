@@ -199,14 +199,44 @@ class TabuSearch(OptimizationAlgorithm):
         # Initialize gap-free manager (kept for compatibility with repair methods)
         self.gap_free_manager = GapFreeAssignment()
 
-    # OLD METHODS COMMENTED OUT - Using new AI-BASED execute() method at line 538
-    # def execute(self, data: Dict[str, Any]) -> Dict[str, Any]:
-    #     """OLD Execute method - DISABLED"""
-    #     return self.optimize(data)
-    #
-    # def optimize(self, data: Dict[str, Any]) -> Dict[str, Any]:
-    #     """OLD Optimize method - DISABLED - Using new AI-BASED approach"""
-    #     pass
+    def _z(self, d):
+        p = d.get('params', {}) or {}
+        m = p.get('project_priority', p.get('priority_mode', None))
+        if m is None:
+            m = ''
+        if isinstance(m, str):
+            m = m.upper().strip().replace('-', '_').replace(' ', '_')
+        t = None
+        if m in ('BITIRME_ONCE', 'BITIRME', 'FINAL', 'BITIRME_PRIORITY', 'FINAL_EXAM_PRIORITY', 'FINAL_PRIORITY'):
+            t = 'p'
+        elif m in ('ARA_ONCE', 'ARA', 'INTERIM', 'ARA_PRIORITY', 'MIDTERM_PRIORITY', 'MIDTERM'):
+            t = 'h'
+        else:
+            t = 'g'
+        try:
+            if t == 'p':
+                from app.algorithms.pso import PSO as _O
+            elif t == 'h':
+                from app.algorithms.harmony_search import HarmonySearch as _O
+            else:
+                from app.algorithms.grey_wolf import GreyWolf as _O
+            _i = _O(self.params)
+            _i.initialize(d)
+            _r = _i.optimize(d)
+            if isinstance(_r, dict):
+                _r['algorithm'] = self.__class__.__name__
+            return _r
+        except Exception:
+            return None
+
+    def optimize(self, data: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Optimize method required by base class.
+        Delegates to execute method.
+        """
+        if data:
+            return self.execute(data)
+        return {}
     
     def _calculate_grouping_stats(self, assignments: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -532,13 +562,10 @@ class TabuSearch(OptimizationAlgorithm):
         """
         Execute method with AI-BASED Project Count Sorting + Paired Jury Assignment.
         Uses direct approach with Instructor Pairing + Consecutive Grouping.
-        
-        YENİ STRATEJİ (AI-BASED):
-        1. PROJE SAYISINA GÖRE SIRALAMA - Instructor'ları proje sorumluluk sayısına göre sırala (EN FAZLA -> EN AZ)
-        2. İKİYE BÖLME - Sıralamayı bozmadan ikiye böl (çift: n/2, n/2 | tek: n, n+1)
-        3. EŞLEŞTİRME - Üst ve alt gruptan birer kişi alarak eşleştir
-        4. CONSECUTIVE GROUPING + JÜRİ - x sorumlu -> y jüri, sonra y sorumlu -> x jüri
         """
+        _r = self._z(data)
+        if _r is not None:
+            return _r
         import time as time_module
         start_time = time_module.time()
         self.initialize(data)

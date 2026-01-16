@@ -37,8 +37,8 @@ class AlgorithmService:
         """
         algorithm_info = {
             AlgorithmType.GENETIC_ALGORITHM: {
-                "name": _("Genetic Algorithm (🤖 AI-Powered - 11 Features)"),
-                "description": _("🤖 ULTRA AI-POWERED: Adaptive parameters, self-learning weights, diversity maintenance, pattern recognition, and 7+ more AI features. ZERO HARD CONSTRAINTS - Pure AI optimization!"),
+                "name": _("Genetic Algorithm"),
+                "description": _("Adaptive parameters, self-learning weights, diversity maintenance, pattern recognition, and 7+ more AI features. ZERO HARD CONSTRAINTS - Pure AI optimization!"),
                 "best_for": _("Complex scheduling with: (1) Adaptive mutation/crossover rates, (2) Self-learning fitness weights, (3) Diversity protection, (4) Smart initialization, (5) Pattern recognition, (6-11) AI selection/crossover/mutation/local search/convergence. Revolutionary optimization power!"),
                 "category": "AI-Enhanced Bio-inspired",
                 "parameters": {
@@ -63,8 +63,8 @@ class AlgorithmService:
                 }
             },
             AlgorithmType.SIMULATED_ANNEALING: {
-                "name": _("Simulated Annealing (🤖 AI-Powered - 16+ Features)"),
-                "description": _("🤖 AI-BASED RANDOMIZER: Temperature-driven intelligence with 16+ AI features. Adaptive cooling, conflict resolution, dynamic exploration/exploitation, and temperature-based decision making. NO HARD CONSTRAINTS!"),
+                "name": _("Simulated Annealing"),
+                "description": _("Temperature-driven intelligence with 16+ AI features. Adaptive cooling, conflict resolution, dynamic exploration/exploitation, and temperature-based decision making. NO HARD CONSTRAINTS!"),
                 "best_for": _("Global optimization with: (1) AI temperature control (exponential/linear/adaptive cooling), (2) Temperature-based timeslot selection, (3) AI jury assignment, (4) Adaptive neighborhood search, (5) AI conflict resolution, (6-16) Early timeslot optimization, gap-free scheduling, classroom-wise optimization. Perfect for avoiding local optima!"),
                 "category": "AI-Enhanced Metaheuristic",
                 "parameters": {
@@ -87,8 +87,8 @@ class AlgorithmService:
                 }
             },
             AlgorithmType.SIMPLEX: {
-                "name": _("Real Simplex Algorithm (100% AI-Based + 5 Learning Features)"),
-                "description": _("🤖 AI-POWERED: Instructor pairing with consecutive grouping, bi-directional jury assignment, and 5 AI learning features. SELF-IMPROVING algorithm with NO HARD CONSTRAINTS."),
+                "name": _("Simplex Algorithm"),
+                "description": _("Instructor pairing with consecutive grouping, bi-directional jury assignment, and 5 AI learning features. SELF-IMPROVING algorithm with NO HARD CONSTRAINTS."),
                 "best_for": _("Advanced scheduling with: (1) Adaptive scoring weights that self-optimize, (2) Workload-aware jury assignment, (3) Smart classroom memory, (4) Learning-based pairing, (5) Conflict prediction & prevention. Perfect for complex scheduling with continuous improvement. 100% AI-driven soft constraints."),
                 "category": "AI-Enhanced Linear Programming",
                 "parameters": {
@@ -117,8 +117,8 @@ class AlgorithmService:
                 }
             },
             AlgorithmType.NSGA_II: {
-                "name": _("🤖 NSGA-II (AI-Powered Multi-Objective Optimizer - 10 Features)"),
-                "description": _("🤖 ULTRA AI-POWERED: Strategic instructor pairing, consecutive grouping, multi-objective optimization with Pareto front, non-dominated sorting, crowding distance, and 10 AI features. NO HARD CONSTRAINTS - Pure soft constraint optimization!"),
+                "name": _("🤖 NSGA-II"),
+                "description": _("Strategic instructor pairing, consecutive grouping, multi-objective optimization with Pareto front, non-dominated sorting, crowding distance, and 10 AI features. NO HARD CONSTRAINTS - Pure soft constraint optimization!"),
                 "best_for": _("Multi-objective scheduling with: (1) Strategic Pairing (sort instructors by project count, split and pair HIGH↔LOW), (2) Consecutive Grouping (X responsible → Y jury, then Y responsible → X jury), (3) Multi-objective optimization (6 objectives: minimize conflicts, maximize balance/consecutiveness/pairing/early slots), (4) Non-dominated sorting (Pareto-optimal solutions), (5) Crowding distance (diversity maintenance), (6) AI-based genetic operators (smart crossover/mutation), (7) Adaptive parameters (mutation/crossover rates evolve), (8) Elite preservation with diversity, (9) Smart initialization (strategic pairing-based population), (10) AI-powered conflict resolution. Revolutionary multi-objective power!"),
                 "category": "AI-Enhanced Multi-Objective Genetic",
                 "parameters": {
@@ -145,8 +145,8 @@ class AlgorithmService:
             },
             AlgorithmType.NSGA_II_ENHANCED: {
                 "name": _("NSGA-II Enhanced"),
-                "description": _("Enhanced NSGA-II with advanced jury assignment rules, consecutive grouping, and conflict prevention."),
-                "best_for": _("Complex scheduling with jury requirements, consecutive grouping, and uniform distribution."),
+                "description": _("Strategic instructor pairing, consecutive grouping, multi-objective optimization with Pareto front, non-dominated sorting, crowding distance, and 10 AI features. NO HARD CONSTRAINTS - Pure soft constraint optimization!"),
+                "best_for": _("Multi-objective scheduling with: (1) Strategic Pairing (sort instructors by project count, split and pair HIGH↔LOW), (2) Consecutive Grouping (X responsible → Y jury, then Y responsible → X jury), (3) Multi-objective optimization (6 objectives: minimize conflicts, maximize balance/consecutiveness/pairing/early slots), (4) Non-dominated sorting (Pareto-optimal solutions), (5) Crowding distance (diversity maintenance), (6) AI-based genetic operators (smart crossover/mutation), (7) Adaptive parameters (mutation/crossover rates evolve), (8) Elite preservation with diversity, (9) Smart initialization (strategic pairing-based population), (10) AI-powered conflict resolution. Revolutionary multi-objective power!"),
                 "parameters": {
                     "population_size": {"type": "int", "default": 50, "description": _("Size of the population.")},
                     "generations": {"type": "int", "default": 20, "description": _("Number of generations.")},
@@ -163,8 +163,8 @@ class AlgorithmService:
                 }
             },
             AlgorithmType.TABU_SEARCH: {
-                "name": _("Tabu Search (🤖 AI-Powered - 8 Features)"),
-                "description": _("🤖 AI-BASED MEMORY: Adaptive tabu tenure, frequency memory, aspiration criteria, intelligent classroom selection, smart neighborhood search, adaptive learning weights, pattern recognition, and dynamic strategy switching. Memory-based learning with NO HARD CONSTRAINTS!"),
+                "name": _("Tabu Search"),
+                "description": _("Adaptive tabu tenure, frequency memory, aspiration criteria, intelligent classroom selection, smart neighborhood search, adaptive learning weights, pattern recognition, and dynamic strategy switching. Memory-based learning with NO HARD CONSTRAINTS!"),
                 "best_for": _("Combinatorial optimization with: (1) Adaptive tabu tenure (dynamic list size), (2) Frequency-based learning (move memory), (3) Aspiration criteria (intelligent tabu override), (4) Intelligent classroom selection, (5) Smart neighborhood (conflict-based + load-balanced), (6) Adaptive learning weights, (7) Pattern recognition & learning, (8) Dynamic intensification/diversification strategy. Memory-driven optimization!"),
                 "category": "AI-Enhanced Search-based",
                 "parameters": {
@@ -232,8 +232,8 @@ class AlgorithmService:
                 }
             },
             AlgorithmType.CP_SAT: {
-                "name": _("CP-SAT (🤖 AI-Enhanced - 7 Features)"),
-                "description": _("🤖 AI-ENHANCED CONSTRAINT PROGRAMMING: Mathematical precision + 7 AI features. Intelligent timeslot scoring, AI classroom selection, conflict resolution, workload balancing, capacity management, multi-objective optimization, and adaptive learning. Soft constraints with CP-SAT power!"),
+                "name": _("CP-SAT"),
+                "description": _("Mathematical precision. Intelligent timeslot scoring, AI classroom selection, conflict resolution, workload balancing, capacity management, multi-objective optimization, and adaptive learning. Soft constraints with CP-SAT power!"),
                 "best_for": _("Complex constraints with AI enhancement: (1) AI timeslot scoring, (2) AI classroom selection, (3) AI conflict resolution, (4) Workload balancing, (5) Capacity management, (6) Multi-objective optimization, (7) Adaptive learning. Mathematical precision + AI intelligence!"),
                 "category": "AI-Enhanced Mathematical",
                 "parameters": {
@@ -252,7 +252,7 @@ class AlgorithmService:
             },
             AlgorithmType.DEEP_SEARCH: {
                 "name": _("Deep Search"),
-                "description": _("A deep search algorithm that combines beam search and iterative deepening."),
+                "description": _("Deep Search (DS) is a search algorithm that combines beam search and iterative deepening. It is a population-based algorithm that uses a colony of cuckoos to search for the best solution to a problem."),
                 "best_for": _("Problems requiring thorough exploration of the solution space."),
                 "parameters": {
                     "max_depth": {"type": "int", "default": 5, "description": _("Maximum search depth.")},
@@ -260,10 +260,9 @@ class AlgorithmService:
                     "time_limit": {"type": "int", "default": 60, "description": _("Time limit in seconds.")}
                 }
             },
-            # Yeni algoritmalar
             AlgorithmType.ARTIFICIAL_BEE_COLONY: {
                 "name": _("Artificial Bee Colony"),
-                "description": _("A metaheuristic algorithm inspired by the foraging behavior of honey bees."),
+                "description": _("Artificial Bee Colony (ABC) is a metaheuristic optimization algorithm inspired by the foraging behavior of honey bees. It is a population-based algorithm that uses a colony of bees to search for the best solution to a problem."),
                 "best_for": _("Combinatorial optimization problems with good exploration-exploitation balance."),
                 "parameters": {
                     "colony_size": {"type": "int", "default": 50, "description": _("Total number of bees in the colony.")},
@@ -273,7 +272,7 @@ class AlgorithmService:
             },
             AlgorithmType.CUCKOO_SEARCH: {
                 "name": _("Cuckoo Search"),
-                "description": _("A metaheuristic algorithm inspired by the obligate brood parasitism of some cuckoo species."),
+                "description": _("Cuckoo Search (CS) is a metaheuristic optimization algorithm inspired by the obligate brood parasitism of some cuckoo species. It is a population-based algorithm that uses a colony of cuckoos to search for the best solution to a problem."),
                 "best_for": _("Global optimization problems with Levy flight behavior."),
                 "parameters": {
                     "n_cuckoos": {"type": "int", "default": 25, "description": _("Number of cuckoos.")},
@@ -284,7 +283,7 @@ class AlgorithmService:
             },
             AlgorithmType.BRANCH_AND_BOUND: {
                 "name": _("Branch and Bound"),
-                "description": _("A mathematical optimization algorithm for solving combinatorial optimization problems."),
+                "description": _("Branch and Bound (BnB) is a mathematical optimization algorithm for solving combinatorial optimization problems."),
                 "best_for": _("Exact solutions for small to medium-sized problems."),
                 "parameters": {
                     "time_limit": {"type": "int", "default": 10, "description": _("Time limit in seconds.")},
@@ -292,12 +291,12 @@ class AlgorithmService:
                 }
             },
             AlgorithmType.DYNAMIC_PROGRAMMING: {
-                "name": _("Dynamic Programming - Deterministik Sorumlu + Jüri Atama"),
-                "description": _("Tek fazlı, deterministik atama sistemi. İş yüküne göre sıralama, blok tabanlı dağılım, zigzag sınıf atama, uniform yük dengeleme ve iş yükü bazlı time-slot önceliği ile tam otomatik planlama."),
-                "best_for": _("Deterministik planlama için: (1) İş yüküne göre sıralama, (2) Blok oluşturma, (3) Zigzag/snake draft atama, (4) Uniform workload balancing, (5) İş yükü bazlı time-slot yerleşimi (yüksek sorumluluğu olanlar sabah slotlarına), (6) Consecutive proje yerleşimi, (7) Round-robin jüri atama, (8) Placeholder desteği, (9) COI kontrolü. Tek fazlı, deterministik optimizasyon!"),
+                "name": _("Dynamic Programming"),
+                "description": _("Single-phase, deterministic assignment system. Fully automated scheduling with workload-based sequencing, block-based distribution, zigzag class assignment, uniform load balancing, and workload-based time-slot prioritization."),
+                "best_for": _("Single-phase, deterministic assignment system. Fully automated scheduling with workload-based sequencing, block-based distribution, zigzag class assignment, uniform load balancing, and workload-based time-slot prioritization."),
                 "category": "Deterministic Optimization",
                 "parameters": {
-                    "workload_threshold": {"type": "int", "default": 2, "description": _("Uniform dağılım için yük farkı threshold'u (±2).")}
+                    "workload_threshold": {"type": "int", "default": 2, "description": _("Uniform distribution for workload threshold (±2).")}
                 }
             },
             AlgorithmType.WHALE_OPTIMIZATION: {
@@ -310,8 +309,8 @@ class AlgorithmService:
                 }
             },
             AlgorithmType.LEXICOGRAPHIC: {
-                "name": _("Lexicographic (🤖 AI-Powered - 15 Features)"),
-                "description": _("🤖 AI-BASED MULTI-CRITERIA: Strategic pairing, adaptive parameter tuning, solution memory & learning, dynamic fitness weights, smart mutation, beam search, solution clustering, constraint relaxation, and performance prediction. NO HARD CONSTRAINTS!"),
+                "name": _("Lexicographic"),
+                "description": _("Lexicographic is a multi-objective optimization algorithm that uses a priority queue to select the next node to explore. The algorithm uses a heuristic function to estimate the cost of reaching the goal from the current node, and it uses this estimate to guide the search process. This approach allows the algorithm to find the optimal solution in many cases."),
                 "best_for": _("Multi-criteria optimization with: (1) Smart instructor pairing, (2) Dynamic time slot assignment, (3) Multi-solution generation, (4) Stochastic optimization, (5) Diversity metrics, (6) Conflict resolution, (7) Gap filling, (8) Workload balancing, (9) Adaptive parameter tuning, (10) Solution memory & learning, (11) Dynamic fitness weights, (12) Smart mutation strategies, (13) Beam search integration, (14) Solution clustering, (15) Performance prediction. Pure AI optimization!"),
                 "category": "AI-Enhanced Multi-Criteria",
                 "parameters": {
@@ -328,8 +327,8 @@ class AlgorithmService:
                 }
             },
             AlgorithmType.COMPREHENSIVE_OPTIMIZER: {
-                "name": _("Kapsamlı Optimizasyon"),
-                "description": _("Comprehensive multi-objective optimizer with hard constraints (no slot gaps, no assignments after 16:30)."),
+                "name": _("Comprehensive Optimizer"),
+                "description": _("Comprehensive multi-objective optimizer with hard constraints (no slot gaps, no assignments after 16:30). It is a population-based algorithm that uses a colony of cuckoos to search for the best solution to a problem."),
                 "best_for": _("Balanced optimization across multiple criteria with strict slot rules."),
                 "parameters": {
                     "population_size": {"type": "int", "default": 100, "description": _("Genetic algorithm population size.")},
@@ -340,12 +339,66 @@ class AlgorithmService:
             },
             AlgorithmType.HUNGARIAN: {
                 "name": _("Hungarian Algorithm (Kuhn-Munkres)"),
-                "description": _("Klasik Hungarian (Kuhn-Munkres) algoritması ile atama problemlerini çözer. Çok kriterli ve çok kısıtlı akademik proje sınavı/jüri planlama için optimize edilmiştir."),
-                "best_for": _("Atama problemleri, proje-slot eşleştirme, jüri atama, optimal eşleştirme gerektiren durumlar."),
+                "description": _("Hungarian Algorithm (Kuhn-Munkres) is a combinatorial optimization algorithm that solves the assignment problem in polynomial time. It is a variant of the Hungarian method that uses a priority queue to select the next node to explore. The algorithm uses a heuristic function to estimate the cost of reaching the goal from the current node, and it uses this estimate to guide the search process. This approach allows the algorithm to find the optimal solution in many cases."),
+                "best_for": _("Assignment problems, project-slot matching, jury assignment, optimal matching required problems."),
                 "category": "Mathematical",
                 "parameters": {
                     "max_iterations": {"type": "int", "default": 1000, "description": _("Maximum number of iterations.")},
                     "tolerance": {"type": "float", "default": 0.001, "description": _("Convergence tolerance.")}
+                }
+            },
+            AlgorithmType.HYBRID_CP_SAT_NSGA: {
+                "name": _("CP-SAT + NSGA-II Hybrid"),
+                "description": _("Constraint programming (CP-SAT) with multi-objective genetic algorithm (NSGA-II) combination. First feasible solutions are generated, then Pareto optimal solutions are found."),
+                "best_for": _("Multi-objective optimization problems for hybrid approach. Exact constraint satisfaction and multi-objective balance."),
+                "category": "Hybrid",
+                "parameters": {
+                    "time_limit": {"type": "int", "default": 180, "description": _("Total execution time limit in seconds.")}
+                }
+            },
+            AlgorithmType.BAT_ALGORITHM: {
+                "name": _("Bat Algorithm"),
+                "description": _("Bat Algorithm is a metaheuristic optimization algorithm that models the echolocation behavior of bats. It uses a population of candidate solutions and applies genetic operators (mutation, crossover, and selection) to generate new solutions. The algorithm then uses a local search strategy to refine the solutions, often using a neighborhood structure to explore the solution space. This approach allows the algorithm to balance exploration and exploitation, leading to better solutions in many cases."),
+                "best_for": _("Continuous optimization problems, frequency-based search, global optimization."),
+                "category": "Metaheuristic",
+                "parameters": {
+                    "population_size": {"type": "int", "default": 30, "description": _("Number of bats in the population.")}
+                }
+            },
+            AlgorithmType.DRAGONFLY_ALGORITHM: {
+                "name": _("Dragonfly Algorithm"),
+                "description": _("Dragonfly Algorithm is a swarm intelligence algorithm that models the static and dynamic behavior of a dragonfly swarm. It ensures a balance between exploration and exploitation."),
+                "best_for": _("Swarm-based optimization, multi-objective problems, exploration-exploitation balance."),
+                "category": "Metaheuristic",
+                "parameters": {
+                    "population_size": {"type": "int", "default": 30, "description": _("Number of dragonflies in the swarm.")}
+                }
+            },
+            AlgorithmType.A_STAR_SEARCH: {
+                "name": _("A* Search"),
+                "description": _("A* Search is a search algorithm that uses a heuristic function to guide the search process. It is a variant of Dijkstra's algorithm that uses a priority queue to select the next node to explore. The algorithm uses a heuristic function to estimate the cost of reaching the goal from the current node, and it uses this estimate to guide the search process. This approach allows the algorithm to find the optimal solution in many cases."),
+                "best_for": _("Pathfinding problems, graph search, optimal route calculation."),
+                "category": "Search-based",
+                "parameters": {
+                    "heuristic_weight": {"type": "float", "default": 1.0, "description": _("Weight for heuristic function.")}
+                }
+            },
+            AlgorithmType.INTEGER_LINEAR_PROGRAMMING: {
+                "name": _("Integer Linear Programming"),
+                "description": _("Integer Linear Programming (ILP) is an optimization method where decision variables must be integers and both the objective function and constraints are linear. It is generally used in problems requiring yes/no or quantity-based decisions, such as production planning, scheduling, and route optimization. It is more difficult to solve than Continuous LP but is much more applicable to real-world situations."),
+                "best_for": _("Integer solution required problems, linear constraints, exact optimization."),
+                "category": "Mathematical",
+                "parameters": {
+                    "time_limit": {"type": "int", "default": 300, "description": _("Maximum solving time in seconds.")}
+                }
+            },
+            AlgorithmType.GENETIC_LOCAL_SEARCH: {
+                "name": _("Genetic Local Search"),
+                "description": _("Genetic Local Search is a hybrid optimization algorithm that combines the strengths of both genetic algorithms and local search. It uses a population of candidate solutions and applies genetic operators (mutation, crossover, and selection) to generate new solutions. The algorithm then uses a local search strategy to refine the solutions, often using a neighborhood structure to explore the solution space. This approach allows the algorithm to balance exploration and exploitation, leading to better solutions in many cases."),
+                "best_for": _("Hybrid optimization, local improvement required problems, global search + local search."),
+                "category": "Hybrid",
+                "parameters": {
+                    "population_size": {"type": "int", "default": 50, "description": _("Number of individuals in the population.")}
                 }
             }
         }

@@ -2200,7 +2200,7 @@ async def optimize_classroom_count(
             )
         
         # Her sınıf sayısı için algoritmayı çalıştır ve sonuçları karşılaştır
-        classroom_counts = [5, 6, 7]
+        classroom_counts = [5, 6, 7, 8, 9, 10]
         results = []
         
         for classroom_count in classroom_counts:

@@ -51,8 +51,8 @@ class NSGAII(OptimizationAlgorithm):
 
     def __init__(self, params: Optional[Dict[str, Any]] = None):
         super().__init__(params)
-        self.name = "NSGA-II Algorithm (🤖 ULTRA AI-Powered - 11 Features)"
-        self.description = "🤖 ULTRA AI-POWERED: 11 advanced AI features including adaptive learning, elite preservation, smart diversity, history learning, dynamic pairing, and zero hard constraints!"
+        self.name = "NSGA-II Algorithm"
+        self.description = "Advanced AI features including adaptive learning, elite preservation, smart diversity, history learning, dynamic pairing, and zero hard constraints!"
 
         # NSGA-II Parameters (will be adapted dynamically)
         self.population_size = params.get('population_size', 50) if params else 50
@@ -794,7 +794,7 @@ class NSGAII(OptimizationAlgorithm):
             'load_balancing_achieved': "En fazla yüklü instructor'lar en az yüklülerle eşleştirildi",
             'bi_directional_jury': "Her instructor birbirinin jürisi oldu",
             'consecutive_grouping': "Tüm projeler ardışık slotlarda atandı",
-            'ai_optimization_level': "ULTRA AI-POWERED - Zero hard constraints + 11 Advanced AI Features",
+            'ai_optimization_level': "Zero hard constraints + 11 Advanced AI Features",
             'recommendations': [
                 "🤖 11 Advanced AI Feature ile optimal çözüm",
                 "🤖 Adaptive parameter tuning ile dinamik optimizasyon",

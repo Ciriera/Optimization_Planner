@@ -32,6 +32,7 @@ import {
   Add,
   Edit,
   Delete,
+  DeleteSweep,
   Assignment,
   Person,
   Schedule,
@@ -57,14 +58,15 @@ const Projects: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({ open: false, message: '', severity: 'success' });
-  
+
   // Dialog states
   const [openDialog, setOpenDialog] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [tabValue, setTabValue] = useState(0);
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<{ id: number; title: string } | null>(null);
-  
+  const [openBulkDeleteDialog, setOpenBulkDeleteDialog] = useState(false);
+
   // Jury management states
   const [openJuryDialog, setOpenJuryDialog] = useState(false);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -72,7 +74,7 @@ const Projects: React.FC = () => {
   const [eligibleJuryMembers, setEligibleJuryMembers] = useState<JuryMember[]>([]);
   const [selectedJuryMembers, setSelectedJuryMembers] = useState<number[]>([]);
   const [juryLoading, setJuryLoading] = useState(false);
-  
+
   // Sorting states
   const [sortBy, setSortBy] = useState<'title' | 'type' | 'instructor' | 'status'>('instructor');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
@@ -91,7 +93,7 @@ const Projects: React.FC = () => {
     const type = instructor.type || '';
     // Prof. Dr., Doç. Dr., Dr. Öğr. Üyesi unvanlı hocaları dahil et
     return name.includes('Prof. Dr.') || name.includes('Doç. Dr.') || name.includes('Dr. Öğr. Üyesi') ||
-           type === 'instructor' || type === 'associate' || type === 'assistant';
+      type === 'instructor' || type === 'associate' || type === 'assistant';
   });
 
   // Merkezi veri yenileme fonksiyonu
@@ -139,8 +141,8 @@ const Projects: React.FC = () => {
   };
 
   const handleJuryMemberToggle = (memberId: number) => {
-    setSelectedJuryMembers(prev => 
-      prev.includes(memberId) 
+    setSelectedJuryMembers(prev =>
+      prev.includes(memberId)
         ? prev.filter(id => id !== memberId)
         : [...prev, memberId]
     );
@@ -148,7 +150,7 @@ const Projects: React.FC = () => {
 
   const handleSaveJury = async () => {
     if (!selectedProject) return;
-    
+
     setJuryLoading(true);
     try {
       await juryService.assignJuryToProject(selectedProject.id, selectedJuryMembers);
@@ -167,11 +169,11 @@ const Projects: React.FC = () => {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setForm((f) => ({ 
-      ...f, 
-      [name]: name === 'responsible_instructor_id' || name === 'remaining_student_count' 
-        ? Number(value) 
-        : value 
+    setForm((f) => ({
+      ...f,
+      [name]: name === 'responsible_instructor_id' || name === 'remaining_student_count'
+        ? Number(value)
+        : value
     }));
   };
 
@@ -239,7 +241,7 @@ const Projects: React.FC = () => {
   // Proje silme işlemini gerçekleştir
   const handleConfirmDelete = async () => {
     if (!projectToDelete) return;
-    
+
     try {
       setLoading(true);
       await api.delete(`/projects/${projectToDelete.id}`);
@@ -253,6 +255,26 @@ const Projects: React.FC = () => {
     }
   };
 
+  // Toplu silme işlemini gerçekleştir
+  const handleBulkDelete = async () => {
+    try {
+      setLoading(true);
+      const response = await api.delete('/projects/bulk/delete-all');
+      const { deleted_projects_count, deleted_schedules_count } = response.data;
+      setSnack({
+        open: true,
+        message: `${deleted_projects_count} proje ve ${deleted_schedules_count} schedule başarıyla silindi`,
+        severity: 'success'
+      });
+      setOpenBulkDeleteDialog(false);
+      await fetchData();
+    } catch (e: any) {
+      setSnack({ open: true, message: e?.response?.data?.detail || 'Toplu silme işlemi başarısız oldu', severity: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const getStatusChip = (status: string) => {
     const statusConfig = {
       active: { label: 'Active', color: 'success' as const, icon: <CheckCircle sx={{ fontSize: 16 }} /> },
@@ -260,7 +282,7 @@ const Projects: React.FC = () => {
       completed: { label: 'Completed', color: 'primary' as const, icon: <CheckCircle sx={{ fontSize: 16 }} /> },
       cancelled: { label: 'Cancelled', color: 'error' as const, icon: <Cancel sx={{ fontSize: 16 }} /> },
     };
-    
+
     const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.active;
     return (
       <Chip
@@ -343,19 +365,32 @@ const Projects: React.FC = () => {
   const stats = getProjectStats();
 
   return (
-    <Box>
+    <Box sx={{ width: '100%' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
         <Typography variant="h4" sx={{ fontWeight: 600 }}>
           Proje Yönetimi
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={() => handleOpenDialog()}
-          sx={{ borderRadius: 2 }}
-        >
-          Proje Ekle
-        </Button>
+        <Stack direction="row" spacing={2}>
+          {projects.length > 0 && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteSweep />}
+              onClick={() => setOpenBulkDeleteDialog(true)}
+              sx={{ borderRadius: 2 }}
+            >
+              Tümünü Sil
+            </Button>
+          )}
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={() => handleOpenDialog()}
+            sx={{ borderRadius: 2 }}
+          >
+            Proje Ekle
+          </Button>
+        </Stack>
       </Box>
 
       {/* Stats Cards */}
@@ -526,14 +561,14 @@ const Projects: React.FC = () => {
                   if (tabValue === 2) return t === 'final' || t === 'bitirme'; // Bitirme
                   return true;
                 }).length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                      <Typography color="text.secondary">
-                        Proje bulunamadı. Başlamak için bazı projeler ekleyin.
-                      </Typography>
-                    </TableCell>
-                  </TableRow>
-                )}
+                    <TableRow>
+                      <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
+                        <Typography color="text.secondary">
+                          Proje bulunamadı. Başlamak için bazı projeler ekleyin.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  )}
               </TableBody>
             </Table>
           </TableContainer>
@@ -675,6 +710,63 @@ const Projects: React.FC = () => {
         </DialogActions>
       </Dialog>
 
+      {/* Bulk Delete Confirmation Dialog */}
+      <Dialog open={openBulkDeleteDialog} onClose={() => setOpenBulkDeleteDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+            <DeleteSweep sx={{ mr: 1, color: 'error.main' }} />
+            Tüm Projeleri Sil
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Alert severity="error" sx={{ mb: 2 }}>
+              <strong>DİKKAT!</strong> Bu işlem geri alınamaz!
+            </Alert>
+            <Typography variant="body1" gutterBottom>
+              Tüm projeleri ve ilişkili schedule'ları silmek istediğinizden emin misiniz?
+            </Typography>
+            <Box
+              sx={{
+                mt: 2,
+                p: 2,
+                bgcolor: 'error.50',
+                borderRadius: 1,
+                border: 1,
+                borderColor: 'error.200',
+              }}
+            >
+              <Typography variant="body2" sx={{ fontWeight: 500, color: 'error.main' }}>
+                Silinecekler:
+              </Typography>
+              <Typography variant="body1" sx={{ mt: 1 }}>
+                • <strong>{projects.length}</strong> proje
+              </Typography>
+              <Typography variant="body1">
+                • İlişkili tüm schedule'lar
+              </Typography>
+              <Typography variant="body1">
+                • İlişkili tüm jüri atamaları
+              </Typography>
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenBulkDeleteDialog(false)} variant="outlined">
+            İptal
+          </Button>
+          <Button
+            onClick={handleBulkDelete}
+            variant="contained"
+            color="error"
+            disabled={loading}
+            startIcon={loading ? <CircularProgress size={16} /> : <DeleteSweep />}
+          >
+            {loading ? 'Siliniyor...' : 'Tümünü Sil'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Jury Management Dialog */}
       <Dialog open={openJuryDialog} onClose={handleCloseJuryDialog} maxWidth="md" fullWidth>
         <DialogTitle>
@@ -700,15 +792,15 @@ const Projects: React.FC = () => {
                       <Typography variant="body1" sx={{ fontWeight: 500 }}>
                         {projectJury.responsible_instructor.name}
                       </Typography>
-                      <Chip 
-                        label="Sorumlu" 
-                        color="primary" 
-                        size="small" 
+                      <Chip
+                        label="Sorumlu"
+                        color="primary"
+                        size="small"
                         sx={{ ml: 'auto' }}
                       />
                     </Box>
                   )}
-                  
+
                   <Typography variant="h6" gutterBottom sx={{ mt: 3 }}>
                     Mevcut Jüri Üyeleri ({projectJury.jury_members.length})
                   </Typography>
@@ -720,10 +812,10 @@ const Projects: React.FC = () => {
                           <Typography variant="body2">
                             {member.name}
                           </Typography>
-                          <Chip 
-                            label={member.type === 'instructor' ? 'Öğretim Üyesi' : 'Araştırma Görevlisi'} 
-                            color="secondary" 
-                            size="small" 
+                          <Chip
+                            label={member.type === 'instructor' ? 'Öğretim Üyesi' : 'Araştırma Görevlisi'}
+                            color="secondary"
+                            size="small"
                             sx={{ ml: 'auto' }}
                           />
                         </Box>
@@ -740,7 +832,7 @@ const Projects: React.FC = () => {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 Proje için jüri üyelerini seçin. Sorumlu öğretim üyesi otomatik olarak jüri başkanıdır.
               </Typography>
-              
+
               <Box sx={{ maxHeight: 300, overflow: 'auto', border: 1, borderColor: 'divider', borderRadius: 1 }}>
                 {eligibleJuryMembers.map((member) => (
                   <Box
@@ -757,11 +849,11 @@ const Projects: React.FC = () => {
                     }}
                     onClick={() => handleJuryMemberToggle(member.id)}
                   >
-                    <CheckCircle 
-                      sx={{ 
-                        mr: 2, 
-                        color: selectedJuryMembers.includes(member.id) ? 'primary.main' : 'action.disabled' 
-                      }} 
+                    <CheckCircle
+                      sx={{
+                        mr: 2,
+                        color: selectedJuryMembers.includes(member.id) ? 'primary.main' : 'action.disabled'
+                      }}
                     />
                     <Box sx={{ flex: 1 }}>
                       <Typography variant="body1" sx={{ fontWeight: selectedJuryMembers.includes(member.id) ? 500 : 400 }}>
@@ -774,7 +866,7 @@ const Projects: React.FC = () => {
                   </Box>
                 ))}
               </Box>
-              
+
               <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
                 Seçili jüri üyesi sayısı: {selectedJuryMembers.length}
               </Typography>

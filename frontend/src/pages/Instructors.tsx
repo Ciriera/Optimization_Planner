@@ -31,6 +31,7 @@ import {
   Add,
   Edit,
   Delete,
+  DeleteSweep,
 } from '@mui/icons-material';
 import { instructorService, Instructor, InstructorCreateInput } from '../services/instructorService';
 import { api } from '../services/authService';
@@ -47,14 +48,18 @@ const Instructors: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [snack, setSnack] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({ open: false, message: '', severity: 'success' });
-  
+
   // Dialog states
   const [openDialog, setOpenDialog] = useState(false);
   const [editingInstructor, setEditingInstructor] = useState<Instructor | null>(null);
-  
+
   // Delete confirmation dialog states
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
   const [instructorToDelete, setInstructorToDelete] = useState<Instructor | null>(null);
+
+  // Bulk delete dialog state
+  const [openBulkDeleteDialog, setOpenBulkDeleteDialog] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const [form, setForm] = useState<ExtendedInstructorForm>({
     name: '',
@@ -75,42 +80,42 @@ const Instructors: React.FC = () => {
         api.get('/projects/'),
         api.get('/schedules/')
       ]);
-      
+
       const instructors = instructorsRes.data || [];
       const projects = projectsRes.data || [];
       const schedules = schedulesRes.data || [];
-      
+
       // Debug: API'den gelen verileri kontrol et
       console.log('Instructors fetched:', instructors.length);
       console.log('Projects fetched:', projects.length);
       console.log('Sample project types:', projects.slice(0, 3).map((p: any) => ({ id: p.id, type: p.type, title: p.title })));
-      
+
       // Her instructor için gerçek iş yükünü hesapla
       const instructorsWithWorkload = instructors.map((instructor: any) => {
         // Sorumlu olduğu projeler
-        const responsibleProjects = projects.filter((p: any) => 
+        const responsibleProjects = projects.filter((p: any) =>
           p.responsible_instructor_id === instructor.id
         );
-        
+
         // Jüri üyesi olduğu projeler (assistant_instructors içinde)
-        const juryProjects = projects.filter((p: any) => 
+        const juryProjects = projects.filter((p: any) =>
           p.assistant_instructors?.some((ai: any) => ai.id === instructor.id)
         );
-        
+
         // Tüm projeler (sorumlu + jüri üyesi)
         const allProjects = [...responsibleProjects, ...juryProjects];
-        
+
         // Bitirme ve ara proje sayılarını hesapla (tüm olası type değerlerini kontrol et)
         const bitirmeCount = allProjects.filter((p: any) => {
           const type = (p.type || '').toString().toLowerCase();
           return type === 'final' || type === 'bitirme';
         }).length;
-        
+
         const araCount = allProjects.filter((p: any) => {
           const type = (p.type || '').toString().toLowerCase();
           return type === 'interim' || type === 'ara';
         }).length;
-        
+
         // Debug: Her instructor için proje sayılarını logla
         if (responsibleProjects.length > 0 || juryProjects.length > 0) {
           console.log(`Instructor: ${instructor.name}`, {
@@ -121,7 +126,7 @@ const Instructors: React.FC = () => {
             total: allProjects.length
           });
         }
-        
+
         return {
           ...instructor,
           bitirme_count: bitirmeCount,
@@ -129,7 +134,7 @@ const Instructors: React.FC = () => {
           total_jury_count: allProjects.length // Toplam jüri üyeliği sayısı
         };
       });
-      
+
       setInstructors(instructorsWithWorkload);
     } catch (err: any) {
       console.error('Error fetching instructors:', err);
@@ -171,9 +176,9 @@ const Instructors: React.FC = () => {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setForm((f) => ({ 
-      ...f, 
-      [name]: name.includes('max_') ? Number(value) : value 
+    setForm((f) => ({
+      ...f,
+      [name]: name.includes('max_') ? Number(value) : value
     }));
   };
 
@@ -253,28 +258,28 @@ const Instructors: React.FC = () => {
   // Instructor silme fonksiyonu
   const handleConfirmDelete = async () => {
     if (!instructorToDelete) return;
-    
+
     try {
       setLoading(true);
       console.log(`Deleting instructor with ID: ${instructorToDelete.id}`);
-      
+
       const response = await api.delete(`/instructors/${instructorToDelete.id}`);
       console.log('Delete response:', response);
-      
+
       // Backend'den gelen detaylı silme bilgilerini göster
       const deleteResult = response.data;
       let message = 'Öğretim üyesi başarıyla silindi';
-      
+
       if (deleteResult) {
         const { deleted_projects_count, removed_jury_count, instructor_name } = deleteResult;
-        
+
         if (deleted_projects_count > 0 || removed_jury_count > 0) {
           message = `${instructor_name} silindi. ${deleted_projects_count} proje silindi, ${removed_jury_count} jüri üyeliği kaldırıldı.`;
         } else {
           message = `${instructor_name} başarıyla silindi.`;
         }
       }
-      
+
       setSnack({ open: true, message, severity: 'success' });
       handleCloseDeleteDialog();
       // Silme işleminden sonra verileri yenile
@@ -283,9 +288,9 @@ const Instructors: React.FC = () => {
       console.error('Delete error:', e);
       console.error('Error response:', e?.response);
       console.error('Error data:', e?.response?.data);
-      
+
       let errorMessage = 'Silme işlemi başarısız oldu';
-      
+
       if (e?.response?.data?.detail) {
         errorMessage = e.response.data.detail;
       } else if (e?.response?.status === 403) {
@@ -297,33 +302,72 @@ const Instructors: React.FC = () => {
       } else if (e?.message) {
         errorMessage = e.message;
       }
-      
+
       setSnack({ open: true, message: errorMessage, severity: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
+  // Bulk delete all instructors
+  const handleBulkDelete = async () => {
+    try {
+      setBulkDeleting(true);
+      const response = await api.delete('/instructors/bulk/delete-all');
+      const result = response.data;
+
+      setSnack({
+        open: true,
+        message: `${result.deleted_instructors_count} öğretim üyesi ve ${result.deleted_projects_count} proje silindi.`,
+        severity: 'success'
+      });
+      setOpenBulkDeleteDialog(false);
+      await fetchInstructors();
+    } catch (e: any) {
+      console.error('Bulk delete error:', e);
+      setSnack({
+        open: true,
+        message: e?.response?.data?.detail || 'Toplu silme işlemi başarısız oldu',
+        severity: 'error'
+      });
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
 
   return (
-    <Box>
+    <Box sx={{ width: '100%' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
         <Typography variant="h4" sx={{ fontWeight: 600 }}>
           Öğretim Üyesi Yönetimi
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={() => handleOpenDialog()}
-          sx={{ borderRadius: 2 }}
-        >
-          Öğretim Üyesi Ekle
-        </Button>
+        <Stack direction="row" spacing={2}>
+          {instructors.length > 0 && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteSweep />}
+              onClick={() => setOpenBulkDeleteDialog(true)}
+              sx={{ borderRadius: 2 }}
+            >
+              Tümünü Sil
+            </Button>
+          )}
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={() => handleOpenDialog()}
+            sx={{ borderRadius: 2 }}
+          >
+            Öğretim Üyesi Ekle
+          </Button>
+        </Stack>
       </Box>
 
       {/* Stats Card */}
       <Box sx={{ mb: 4 }}>
-        <Card sx={{ 
+        <Card sx={{
           background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
           color: 'white',
           boxShadow: '0 4px 20px rgba(25, 118, 210, 0.3)'
@@ -331,30 +375,30 @@ const Instructors: React.FC = () => {
           <CardContent sx={{ p: 3 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <Box>
-                <Typography variant="h6" sx={{ 
-                  fontWeight: 500, 
+                <Typography variant="h6" sx={{
+                  fontWeight: 500,
                   opacity: 0.9,
                   mb: 1
                 }}>
                   Toplam Öğretim Üyesi
                 </Typography>
-                <Typography variant="h2" sx={{ 
-                  fontWeight: 700, 
+                <Typography variant="h2" sx={{
+                  fontWeight: 700,
                   color: 'white',
                   lineHeight: 1
                 }}>
                   {instructors.length}
                 </Typography>
-                <Typography variant="body2" sx={{ 
+                <Typography variant="body2" sx={{
                   opacity: 0.8,
                   mt: 1
                 }}>
                   Aktif öğretim üyesi sayısı
                 </Typography>
               </Box>
-              <Box sx={{ 
-                display: 'flex', 
-                alignItems: 'center', 
+              <Box sx={{
+                display: 'flex',
+                alignItems: 'center',
                 justifyContent: 'center',
                 width: 80,
                 height: 80,
@@ -552,17 +596,17 @@ const Instructors: React.FC = () => {
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog 
-        open={openDeleteDialog} 
+      <Dialog
+        open={openDeleteDialog}
         onClose={handleCloseDeleteDialog}
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{ 
-          display: 'flex', 
-          alignItems: 'center', 
+        <DialogTitle sx={{
+          display: 'flex',
+          alignItems: 'center',
           color: 'error.main',
-          fontWeight: 600 
+          fontWeight: 600
         }}>
           <Delete sx={{ mr: 1 }} />
           Öğretim Görevlisi Silme Onayı
@@ -574,7 +618,7 @@ const Instructors: React.FC = () => {
                 Seçmiş Olduğunuz Öğretim Görevlisini Silmeniz Durumunda Öğretim Görevlisinin Sorumlu Olduğu Projeler de silinecektir!
               </Typography>
             </Alert>
-            
+
             {instructorToDelete && (
               <Paper sx={{ p: 2, bgcolor: 'grey.50', border: 1, borderColor: 'divider' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
@@ -612,14 +656,14 @@ const Instructors: React.FC = () => {
                 </Stack>
               </Paper>
             )}
-            
+
             <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'center' }}>
               Bu işlem geri alınamaz. Devam etmek istediğinizden emin misiniz?
             </Typography>
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button 
+          <Button
             onClick={handleCloseDeleteDialog}
             variant="outlined"
             sx={{ minWidth: 100 }}
@@ -635,6 +679,72 @@ const Instructors: React.FC = () => {
             sx={{ minWidth: 100 }}
           >
             {loading ? 'Siliniyor...' : 'Sil'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <Dialog
+        open={openBulkDeleteDialog}
+        onClose={() => setOpenBulkDeleteDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{
+          display: 'flex',
+          alignItems: 'center',
+          color: 'error.main',
+          fontWeight: 600
+        }}>
+          <DeleteSweep sx={{ mr: 1 }} />
+          Tüm Öğretim Üyelerini Sil
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Alert severity="error" sx={{ mb: 2 }}>
+              <Typography variant="body1" sx={{ fontWeight: 600 }}>
+                DİKKAT: Bu işlem geri alınamaz!
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                Tüm öğretim üyeleri, projeleri ve ilişkili veriler kalıcı olarak silinecektir.
+              </Typography>
+            </Alert>
+
+            <Paper sx={{ p: 2, bgcolor: 'grey.50', border: 1, borderColor: 'divider' }}>
+              <Stack spacing={1}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <Typography variant="body2" color="text.secondary">
+                    Silinecek Öğretim Üyesi:
+                  </Typography>
+                  <Typography variant="body2" sx={{ fontWeight: 600, color: 'error.main' }}>
+                    {instructors.length}
+                  </Typography>
+                </Box>
+              </Stack>
+            </Paper>
+
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'center' }}>
+              Bu işlemi onaylıyor musunuz?
+            </Typography>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            onClick={() => setOpenBulkDeleteDialog(false)}
+            variant="outlined"
+            sx={{ minWidth: 100 }}
+          >
+            İptal
+          </Button>
+          <Button
+            onClick={handleBulkDelete}
+            variant="contained"
+            color="error"
+            disabled={bulkDeleting}
+            startIcon={bulkDeleting ? <CircularProgress size={16} /> : <DeleteSweep />}
+            sx={{ minWidth: 150 }}
+          >
+            {bulkDeleting ? 'Siliniyor...' : 'Tümünü Sil'}
           </Button>
         </DialogActions>
       </Dialog>

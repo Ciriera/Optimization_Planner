@@ -816,3 +816,60 @@ async def assign_ra_placeholders_to_projects(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error assigning RA placeholders: {str(e)}"
         )
+
+
+@router.delete("/bulk/delete-all", status_code=status.HTTP_200_OK, response_model=Dict[str, Any])
+async def delete_all_instructors(
+    *,
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """
+    Tüm öğretim elemanlarını ve ilişkili projeleri sil
+    """
+    try:
+        # Get all instructors count
+        count_query = "SELECT COUNT(*) FROM instructors"
+        count_result = await db.execute(text(count_query))
+        total_instructors = count_result.scalar() or 0
+        
+        if total_instructors == 0:
+            return {
+                "message": "Silinecek öğretim elemanı bulunamadı",
+                "deleted_instructors_count": 0,
+                "deleted_projects_count": 0
+            }
+        
+        # Get all projects count
+        projects_count_query = "SELECT COUNT(*) FROM projects"
+        projects_result = await db.execute(text(projects_count_query))
+        total_projects = projects_result.scalar() or 0
+        
+        # Delete all schedules first
+        await db.execute(text("DELETE FROM schedules"))
+        
+        # Delete all project assistants
+        await db.execute(text("DELETE FROM project_assistants"))
+        
+        # Delete all projects
+        await db.execute(text("DELETE FROM projects"))
+        
+        # Delete all instructors
+        await db.execute(text("DELETE FROM instructors"))
+        
+        await db.commit()
+        
+        return {
+            "message": "Tüm öğretim elemanları ve projeler başarıyla silindi",
+            "deleted_instructors_count": total_instructors,
+            "deleted_projects_count": total_projects
+        }
+        
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        print(f"ERROR in delete_all_instructors: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Toplu silme işlemi sırasında hata oluştu: {str(e)}"
+        )
